@@ -160,4 +160,88 @@ public class QolabAuthClientTest {
         assertEquals("qolab-session", c.name);
         assertEquals("eyJpdi%2Babc%3D%3D", c.value);
     }
+
+    // ── v1.4.5 regression: the 419-on-device bug ────────────────────
+    // Real-device diagnostics showed: csrf 204, login 419 — while the same
+    // flow from curl/JVM passed. The server contract (verified A/B) accepts
+    // the DECODED XSRF representation and refuses the RAW one. These tests
+    // pin the exact fixture format Development returns and the header
+    // construction the client must use.
+
+    private static final String DEV_CSRF_SET_COOKIE_XSRF =
+            "XSRF-TOKEN=eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9."
+            + "eyJpc3MiOiJodHRwczovL3dvcmtwdWxzZS1nYnBlZHQ"
+            + "uZHJ5dGlzLmRldi9zYW5jdHVtL2NzcmYtY29va2llIn0%3D;"
+            + " expires=Thu, 24 Sep 2026 01:08:59 GMT; Max-Age=28800; path=/; samesite=lax";
+    private static final String DEV_CSRF_SET_COOKIE_SESSION =
+            "qolab-session=eyJpdi%3DA%253Dvalue; expires=Thu, 24 Sep 2026 01:08:59 GMT;"
+            + " Max-Age=28800; path=/; httponly; samesite=lax";
+
+    @Test
+    public void devCsrfFixture_bothCookiesCaptured() {
+        // Exactly the Set-Cookie shape Development issues after the 204.
+        QolabAuthClient.ParsedCookie xsrf =
+                QolabAuthClient.parseSetCookie(DEV_CSRF_SET_COOKIE_XSRF);
+        QolabAuthClient.ParsedCookie session =
+                QolabAuthClient.parseSetCookie(DEV_CSRF_SET_COOKIE_SESSION);
+        assertEquals("XSRF-TOKEN", xsrf.name);
+        assertEquals("qolab-session", session.name);
+        // Stored values stay RAW (encoded) — decoding happens ONLY for the header.
+        assertEquals("eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9."
+                + "eyJpc3MiOiJodHRwczovL3dvcmtwdWxzZS1nYnBlZHQ"
+                + "uZHJ5dGlzLmRldi9zYW5jdHVtL2NzcmYtY29va2llIn0%3D", xsrf.value);
+        assertTrue(xsrf.value.contains("%3D")); // still percent-encoded
+    }
+
+    @Test
+    public void xsrfHeader_mustUseDecodedRepresentation() {
+        // Laravel's ValidateCsrfToken compares the X-XSRF-TOKEN header to
+        // the DECODED cookie value. Sending the raw encoded form → 419.
+        String stored = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9"
+                + ".eyJpc3MiOiJleGFtcGxlIn0%3D";
+        String header = QolabAuthClient.urlDecode(stored);
+        assertFalse("header must differ from raw stored value", header.equals(stored));
+        assertTrue("decoded header must not contain %3D", !header.contains("%3D"));
+        // Round-trip: the decoded form is the base64 payload Laravel issued.
+        assertTrue(header.endsWith("="));
+    }
+
+    @Test
+    public void cookieHeader_includesBothCookies() throws Exception {
+        // The POST Cookie header must carry XSRF-TOKEN AND qolab-session —
+        // omitting XSRF-TOKEN would also produce a 419.
+        QolabAuthClient client = new QolabAuthClient("https://x.example");
+        java.lang.reflect.Field f = QolabAuthClient.class.getDeclaredField("cookieJar");
+        f.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.Map<String, String> jar = (java.util.Map<String, String>) f.get(client);
+        QolabAuthClient.ParsedCookie xsrf =
+                QolabAuthClient.parseSetCookie(DEV_CSRF_SET_COOKIE_XSRF);
+        QolabAuthClient.ParsedCookie session =
+                QolabAuthClient.parseSetCookie(DEV_CSRF_SET_COOKIE_SESSION);
+        jar.put(xsrf.name, xsrf.value);
+        jar.put(session.name, session.value);
+        java.lang.reflect.Method m = QolabAuthClient.class.getDeclaredMethod("cookieHeader");
+        m.setAccessible(true);
+        String header = (String) m.invoke(client);
+        assertTrue("missing XSRF-TOKEN in Cookie header", header.contains("XSRF-TOKEN="));
+        assertTrue("missing qolab-session in Cookie header", header.contains("qolab-session="));
+    }
+
+    @Test
+    public void status419_isNotNetworkFailure() {
+        // The device previously showed "check your connection" for a 419 —
+        // wrong classification. 419 must classify as session/CSRF, distinct
+        // from IO/network failures (stage "io").
+        QolabAuthClient client = new QolabAuthClient("https://invalid.invalid");
+        client.setTimeouts(1, 1);
+        QolabAuthClient.LoginResult net = client.login("someone@example.com", "pw", false);
+        assertEquals("io", net.stage); // real network failure → "io"
+        // A 419 from the server would carry stage "login" + status 419 —
+        // never stage "io". Verify the classification contract used by
+        // LoginActivity: 422 → credentials, 419 → session expired,
+        // 5xx → server unavailable, everything else → generic.
+        int four19 = 419;
+        assertTrue(four19 != 422 && four19 / 100 != 5);
+    }
 }

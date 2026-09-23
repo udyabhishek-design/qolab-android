@@ -166,8 +166,21 @@ public final class QolabAuthClient {
 
             String[] redirectOut = new String[1];
             long loginStart = SystemClock.elapsedRealtime();
-            int status = httpPostForm(baseUrl + "/login", form, xsrf, redirectOut);
+            String decodedXsrf = urlDecode(xsrf);
+            boolean xsrfEncoded = !decodedXsrf.equals(xsrf);
+            int status = httpPostForm(baseUrl + "/login", form, decodedXsrf, redirectOut);
+            xsrfHeaderUsedDecoded = true;
+            if (status == 419 && xsrfEncoded) {
+                // Some network paths deliver the XSRF cookie value with a
+                // different percent-encoding than Laravel issued. Retry the
+                // SAME csrf session once with the RAW stored value — CSRF
+                // itself is never weakened; both candidates are legitimate
+                // representations of the same token.
+                status = httpPostForm(baseUrl + "/login", form, xsrf, redirectOut);
+                xsrfHeaderUsedDecoded = status != 419;
+            }
             loginMs = SystemClock.elapsedRealtime() - loginStart;
+            xsrfAppearedEncoded = xsrfEncoded;
             boolean session = hasSessionCookie();
             if (status == 422) {
                 return new LoginResult(false, null, status, "login",
@@ -190,6 +203,20 @@ public final class QolabAuthClient {
                     csrfStatus, cookieJar.containsKey("XSRF-TOKEN"), hasSessionCookie(),
                     null, e.getClass().getSimpleName(), new ArrayList<>(0), csrfMs, loginMs);
         }
+    }
+
+    // Safe per-attempt XSRF facts for Development diagnostics (never values).
+    boolean xsrfAppearedEncoded = false;
+    boolean xsrfHeaderUsedDecoded = true;
+
+    /** True when the stored XSRF cookie value contains percent-encoding. */
+    public boolean xsrfAppearedUrlEncoded() {
+        return xsrfAppearedEncoded;
+    }
+
+    /** True when the ACCEPTED request used the decoded representation. */
+    public boolean xsrfHeaderWasDecoded() {
+        return xsrfHeaderUsedDecoded;
     }
 
     /**
@@ -267,7 +294,10 @@ public final class QolabAuthClient {
         c.setDoOutput(true);
         c.setRequestProperty("Accept", "application/json");
         c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded");
-        c.setRequestProperty("X-XSRF-TOKEN", urlDecode(xsrfToken));
+        // CSRF header token — Laravel expects the DECODED representation
+        // (verified A/B against Development: raw-encoded → 419,
+        // decoded → 422+). The caller handles the raw-value fallback.
+        c.setRequestProperty("X-XSRF-TOKEN", xsrfToken);
         c.setRequestProperty("Cookie", cookieHeader());
         OutputStream os = c.getOutputStream();
         os.write(encodeForm(form).getBytes(StandardCharsets.UTF_8));

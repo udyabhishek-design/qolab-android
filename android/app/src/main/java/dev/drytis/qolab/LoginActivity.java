@@ -258,6 +258,8 @@ public class LoginActivity extends AppCompatActivity {
                     runOnUiThread(this::onLoginSuccess);
                 } else {
                     lastFailure = new DiagSnapshot(result, "cookie-bridge", "verification failed", 0);
+                    lastXsrfAppearedEncoded = null;
+                    lastXsrfHeaderDecoded = null;
                     runOnUiThread(() -> onLoginFailure(null));
                 }
                 return;
@@ -266,11 +268,19 @@ public class LoginActivity extends AppCompatActivity {
             String message;
             if (result.status == 422) {
                 message = QolabAuthClient.parseErrorMessage(client.lastBody());
+            } else if (result.status == 419) {
+                // CSRF rejected — the session expired or the token
+                // representation was refused. NOT a connectivity problem.
+                message = getString(R.string.login_error_csrf);
+            } else if (result.status / 100 == 5) {
+                message = getString(R.string.login_error_server);
             } else {
                 message = null;
             }
             final String msg = message;
             lastFailure = new DiagSnapshot(result, result.stage, result.ioError, 0);
+            lastXsrfAppearedEncoded = result.xsrfCookiePresent ? client.xsrfAppearedUrlEncoded() : null;
+            lastXsrfHeaderDecoded = result.xsrfCookiePresent ? client.xsrfHeaderWasDecoded() : null;
             runOnUiThread(() -> onLoginFailure(msg));
         });
     }
@@ -301,6 +311,8 @@ public class LoginActivity extends AppCompatActivity {
             this.loginStatus = r.status;
             this.failureType = failureType == null
                     ? (r.status == 422 ? "credentials rejected (422)"
+                       : r.status == 419 ? "session/CSRF rejected (419)"
+                       : r.status / 100 == 5 ? "server error (" + r.status + ")"
                        : r.status > 0 ? "HTTP error " + r.status : "unknown")
                     : failureType;
             this.csrfMs = r.csrfDurationMs;
@@ -319,6 +331,8 @@ public class LoginActivity extends AppCompatActivity {
     }
 
     private DiagSnapshot lastFailure = null;
+    private Boolean lastXsrfAppearedEncoded = null;
+    private Boolean lastXsrfHeaderDecoded = null;
     private boolean diagExpanded = false;
     private LinearLayout diagPanel = null;
     private TextView diagBody = null;
@@ -358,6 +372,14 @@ public class LoginActivity extends AppCompatActivity {
             sb.append("Login HTTP: ").append(fmtMs(lastFailure.loginMs, lastFailure.loginStatus)).append('\n');
             sb.append("Failure type: ").append(lastFailure.failureType).append('\n');
             sb.append("Network available: ").append(networkAvailable()).append('\n');
+            sb.append("XSRF cookie present: ")
+                    .append(lastFailure.xsrfCookie ? "Yes" : "No").append('\n');
+            sb.append("XSRF appears URL-encoded: ")
+                    .append(lastXsrfAppearedEncoded == null ? "Not reached"
+                            : lastXsrfAppearedEncoded ? "Yes" : "No").append('\n');
+            sb.append("XSRF decoded for header: ")
+                    .append(lastXsrfHeaderDecoded == null ? "Not reached"
+                            : lastXsrfHeaderDecoded ? "Yes" : "No").append('\n');
             sb.append("Session cookie received: ")
                     .append(lastFailure.csrfStatus == 0 && lastFailure.loginStatus == 0
                             ? "Not reached" : lastFailure.sessionCookie ? "Yes" : "No").append('\n');
