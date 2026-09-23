@@ -12,6 +12,21 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 4
         versionName "1.4"
+
+        // ── Environment-aware server origin ─────────────────────────
+        // DEBUG / DEVELOPMENT  -> Qolab DEVELOPMENT backend
+        // RELEASE / PRODUCTION -> Qolab production backend
+        // The app reads this at runtime via BuildConfig.QOLAB_ORIGIN;
+        // a gradle.properties override can flip the debug target if ever
+        // needed (QOLAB_DEV_ORIGIN / QOLAB_PROD_ORIGIN).
+        buildConfigField "String", "QOLAB_DEV_ORIGIN", "\"${project.findProperty('QOLAB_DEV_ORIGIN') ?: 'https://workpulse-gbpedt.drytis.dev'}\""
+        buildConfigField "String", "QOLAB_PROD_ORIGIN", "\"${project.findProperty('QOLAB_PROD_ORIGIN') ?: 'https://qolab.drytis.com'}\""
+        buildConfigField "String", "QOLAB_ORIGIN", "false".equalsIgnoreCase(String.valueOf(findProperty('QOLAB_FORCE_PROD'))) ?
+                "\"${project.findProperty('QOLAB_PROD_ORIGIN') ?: 'https://qolab.drytis.com'}\"" :
+            (gradle.startParameter.taskNames.any { it.toLowerCase().contains('release') } ?
+                "\"${project.findProperty('QOLAB_PROD_ORIGIN') ?: 'https://qolab.drytis.com'}\"" :
+                "\"${project.findProperty('QOLAB_DEV_ORIGIN') ?: 'https://workpulse-gbpedt.drytis.dev'}\"")
+
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

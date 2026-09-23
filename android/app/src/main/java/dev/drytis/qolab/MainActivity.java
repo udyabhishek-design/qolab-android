@@ -571,7 +571,8 @@ public class MainActivity extends BridgeActivity {
             String origin = getBridge().getServerUrl();
             if (origin != null) return origin.replaceAll("/+$", "");
         } catch (Exception ignored) {}
-        return "https://qolab.drytis.com";
+        // Environment-aware fallback matching the build (debug=dev, release=prod).
+        return BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", "");
     }
 
     /**

@@ -3,7 +3,7 @@
   "appName": "Qolab",
   "webDir": "www",
   "server": {
-    "url": "https://qolab.drytis.com/",
+    "url": "https://workpulse-gbpedt.drytis.dev/",
     "cleartext": false,
     "androidScheme": "https"
   },

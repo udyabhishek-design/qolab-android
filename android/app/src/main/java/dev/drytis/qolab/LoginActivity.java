@@ -100,21 +100,13 @@ public class LoginActivity extends AppCompatActivity {
     }
 
     private String readAppOrigin() {
-        // Capacitor embeds the server url into the app assets config; the
-        // bridge in MainActivity has it too, but LoginActivity runs before
-        // the bridge exists. Read it from the copied capacitor config asset.
-        try {
-            java.io.InputStream is = getAssets().open("capacitor.config.json");
-            java.util.Scanner s = new java.util.Scanner(is, "UTF-8").useDelimiter("\\A");
-            String json = s.hasNext() ? s.next() : "";
-            s.close();
-            org.json.JSONObject cfg = new org.json.JSONObject(json);
-            String url = cfg.optJSONObject("server") != null
-                    ? cfg.optJSONObject("server").optString("url", null) : null;
-            if (url != null && !url.isEmpty()) return url.replaceAll("/+$", "");
-        } catch (Exception ignored) {
-        }
-        return "https://qolab.drytis.com";
+        // BuildConfig.QOLAB_ORIGIN is environment-aware: debug builds point at
+        // the Qolab DEVELOPMENT backend, release builds at production. This
+        // guarantees the native login can never authenticate against a
+        // different origin than the WebView shell (MainActivity serves the
+        // same capacitor server.url, which `npx cap sync` copies to match
+        // the build being produced).
+        return BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", "");
     }
 
     // ── Fields ──────────────────────────────────────────────────────
