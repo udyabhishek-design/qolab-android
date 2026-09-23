@@ -95,6 +95,8 @@ public class MainActivity extends BridgeActivity {
     private boolean splashDismissed = false;
     private boolean restoredFromState = false;
     private String lastLoadedUrl = null;
+    /** One-shot guard so an expired-session /login redirect can't loop. */
+    private boolean authRedirectHandled = false;
     /** Failsafe timeout so the splash can never permanently block the UI. */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final long SPLASH_FAILSAFE_MS = 12_000;
@@ -194,6 +196,20 @@ public class MainActivity extends BridgeActivity {
                 if (BuildConfig.DEBUG) {
                     android.util.Log.i("QolabAuth", "webview navigation: " + url
                             + (url != null && url.endsWith("/login") ? "  ← redirected to /login" : ""));
+                }
+                // Session expired while using the app: Laravel redirects to
+                // /login. NEVER show the old web login — route cleanly back
+                // to the native LoginActivity instead. Guarded so a redirect
+                // storm can't launch it twice (no loop: LoginActivity waits
+                // for user input before returning here).
+                if (url != null && url.equals(appOriginUrl() + "/login")
+                        && !authRedirectHandled) {
+                    authRedirectHandled = true;
+                    Log.i("QolabAuth", "session expired → native LoginActivity");
+                    Intent login = new Intent(MainActivity.this, LoginActivity.class);
+                    login.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+                    startActivity(login);
+                    finish();
                 }
             }
 

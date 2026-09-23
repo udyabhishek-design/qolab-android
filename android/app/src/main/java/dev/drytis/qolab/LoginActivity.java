@@ -75,6 +75,29 @@ public class LoginActivity extends AppCompatActivity {
             appHost = null;
         }
 
+        // Clean stale session state so the MainActivity gate can't bounce
+        // back mid-expiry: if we're showing native Login, any *-session
+        // cookie present is expired/invalid. Cookie NAMES only logged.
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            String existing = cm.getCookie(appOrigin);
+            if (existing != null) {
+                boolean hadSession = false;
+                for (String part : existing.split(";")) {
+                    String name = part.split("=", 2)[0].trim();
+                    if (name.toLowerCase().endsWith("session")) {
+                        cm.setCookie(appOrigin + "/", name + "=; Path=/; Max-Age=0");
+                        hadSession = true;
+                    }
+                }
+                if (hadSession) {
+                    cm.flush();
+                    android.util.Log.i(TAG, "cleared stale session cookie on native login");
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
         emailInput = findViewById(R.id.login_email);
         passwordInput = findViewById(R.id.login_password);
         passwordToggle = findViewById(R.id.login_password_toggle);
@@ -228,61 +251,63 @@ public class LoginActivity extends AppCompatActivity {
         final String email = emailInput.getText().toString().trim();
         final String password = passwordInput.getText().toString();
 
-        networkExecutor.execute(() -> {
-            QolabAuthClient client = new QolabAuthClient(appOrigin);
-            android.util.Log.i(TAG, "sign-in start host=" + appHost);
+        // v1.4.6: authenticate through the WebView session context using the
+        // proven Laravel/Fortify browser flow — cookies land directly in the
+        // CookieManager Capacitor/MainActivity share. No Java cookie jar,
+        // no manual CSRF reconstruction.
+        QolabWebViewAuth auth = new QolabWebViewAuth(this, appOrigin, email, password,
+                r -> runOnUiThread(() -> {
+                    android.util.Log.i(TAG, "webview-auth success=" + r.success
+                            + " stage=" + r.stage
+                            + " csrfStatus=" + r.csrfStatus
+                            + " loginStatus=" + r.loginStatus
+                            + " csrfMs=" + r.csrfMs + " loginMs=" + r.loginMs
+                            + " finalUrl=" + r.finalUrl
+                            + (r.ioError == null ? "" : " ioError=" + r.ioError));
 
-            QolabAuthClient.LoginResult result = client.login(email, password, false);
+                    if (r.success) {
+                        // The authenticated session now lives in the SHARED
+                        // CookieManager — same context MainActivity/WebView use.
+                        boolean bridged = cookieManagerHasSession();
+                        android.util.Log.i(TAG, "cookieManagerHasSession=" + bridged);
+                        if (bridged) {
+                            onLoginSuccess();
+                        } else {
+                            lastFailure = snapshotOf(r, "cookie-bridge", "verification failed");
+                            lastXsrfAppearedEncoded = null;
+                            lastXsrfHeaderDecoded = null;
+                            onLoginFailure(null);
+                        }
+                        return;
+                    }
 
-            android.util.Log.i(TAG, "result success=" + result.success
-                    + " stage=" + result.stage
-                    + " csrfStatus=" + result.csrfStatus
-                    + " loginStatus=" + result.status
-                    + " xsrfCookie=" + result.xsrfCookiePresent
-                    + " sessionCookie=" + result.sessionCookiePresent
-                    + " redirect=" + result.redirectLocation
-                    + (result.ioError == null ? "" : " ioError=" + result.ioError)
-                    + " csrfMs=" + result.csrfDurationMs
-                    + " loginMs=" + result.loginDurationMs
-                    + " cookieNames=" + result.cookieNames);
+                    String message = null;
+                    if (r.loginStatus == 422) {
+                        message = QolabAuthClient.parseErrorMessage(r.errorBody);
+                    } else if (r.loginStatus == 419) {
+                        // CSRF rejected — session expired or token refused.
+                        // NOT a connectivity problem.
+                        message = getString(R.string.login_error_csrf);
+                    } else if (r.loginStatus / 100 == 5) {
+                        message = getString(R.string.login_error_server);
+                    }
+                    lastFailure = snapshotOf(r, r.stage, r.ioError);
+                    lastXsrfAppearedEncoded = r.csrfStatus > 0 ? Boolean.TRUE : null;
+                    lastXsrfHeaderDecoded = r.csrfStatus > 0 ? Boolean.TRUE : null;
+                    onLoginFailure(message);
+                }));
+        auth.start();
+    }
 
-            if (result.success) {
-                // Persist the authenticated session into the WebView so the
-                // shell behaves exactly like a browser login — and VERIFY the
-                // store actually retained it before navigating (setCookie on
-                // some WebView versions is asynchronous).
-                boolean bridged = writeCookiesToWebView(result.cookies);
-                android.util.Log.i(TAG, "cookie bridge ok=" + bridged
-                        + " cookieManagerHasSession=" + cookieManagerHasSession());
-                if (bridged) {
-                    runOnUiThread(this::onLoginSuccess);
-                } else {
-                    lastFailure = new DiagSnapshot(result, "cookie-bridge", "verification failed", 0);
-                    lastXsrfAppearedEncoded = null;
-                    lastXsrfHeaderDecoded = null;
-                    runOnUiThread(() -> onLoginFailure(null));
-                }
-                return;
-            }
-
-            String message;
-            if (result.status == 422) {
-                message = QolabAuthClient.parseErrorMessage(client.lastBody());
-            } else if (result.status == 419) {
-                // CSRF rejected — the session expired or the token
-                // representation was refused. NOT a connectivity problem.
-                message = getString(R.string.login_error_csrf);
-            } else if (result.status / 100 == 5) {
-                message = getString(R.string.login_error_server);
-            } else {
-                message = null;
-            }
-            final String msg = message;
-            lastFailure = new DiagSnapshot(result, result.stage, result.ioError, 0);
-            lastXsrfAppearedEncoded = result.xsrfCookiePresent ? client.xsrfAppearedUrlEncoded() : null;
-            lastXsrfHeaderDecoded = result.xsrfCookiePresent ? client.xsrfHeaderWasDecoded() : null;
-            runOnUiThread(() -> onLoginFailure(msg));
-        });
+    /** Build a diagnostics snapshot from a WebView-bridge result (safe fields). */
+    private static DiagSnapshot snapshotOf(QolabWebViewAuth.Result r, String stage, String io) {
+        String failureType = io != null ? io
+                : r.loginStatus == 422 ? "credentials rejected (422)"
+                : r.loginStatus == 419 ? "session/CSRF rejected (419)"
+                : r.loginStatus / 100 == 5 ? "server error (" + r.loginStatus + ")"
+                : r.loginStatus > 0 ? "HTTP error " + r.loginStatus : "unknown";
+        return new DiagSnapshot(stage, r.csrfStatus, r.loginStatus, failureType,
+                r.csrfMs, r.loginMs, r.csrfStatus > 0);
     }
 
     // ── DEVELOPMENT-ONLY diagnostics (v1.4.4, temporary) ───────────
@@ -291,7 +316,6 @@ public class LoginActivity extends AppCompatActivity {
 
     /** Snapshot of the last failed attempt (null until one happened). */
     private static final class DiagSnapshot {
-        final String originHost;
         final String stage;
         final int csrfStatus;
         final int loginStatus;
@@ -299,34 +323,16 @@ public class LoginActivity extends AppCompatActivity {
         final long csrfMs;
         final long loginMs;
         final boolean xsrfCookie;
-        final boolean sessionCookie;
-        final boolean cookieBridgeOk;
-        final boolean mainActivityLaunched;
 
-        DiagSnapshot(QolabAuthClient.LoginResult r, String stage, String failureType,
-                     long probeUnused) {
-            this.originHost = safeHostOf(r);
+        DiagSnapshot(String stage, int csrfStatus, int loginStatus, String failureType,
+                     long csrfMs, long loginMs, boolean xsrfCookie) {
             this.stage = stage == null ? "?" : stage;
-            this.csrfStatus = r.csrfStatus;
-            this.loginStatus = r.status;
-            this.failureType = failureType == null
-                    ? (r.status == 422 ? "credentials rejected (422)"
-                       : r.status == 419 ? "session/CSRF rejected (419)"
-                       : r.status / 100 == 5 ? "server error (" + r.status + ")"
-                       : r.status > 0 ? "HTTP error " + r.status : "unknown")
-                    : failureType;
-            this.csrfMs = r.csrfDurationMs;
-            this.loginMs = r.loginDurationMs;
-            this.xsrfCookie = r.xsrfCookiePresent;
-            this.sessionCookie = r.sessionCookiePresent;
-            this.cookieBridgeOk = false;
-            this.mainActivityLaunched = false;
-        }
-
-        private static String safeHostOf(QolabAuthClient.LoginResult r) {
-            // Cookie NAMES are safe; derive host from the first cookie name
-            // context is unnecessary — the origin host is fixed per build.
-            return null; // filled by the activity (has BuildConfig origin)
+            this.csrfStatus = csrfStatus;
+            this.loginStatus = loginStatus;
+            this.failureType = failureType == null ? "unknown" : failureType;
+            this.csrfMs = csrfMs;
+            this.loginMs = loginMs;
+            this.xsrfCookie = xsrfCookie;
         }
     }
 
@@ -381,10 +387,10 @@ public class LoginActivity extends AppCompatActivity {
                     .append(lastXsrfHeaderDecoded == null ? "Not reached"
                             : lastXsrfHeaderDecoded ? "Yes" : "No").append('\n');
             sb.append("Session cookie received: ")
-                    .append(lastFailure.csrfStatus == 0 && lastFailure.loginStatus == 0
-                            ? "Not reached" : lastFailure.sessionCookie ? "Yes" : "No").append('\n');
-            sb.append("Cookie bridge: ").append(lastFailure.cookieBridgeOk ? "Yes" : "No").append('\n');
-            sb.append("MainActivity launched: ").append(lastFailure.mainActivityLaunched ? "Yes" : "No");
+                    .append(lastFailure.loginStatus == 0
+                            ? "Not reached" : "Yes").append('\n');
+            sb.append("Cookie bridge: ").append("n/a (WebView session context)").append('\n');
+            sb.append("MainActivity launched: No");
         }
         diagBody.setText(sb.toString());
     }
@@ -432,32 +438,11 @@ public class LoginActivity extends AppCompatActivity {
     }
 
     /**
-     * Write the authenticated cookies into the WebView CookieManager and
-     * VERIFY the store retained the session cookie. Returns true only when
-     * the read-back confirms a *-session cookie for the app origin.
+    /**
+     * v1.4.6: the manual Java→CookieManager cookie bridge is OBSOLETE —
+     * authentication now happens inside the WebView session context, so
+     * Laravel establishes cookies natively in the shared CookieManager.
      */
-    private boolean writeCookiesToWebView(List<QolabAuthClient.Cookie> cookies) {
-        try {
-            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
-            cm.setAcceptCookie(true);
-            for (QolabAuthClient.Cookie c : cookies) {
-                // Skip the CSRF cookie — the WebView re-does its own handshake.
-                if ("XSRF-TOKEN".equalsIgnoreCase(c.name)) continue;
-                String cookieValue = String.format(java.util.Locale.US,
-                        "%s=%s; Path=/; Secure", c.name, c.value);
-                cm.setCookie(appOrigin + "/", cookieValue);
-            }
-            cm.flush();
-            // Read-back verification: CookieManager.setCookie is documented
-            // as synchronous in practice, but flush() persistence and some
-            // OEM implementations are not; verify the session cookie is
-            // actually retrievable before we navigate anywhere.
-            return cookieManagerHasSession();
-        } catch (Exception e) {
-            android.util.Log.w(TAG, "cookie bridge failed: " + e.getClass().getSimpleName());
-            return false;
-        }
-    }
 
     /** Safe: checks cookie NAMES only. */
     private boolean cookieManagerHasSession() {
