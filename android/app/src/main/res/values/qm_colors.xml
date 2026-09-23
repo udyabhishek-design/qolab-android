@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ═══ Qolab Mobile design tokens (Login / v1.4) ═══ -->
+    <!-- Base canvas — warm cream -->
+    <color name="qm_canvas">#F7F4EC</color>
+    <!-- Ink / near-black -->
+    <color name="qm_ink">#1A1A1A</color>
+    <!-- Muted gray supporting text -->
+    <color name="qm_muted">#7A756D</color>
+    <!-- Qolab wine / crimson — primary accent -->
+    <color name="qm_wine">#8B1E2D</color>
+    <color name="qm_wine_pressed">#6E1622</color>
+    <color name="qm_wine_disabled">#C4A2A7</color>
+    <color name="qm_cream_on_wine">#FBF6EF</color>
+    <!-- Qolab red dot after the wordmark -->
+    <color name="qm_red_dot">#E4202E</color>
+    <!-- Yellow popping block -->
+    <color name="qm_yellow">#FFC940</color>
+    <!-- Cobalt blue block -->
+    <color name="qm_cobalt">#2148C0</color>
+    <color name="qm_cobalt_text">#F5F0E4</color>
+    <!-- Deep forest green block -->
+    <color name="qm_forest">#14532D</color>
+    <color name="qm_lime">#F4FF6B</color>
+    <!-- Form surface + warm border -->
+    <color name="qm_field_surface">#FFFFFF</color>
+    <color name="qm_field_border">#E2DBCD</color>
+    <color name="qm_field_border_focus">#8B1E2D</color>
+    <color name="qm_icon_gray">#9A948B</color>
+    <!-- Error -->
+    <color name="qm_error">#B3261E</color>
+    <color name="qm_error_surface">#FCEDEB</color>
+</resources>

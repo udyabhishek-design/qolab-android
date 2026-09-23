@@ -1,0 +1,476 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Qolab Mobile — Login (v1.4)
+  Purpose-built native login screen. Warm cream canvas, editorial headline,
+  one yellow popping color block near the top, touch-friendly form, wine
+  primary CTA, two asymmetric identity blocks (cobalt / forest) below.
+
+  Everything lives in a ScrollView with no visible scrollbar so short
+  devices (Motorola G32 / 360dp) scroll naturally when the keyboard shows.
+  windowSoftInputMode=adjustResize keeps the focused field + CTA reachable.
+-->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@+id/login_scroll"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/qm_canvas"
+    android:fillViewport="true"
+    android:scrollbars="none"
+    android:overScrollMode="never"
+    android:descendantFocusability="beforeDescendants"
+    android:focusableInTouchMode="true"
+    tools:context=".LoginActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:paddingStart="24dp"
+        android:paddingEnd="24dp"
+        android:paddingTop="20dp"
+        android:paddingBottom="32dp">
+
+        <!-- ═══ Brand — wordmark + red dot ═══ -->
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginTop="16dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/login_wordmark"
+                android:textColor="@color/qm_ink"
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:letterSpacing="-0.02"
+                android:fontFamily="sans-serif-black"
+                android:contentDescription="@string/login_wordmark" />
+
+            <View
+                android:layout_width="7dp"
+                android:layout_height="7dp"
+                android:layout_marginStart="5dp"
+                android:background="@drawable/qm_red_dot"
+                android:contentDescription="@string/login_wordmark" />
+        </LinearLayout>
+
+        <!-- ═══ Headline ═══ -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:text="@string/login_headline_line1"
+            android:textColor="@color/qm_ink"
+            android:textSize="34sp"
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="-0.02"
+            android:lineSpacingMultiplier="1.05" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="2dp"
+            android:text="@string/login_headline_line2"
+            android:textColor="@color/qm_wine"
+            android:textSize="34sp"
+            android:textStyle="bold"
+            android:fontFamily="sans-serif-black"
+            android:letterSpacing="-0.02"
+            android:lineSpacingMultiplier="1.05" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:text="@string/login_subcopy"
+            android:textColor="@color/qm_muted"
+            android:textSize="15sp"
+            android:lineSpacingMultiplier="1.3"
+            android:maxLines="2" />
+
+        <!-- ═══ Yellow popping color block (design element, NOT interactive) ═══ -->
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:importantForAccessibility="no">
+
+            <!-- Card approaches the right edge for visual tension -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:orientation="vertical"
+                android:background="@drawable/qm_block_yellow"
+                android:paddingStart="22dp"
+                android:paddingEnd="34dp"
+                android:paddingTop="18dp"
+                android:paddingBottom="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_yellow_line1"
+                    android:textColor="@color/qm_ink"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.1" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_yellow_line2"
+                    android:textColor="@color/qm_ink"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.1" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_yellow_line3"
+                    android:textColor="@color/qm_ink"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.1" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_yellow_line4"
+                    android:textColor="@color/qm_ink"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.1" />
+
+                <!-- Minimal accent line -->
+                <View
+                    android:layout_width="34dp"
+                    android:layout_height="3dp"
+                    android:layout_marginTop="10dp"
+                    android:background="@color/qm_ink" />
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- ═══ Login form ═══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="30dp"
+            android:orientation="vertical">
+
+            <!-- Work email -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/login_label_email"
+                android:textColor="@color/qm_ink"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp">
+
+                <EditText
+                    android:id="@+id/login_email"
+                    android:layout_width="match_parent"
+                    android:layout_height="58dp"
+                    android:background="@drawable/qm_field"
+                    android:hint="@string/login_hint_email"
+                    android:textColorHint="@color/qm_icon_gray"
+                    android:textColor="@color/qm_ink"
+                    android:textSize="16sp"
+                    android:inputType="textEmailAddress"
+                    android:autofillHints="email"
+                    android:imeOptions="actionNext"
+                    android:maxLines="1"
+                    android:paddingStart="50dp"
+                    android:paddingEnd="16dp"
+                    android:drawablePadding="0dp"
+                    android:contentDescription="@string/login_label_email" />
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="start|center_vertical"
+                    android:layout_marginStart="16dp"
+                    android:src="@drawable/qm_ic_mail"
+                    android:contentDescription="@string/login_icon_mail"
+                    android:tint="@color/qm_icon_gray"
+                    tools:ignore="UseAppTint" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/login_email_error"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:layout_marginStart="4dp"
+                android:textColor="@color/qm_error"
+                android:textSize="13sp"
+                android:visibility="gone"
+                tools:text="Enter a valid email address"
+                tools:visibility="visible" />
+
+            <!-- Password -->
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="@string/login_label_password"
+                android:textColor="@color/qm_ink"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp">
+
+                <EditText
+                    android:id="@+id/login_password"
+                    android:layout_width="match_parent"
+                    android:layout_height="58dp"
+                    android:background="@drawable/qm_field"
+                    android:hint="@string/login_hint_password"
+                    android:textColorHint="@color/qm_icon_gray"
+                    android:textColor="@color/qm_ink"
+                    android:textSize="16sp"
+                    android:inputType="textPassword"
+                    android:autofillHints="password"
+                    android:imeOptions="actionDone"
+                    android:maxLines="1"
+                    android:paddingStart="50dp"
+                    android:paddingEnd="52dp"
+                    android:contentDescription="@string/login_label_password" />
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="start|center_vertical"
+                    android:layout_marginStart="16dp"
+                    android:src="@drawable/qm_ic_lock"
+                    android:contentDescription="@string/login_icon_lock"
+                    android:tint="@color/qm_icon_gray"
+                    tools:ignore="UseAppTint" />
+
+                <!-- Show / hide password — 44dp touch target -->
+                <ImageButton
+                    android:id="@+id/login_password_toggle"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:src="@drawable/qm_ic_eye"
+                    android:tint="@color/qm_icon_gray"
+                    android:contentDescription="@string/login_show_password"
+                    android:visibility="invisible"
+                    tools:ignore="UseAppTint" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/login_password_error"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:layout_marginStart="4dp"
+                android:textColor="@color/qm_error"
+                android:textSize="13sp"
+                android:visibility="gone"
+                tools:text="Enter your password"
+                tools:visibility="visible" />
+
+            <!-- Forgot password — right aligned -->
+            <TextView
+                android:id="@+id/login_forgot"
+                android:layout_width="wrap_content"
+                android:layout_height="44dp"
+                android:layout_gravity="end"
+                android:gravity="center_vertical"
+                android:paddingStart="8dp"
+                android:text="@string/login_forgot_password"
+                android:textColor="@color/qm_wine"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:background="?attr/selectableItemBackground" />
+
+            <!-- Screen-level error (credentials / network) -->
+            <TextView
+                android:id="@+id/login_form_error"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:padding="12dp"
+                android:background="@drawable/qm_error_surface"
+                android:textColor="@color/qm_error"
+                android:textSize="14sp"
+                android:visibility="gone"
+                tools:text="These credentials do not match our records."
+                tools:visibility="visible" />
+
+            <!-- ═══ Primary Sign In button ═══ -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="58dp"
+                android:layout_marginTop="18dp">
+
+                <Button
+                    android:id="@+id/login_submit"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/qm_button_wine"
+                    android:textColor="@color/qm_cream_on_wine"
+                    android:textSize="16sp"
+                    android:textStyle="bold"
+                    android:letterSpacing="0.01"
+                    android:text="@string/login_sign_in"
+                    android:paddingEnd="14dp"
+                    android:stateListAnimator="@null" />
+
+                <!-- Inline spinner shown inside the button while signing in -->
+                <ProgressBar
+                    android:id="@+id/login_progress"
+                    android:layout_width="24dp"
+                    android:layout_height="24dp"
+                    android:layout_gravity="end|center_vertical"
+                    android:layout_marginEnd="18dp"
+                    android:indeterminateTint="@color/qm_cream_on_wine"
+                    android:visibility="gone"
+                    tools:visibility="visible" />
+
+                <!-- Arrow "→" -->
+                <TextView
+                    android:id="@+id/login_arrow"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end|center_vertical"
+                    android:layout_marginEnd="18dp"
+                    android:text="→"
+                    android:textColor="@color/qm_cream_on_wine"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- ═══ Lower identity composition — asymmetric, partially offscreen ═══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="34dp"
+            android:orientation="vertical"
+            android:importantForAccessibility="no"
+            android:clipToPadding="false"
+            android:clipChildren="false">
+
+            <!-- BLUE CARD — bleeds right past the padding -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="end"
+                android:layout_marginEnd="-26dp"
+                android:orientation="vertical"
+                android:background="@drawable/qm_block_cobalt"
+                android:paddingStart="24dp"
+                android:paddingEnd="40dp"
+                android:paddingTop="18dp"
+                android:paddingBottom="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_blue_line1"
+                    android:textColor="@color/qm_cobalt_text"
+                    android:textSize="21sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.08" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_blue_line2"
+                    android:textColor="@color/qm_cobalt_text"
+                    android:textSize="21sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.08" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_blue_line3"
+                    android:textColor="@color/qm_lime"
+                    android:textSize="21sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.08" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_blue_line4"
+                    android:textColor="@color/qm_lime"
+                    android:textSize="21sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.08" />
+            </LinearLayout>
+
+            <!-- GREEN CARD — offset left, overlapping the blue card rhythm -->
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="start"
+                android:layout_marginTop="-18dp"
+                android:layout_marginStart="-10dp"
+                android:orientation="vertical"
+                android:background="@drawable/qm_block_forest"
+                android:paddingStart="24dp"
+                android:paddingEnd="36dp"
+                android:paddingTop="20dp"
+                android:paddingBottom="22dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_green_line1"
+                    android:textColor="@color/qm_lime"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.08" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_green_line2"
+                    android:textColor="@color/qm_lime"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.08" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/login_block_green_line3"
+                    android:textColor="@color/qm_lime"
+                    android:textSize="20sp"
+                    android:textStyle="bold"
+                    android:fontFamily="sans-serif-black"
+                    android:lineSpacingMultiplier="1.08" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>

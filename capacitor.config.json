@@ -1,0 +1,14 @@
+{
+  "appId": "dev.drytis.qolab",
+  "appName": "Qolab",
+  "webDir": "www",
+  "server": {
+    "url": "https://qolab.drytis.com/",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  }
+}

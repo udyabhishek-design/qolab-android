@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Qolab</string>
+    <string name="title_activity_main">Qolab</string>
+    <string name="package_name">dev.drytis.qolab</string>
+    <string name="custom_url_scheme">dev.drytis.qolab</string>
+</resources>

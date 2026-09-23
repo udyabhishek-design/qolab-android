@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ═══ Qolab Mobile — Login (v1.4) ═══ -->
+    <string name="login_wordmark">Qolab</string>
+    <string name="login_headline_line1">Work together.</string>
+    <string name="login_headline_line2">Go further.</string>
+    <string name="login_subcopy">Your AI-powered workspace for a more connected team.</string>
+    <string name="login_block_yellow_line1">People</string>
+    <string name="login_block_yellow_line2">Rooms</string>
+    <string name="login_block_yellow_line3">Ideas</string>
+    <string name="login_block_yellow_line4">Progress</string>
+    <string name="login_block_blue_line1">Same</string>
+    <string name="login_block_blue_line2">People.</string>
+    <string name="login_block_blue_line3">Smarter</string>
+    <string name="login_block_blue_line4">Work.</string>
+    <string name="login_block_green_line1">A more</string>
+    <string name="login_block_green_line2">human way</string>
+    <string name="login_block_green_line3">to work with AI.</string>
+    <string name="login_label_email">Work email</string>
+    <string name="login_hint_email">name@company.com</string>
+    <string name="login_label_password">Password</string>
+    <string name="login_hint_password">Enter your password</string>
+    <string name="login_show_password">Show password</string>
+    <string name="login_hide_password">Hide password</string>
+    <string name="login_forgot_password">Forgot password?</string>
+    <string name="login_sign_in">Sign in</string>
+    <string name="login_signing_in">Signing in…</string>
+    <string name="login_error_missing_email">Enter your work email</string>
+    <string name="login_error_invalid_email">Enter a valid email address</string>
+    <string name="login_error_missing_password">Enter your password</string>
+    <string name="login_error_generic">Couldn\u2019t sign in. Check your connection and try again.</string>
+    <string name="login_icon_mail">Email icon</string>
+    <string name="login_icon_lock">Password icon</string>
+    <string name="login_cd_decorative_block">Decorative design element</string>
+</resources>
