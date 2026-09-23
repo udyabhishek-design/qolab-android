@@ -47,28 +47,55 @@ public final class QolabAuthClient {
         }
     }
 
-    /** Result of a login attempt. */
+    /** Result of a login attempt. Diagnostics carry ONLY safe data:
+     *  statuses, stages, cookie NAMES, exception CLASS names — never
+     *  cookie values, tokens, or credentials. */
     public static final class LoginResult {
         public final boolean success;
         /** First user-facing message from a 422 errors object, or null. */
         public final String errorMessage;
-        /** Raw HTTP status; 0 for IO failure. */
+        /** POST /login status (or csrf status when the flow failed there); 0 for IO failure. */
         public final int status;
+        /** Where the flow stopped: "csrf" | "login" | "io" | "" (success). */
+        public final String stage;
+        /** GET /sanctum/csrf-cookie status (0 if never reached). */
+        public final int csrfStatus;
+        /** XSRF-TOKEN cookie present in the jar after the handshake. */
+        public final boolean xsrfCookiePresent;
+        /** A *-session cookie present in the jar after the flow. */
+        public final boolean sessionCookiePresent;
+        /** Cookie NAMES only (safe to log). */
+        public final List<String> cookieNames;
+        /** Location header of the POST response when 3xx, else null. */
+        public final String redirectLocation;
+        /** Exception class name for IO failures (safe, no message). */
+        public final String ioError;
         /** All cookies received during the flow (csrf + authenticated session). */
         public final List<Cookie> cookies;
 
-        LoginResult(boolean success, String errorMessage, int status, List<Cookie> cookies) {
+        LoginResult(boolean success, String errorMessage, int status, String stage,
+                    int csrfStatus, boolean xsrfCookiePresent, boolean sessionCookiePresent,
+                    String redirectLocation, String ioError, List<Cookie> cookies) {
             this.success = success;
             this.errorMessage = errorMessage;
             this.status = status;
+            this.stage = stage == null ? "" : stage;
+            this.csrfStatus = csrfStatus;
+            this.xsrfCookiePresent = xsrfCookiePresent;
+            this.sessionCookiePresent = sessionCookiePresent;
+            this.redirectLocation = redirectLocation;
+            this.ioError = ioError;
             this.cookies = cookies;
+            List<String> names = new ArrayList<>();
+            for (Cookie c : cookies) names.add(c.name);
+            this.cookieNames = names;
         }
     }
 
     private final String baseUrl;
     private final Map<String, String> cookieJar = new LinkedHashMap<>();
-    private int connectTimeoutMs = 10_000;
-    private int readTimeoutMs = 20_000;
+    private int connectTimeoutMs = 15_000;
+    private int readTimeoutMs = 40_000;
 
     public QolabAuthClient(String baseUrl) {
         // strip trailing slash
@@ -82,18 +109,42 @@ public final class QolabAuthClient {
 
     /**
      * Full login flow. Blocking — call from a background thread.
+     * One transparent retry of the whole csrf+login sequence when the
+     * handshake comes back empty (dev backend waking from idle) or the
+     * POST is rejected as CSRF-invalid (419) — the retry performs a
+     * FRESH csrf handshake, never reusing the stale token.
      */
     public LoginResult login(String email, String password, boolean remember) {
+        for (int attempt = 1; attempt <= 2; attempt++) {
+            cookieJar.clear();
+            LoginResult r = loginOnce(email, password, remember);
+            boolean retryable = false;
+            if (!r.success) {
+                if ("io".equals(r.stage)) {
+                    retryable = attempt == 1; // network hiccup — one fresh try
+                } else if ("login".equals(r.stage) && r.status == 419) {
+                    retryable = attempt == 1; // CSRF expired — fresh handshake
+                }
+            }
+            if (!retryable) return r;
+        }
+        // unreachable; second attempt always returns
+        throw new IllegalStateException("login retry exhausted");
+    }
+
+    private LoginResult loginOnce(String email, String password, boolean remember) {
+        int csrfStatus = 0;
+        String ioError = null;
         try {
             // 1. CSRF handshake
-            int csrfStatus = httpGet(baseUrl + "/sanctum/csrf-cookie");
-            if (csrfStatus / 100 != 2) {
-                return new LoginResult(false, null, csrfStatus, snapshotCookies());
-            }
+            csrfStatus = httpGet(baseUrl + "/sanctum/csrf-cookie");
             String xsrf = cookieJar.get("XSRF-TOKEN");
-            if (xsrf == null) {
-                // No XSRF cookie — treat as network/config failure.
-                return new LoginResult(false, null, 0, snapshotCookies());
+            boolean xsrfOk = xsrf != null;
+            if (csrfStatus / 100 != 2 || !xsrfOk) {
+                // No usable handshake — fail with full diagnostics.
+                return new LoginResult(false, null, csrfStatus, "csrf",
+                        csrfStatus, xsrfOk, hasSessionCookie(),
+                        null, null, snapshotCookies());
             }
 
             // 2. POST /login (Accept: application/json → 422 JSON on error)
@@ -102,15 +153,31 @@ public final class QolabAuthClient {
             form.put("password", password == null ? "" : password);
             form.put("remember", remember ? "on" : "");
 
-            int status = httpPostForm(baseUrl + "/login", form, xsrf);
+            String[] redirectOut = new String[1];
+            int status = httpPostForm(baseUrl + "/login", form, xsrf, redirectOut);
+            boolean session = hasSessionCookie();
             if (status == 422) {
-                return new LoginResult(false, null, status, snapshotCookies());
+                return new LoginResult(false, null, status, "login",
+                        csrfStatus, true, session,
+                        redirectOut[0], null, snapshotCookies());
             }
             boolean ok = status / 100 == 2 || status / 100 == 3;
-            return new LoginResult(ok, null, status, snapshotCookies());
+            return new LoginResult(ok, null, status, ok ? "" : "login",
+                    csrfStatus, true, session,
+                    redirectOut[0], null, snapshotCookies());
         } catch (Exception e) {
-            return new LoginResult(false, null, 0, new ArrayList<>(0));
+            return new LoginResult(false, null, 0, "io",
+                    csrfStatus, cookieJar.containsKey("XSRF-TOKEN"), hasSessionCookie(),
+                    null, e.getClass().getSimpleName(), new ArrayList<>(0));
         }
+    }
+
+    /** True when the jar holds any *-session cookie. */
+    private boolean hasSessionCookie() {
+        for (String name : cookieJar.keySet()) {
+            if (name.toLowerCase().endsWith("session")) return true;
+        }
+        return false;
     }
 
     /**
@@ -135,7 +202,9 @@ public final class QolabAuthClient {
         return c.getResponseCode();
     }
 
-    private int httpPostForm(String urlStr, Map<String, String> form, String xsrfToken)
+    /** @param redirectOut one-element sink for the Location header (3xx). */
+    private int httpPostForm(String urlStr, Map<String, String> form, String xsrfToken,
+                             String[] redirectOut)
             throws Exception {
         HttpURLConnection c = open(urlStr);
         c.setRequestMethod("POST");
@@ -150,6 +219,10 @@ public final class QolabAuthClient {
         os.close();
         storeCookies(c);
         lastErrorBody = readBody(c);
+        if (redirectOut != null) {
+            List<String> loc = c.getHeaderFields().get("Location");
+            if (loc != null && !loc.isEmpty()) redirectOut[0] = loc.get(0);
+        }
         drain(c);
         return c.getResponseCode();
     }

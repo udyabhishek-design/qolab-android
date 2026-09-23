@@ -119,4 +119,45 @@ public class QolabAuthClientTest {
         assertEquals("https://qolab.drytis.com",
                 f.get(new QolabAuthClient("https://qolab.drytis.com//")));
     }
+
+    // ── v1.4.3 regression: diagnostics must never carry secrets ─────
+
+    @Test
+    public void diagnostics_stageFields_safeByConstruction() throws Exception {
+        // Reach into the result builder via reflection-free path: construct
+        // through the same logic login() uses on IO failure (null network
+        // in unit tests throws immediately inside httpGet).
+        QolabAuthClient client = new QolabAuthClient("https://invalid.invalid");
+        client.setTimeouts(1, 1);
+        QolabAuthClient.LoginResult r = client.login("someone@example.com", "secret-pw", false);
+        assertFalse(r.success);
+        assertEquals("io", r.stage);
+        assertNotNull(r.ioError);
+        assertTrue(r.cookieNames.isEmpty());
+        // login() retries once on IO failure → still exactly one outcome
+        assertFalse(r.success);
+    }
+
+    @Test
+    public void timeouts_raisedForColdBackend() throws Exception {
+        // The dev backend can take >10s to wake from idle; v1.4's 10s/20s
+        // caused deterministic IO failures on-device. v1.4.3: 15s/40s.
+        java.lang.reflect.Field ct = QolabAuthClient.class.getDeclaredField("connectTimeoutMs");
+        java.lang.reflect.Field rt = QolabAuthClient.class.getDeclaredField("readTimeoutMs");
+        ct.setAccessible(true); rt.setAccessible(true);
+        QolabAuthClient c = new QolabAuthClient("https://x.example");
+        assertEquals(15_000, ct.get(c));
+        assertEquals(40_000, rt.get(c));
+    }
+
+    @Test
+    public void parseSetCookie_preservesFullValueWithSpecials() {
+        // Session cookie values may contain %2B etc. — the pair-splitting
+        // must not truncate or re-decode them.
+        QolabAuthClient.ParsedCookie c = QolabAuthClient.parseSetCookie(
+                "qolab-session=eyJpdi%2Babc%3D%3D; expires=Thu; path=/; httponly; samesite=lax");
+        assertNotNull(c);
+        assertEquals("qolab-session", c.name);
+        assertEquals("eyJpdi%2Babc%3D%3D", c.value);
+    }
 }

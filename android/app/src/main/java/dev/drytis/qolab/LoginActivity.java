@@ -41,6 +41,8 @@ import java.util.concurrent.Executors;
  */
 public class LoginActivity extends AppCompatActivity {
 
+    private static final String TAG = "QolabAuth";
+
     private EditText emailInput;
     private EditText passwordInput;
     private ImageButton passwordToggle;
@@ -226,13 +228,33 @@ public class LoginActivity extends AppCompatActivity {
 
         networkExecutor.execute(() -> {
             QolabAuthClient client = new QolabAuthClient(appOrigin);
+            android.util.Log.i(TAG, "sign-in start host=" + appHost);
+
             QolabAuthClient.LoginResult result = client.login(email, password, false);
+
+            android.util.Log.i(TAG, "result success=" + result.success
+                    + " stage=" + result.stage
+                    + " csrfStatus=" + result.csrfStatus
+                    + " loginStatus=" + result.status
+                    + " xsrfCookie=" + result.xsrfCookiePresent
+                    + " sessionCookie=" + result.sessionCookiePresent
+                    + " redirect=" + result.redirectLocation
+                    + (result.ioError == null ? "" : " ioError=" + result.ioError)
+                    + " cookieNames=" + result.cookieNames);
 
             if (result.success) {
                 // Persist the authenticated session into the WebView so the
-                // shell behaves exactly like a browser login.
-                writeCookiesToWebView(result.cookies);
-                runOnUiThread(this::onLoginSuccess);
+                // shell behaves exactly like a browser login — and VERIFY the
+                // store actually retained it before navigating (setCookie on
+                // some WebView versions is asynchronous).
+                boolean bridged = writeCookiesToWebView(result.cookies);
+                android.util.Log.i(TAG, "cookie bridge ok=" + bridged
+                        + " cookieManagerHasSession=" + cookieManagerHasSession());
+                if (bridged) {
+                    runOnUiThread(this::onLoginSuccess);
+                } else {
+                    runOnUiThread(() -> onLoginFailure(null));
+                }
                 return;
             }
 
@@ -247,7 +269,12 @@ public class LoginActivity extends AppCompatActivity {
         });
     }
 
-    private void writeCookiesToWebView(List<QolabAuthClient.Cookie> cookies) {
+    /**
+     * Write the authenticated cookies into the WebView CookieManager and
+     * VERIFY the store retained the session cookie. Returns true only when
+     * the read-back confirms a *-session cookie for the app origin.
+     */
+    private boolean writeCookiesToWebView(List<QolabAuthClient.Cookie> cookies) {
         try {
             android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
             cm.setAcceptCookie(true);
@@ -259,11 +286,33 @@ public class LoginActivity extends AppCompatActivity {
                 cm.setCookie(appOrigin + "/", cookieValue);
             }
             cm.flush();
-        } catch (Exception ignored) {
+            // Read-back verification: CookieManager.setCookie is documented
+            // as synchronous in practice, but flush() persistence and some
+            // OEM implementations are not; verify the session cookie is
+            // actually retrievable before we navigate anywhere.
+            return cookieManagerHasSession();
+        } catch (Exception e) {
+            android.util.Log.w(TAG, "cookie bridge failed: " + e.getClass().getSimpleName());
+            return false;
         }
     }
 
+    /** Safe: checks cookie NAMES only. */
+    private boolean cookieManagerHasSession() {
+        try {
+            String cookies = android.webkit.CookieManager.getInstance().getCookie(appOrigin);
+            if (cookies == null) return false;
+            for (String part : cookies.split(";")) {
+                String name = part.split("=", 2)[0].trim();
+                if (name.toLowerCase().endsWith("session")) return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
     private void onLoginSuccess() {
+        android.util.Log.i(TAG, "login success → MainActivity");
         setSubmitting(false);
         Intent i = new Intent(this, MainActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);

@@ -130,13 +130,16 @@ public class MainActivity extends BridgeActivity {
                     ? getIntent().getStringExtra("qolab_start_path") : null;
             // Public pages (forgot-password) skip the login gate.
             if (!"/forgot-password".equals(startPath) && !hasSessionCookie()) {
+                Log.i("QolabAuth", "gate: no session cookie → LoginActivity");
                 Intent login = new Intent(this, LoginActivity.class);
                 startActivity(login);
                 finish();
                 return;
             }
+            Log.i("QolabAuth", "gate: session cookie present → WebView start");
             if (startPath != null && !startPath.isEmpty()) {
                 String url = appOriginUrl() + startPath;
+                Log.i("QolabAuth", "gate: explicit start path " + startPath);
                 webView.loadUrl(url);
             }
         }
@@ -187,6 +190,10 @@ public class MainActivity extends BridgeActivity {
                 String host = url == null ? null : Uri.parse(url).getHost();
                 if (host != null && isAllowedHost(host, navBridge)) {
                     lastLoadedUrl = url;
+                }
+                if (BuildConfig.DEBUG) {
+                    android.util.Log.i("QolabAuth", "webview navigation: " + url
+                            + (url != null && url.endsWith("/login") ? "  ← redirected to /login" : ""));
                 }
             }
 
