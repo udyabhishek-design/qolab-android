@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Tall phones (≥860dp height, e.g. 412×915 / 393×873 class):
+         slightly more generous composition. Budget ≈ 715dp @393w. -->
+    <dimen name="qm_login_top_pad">20dp</dimen>
+    <dimen name="qm_login_headline">32sp</dimen>
+    <dimen name="qm_login_field_height">56dp</dimen>
+</resources>

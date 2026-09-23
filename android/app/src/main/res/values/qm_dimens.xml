@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Qolab Mobile Login — default (compact) sizing.
+         Budget ≈ 688dp @393w → no scroll on 780dp-class viewports
+         (Motorola G32 class) with keyboard closed. -->
+    <dimen name="qm_login_top_pad">12dp</dimen>
+    <dimen name="qm_login_headline">28sp</dimen>
+    <dimen name="qm_login_field_height">54dp</dimen>
+</resources>
