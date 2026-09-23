@@ -1,128 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Qolab Mobile — Login (v1.4.1 compact layout)
-  Same visual language, tightened for one-viewport entry screens.
+  Qolab Mobile — Login (v1.4.2 compact, fully-composed single viewport)
 
-  Height budget @393dp width (portrait, keyboard closed), everything measured:
-    top pad 12 + brand 27 + 16 + headline 2×37 + 6 + sub 20 + 12
-    + yellow 96 + 16 + label 18 + 6 + email 54 + 6 + gap 12 + label 18 + 6
-    + password 54 + 2 + forgot 32 + 8 + error 0 + CTA 54 + bottom pad 12
-  ≈ 688dp → fits 780dp-class viewports (Motorola G32) with margin, and the
-  decorative peeks fill the leftover space below (or clip on short screens —
-  they never push the form).
+  One fixed vertical composition, no weighted spacers, no clipped/peeking
+  decoration. Root uses fitsSystemWindows so status + gesture insets are
+  consumed as padding — the bottom cards end ABOVE the navigation area.
 
-  ScrollView remains only as an a11y/font-scale/keyboard safety net.
-  Bottom peeks are drawn by a fixed footer inside a root FrameLayout; they
-  sit UNDER the scroll content, so they can never push authentication.
+  Fixed height budget @360w (compact tier):
+    brand 25 + 10 + headline 71 + 8 + [subcopy|yellow] 108 + 14
+    + form 261 + 14 + bottom cards ~100 + 12 pad
+    ≈ 623dp of content + system insets (~96dp worst case) < 780dp viewport
+  → nothing scrolls on a Motorola G32-class screen with the keyboard closed.
+  The ScrollView is an emergency fallback only (keyboard / font scaling).
+
+  Taller devices (values-h860dp) get slightly larger headline + card type;
+  gaps stay fixed so no blank band can appear.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/qm_canvas"
-    android:clipChildren="false"
-    android:clipToPadding="false"
+    android:fitsSystemWindows="true"
     tools:context=".LoginActivity">
 
-    <!-- ── Decorative identity peeks (fixed, bottom corners, never scroll) ── -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="match_parent"
-        android:orientation="vertical"
-        android:importantForAccessibility="no"
-        android:clipChildren="false"
-        android:clipToPadding="false">
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal"
-            android:clipChildren="false"
-            android:clipToPadding="false">
-
-            <!-- Forest-green peek — enters from the LEFT edge -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="start|bottom"
-                android:layout_marginStart="-26dp"
-                android:layout_marginBottom="-24dp"
-                android:orientation="vertical"
-                android:background="@drawable/qm_block_forest"
-                android:paddingStart="30dp"
-                android:paddingEnd="26dp"
-                android:paddingTop="12dp"
-                android:paddingBottom="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/login_block_green_line3"
-                    android:textColor="@color/qm_lime"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:fontFamily="sans-serif-black"
-                    android:lineSpacingMultiplier="1.0" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/login_block_green_line2"
-                    android:textColor="@color/qm_lime"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:fontFamily="sans-serif-black"
-                    android:lineSpacingMultiplier="1.0" />
-            </LinearLayout>
-
-            <View
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
-
-            <!-- Cobalt peek — enters from the RIGHT edge -->
-            <LinearLayout
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_gravity="end|bottom"
-                android:layout_marginEnd="-22dp"
-                android:layout_marginBottom="-20dp"
-                android:orientation="vertical"
-                android:background="@drawable/qm_block_cobalt"
-                android:paddingStart="26dp"
-                android:paddingEnd="30dp"
-                android:paddingTop="12dp"
-                android:paddingBottom="16dp">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/login_block_blue_line3"
-                    android:textColor="@color/qm_lime"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:fontFamily="sans-serif-black"
-                    android:lineSpacingMultiplier="1.0" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/login_block_blue_line4"
-                    android:textColor="@color/qm_cobalt_text"
-                    android:textSize="15sp"
-                    android:textStyle="bold"
-                    android:fontFamily="sans-serif-black"
-                    android:lineSpacingMultiplier="1.0" />
-            </LinearLayout>
-        </LinearLayout>
-    </LinearLayout>
-
-    <!-- ── Primary content ── -->
     <ScrollView
         android:id="@+id/login_scroll"
         android:layout_width="match_parent"
@@ -139,14 +40,8 @@
             android:orientation="vertical"
             android:paddingStart="24dp"
             android:paddingEnd="24dp"
-            android:paddingTop="@dimen/qm_login_top_pad"
-            android:paddingBottom="16dp">
-
-            <!-- Vertical distribution: spacers (0dp, weight) absorb leftover
-                 height so the form sits slightly above center on tall
-                 screens and yields entirely when the keyboard opens
-                 (adjustResize shrinks the viewport → weights collapse to 0
-                 before the fixed content ever scrolls). -->
+            android:paddingTop="8dp"
+            android:paddingBottom="12dp">
 
             <!-- ═══ Brand — wordmark + red dot ═══ -->
             <LinearLayout
@@ -174,11 +69,11 @@
                     android:contentDescription="@string/login_wordmark" />
             </LinearLayout>
 
-            <!-- ═══ Headline (full width) ═══ -->
+            <!-- ═══ Headline ═══ -->
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="14dp"
+                android:layout_marginTop="10dp"
                 android:text="@string/login_headline_line1"
                 android:textColor="@color/qm_ink"
                 android:textSize="@dimen/qm_login_headline"
@@ -199,39 +94,39 @@
                 android:letterSpacing="-0.02"
                 android:lineSpacingMultiplier="1.04" />
 
-            <!-- Subcopy + compact yellow accent block side by side (upper
-                 portion, right side). The block is a design accent, NOT
-                 interactive, and never determines the screen height budget
-                 because the subcopy beside it is shorter. -->
+            <!-- ═══ Supporting copy + compact yellow card (one row) ═══ -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="8dp"
                 android:orientation="horizontal"
-                android:gravity="top"
+                android:gravity="center_vertical"
                 android:baselineAligned="false">
 
                 <TextView
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_gravity="center_vertical"
                     android:text="@string/login_subcopy"
                     android:textColor="@color/qm_muted"
                     android:textSize="14sp"
                     android:lineSpacingMultiplier="1.25"
                     android:maxLines="3" />
 
+                <!-- Design accent — NOT interactive. Fixed height: decoration
+                     must never push the form below the fold. -->
                 <LinearLayout
                     android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
+                    android:layout_height="@dimen/qm_login_yellow_height"
                     android:layout_marginStart="12dp"
                     android:orientation="vertical"
+                    android:gravity="center_vertical"
                     android:background="@drawable/qm_block_yellow"
                     android:paddingStart="14dp"
-                    android:paddingEnd="16dp"
-                    android:paddingTop="12dp"
-                    android:paddingBottom="12dp"
+                    android:end="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp"
                     android:importantForAccessibility="no">
 
                     <TextView
@@ -239,61 +134,55 @@
                         android:layout_height="wrap_content"
                         android:text="@string/login_block_yellow_line1"
                         android:textColor="@color/qm_ink"
-                        android:textSize="15sp"
+                        android:textSize="@dimen/qm_login_yellow_text"
                         android:textStyle="bold"
                         android:fontFamily="sans-serif-black"
-                        android:lineSpacingMultiplier="1.12" />
+                        android:lineSpacingMultiplier="1.1" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/login_block_yellow_line2"
                         android:textColor="@color/qm_ink"
-                        android:textSize="15sp"
+                        android:textSize="@dimen/qm_login_yellow_text"
                         android:textStyle="bold"
                         android:fontFamily="sans-serif-black"
-                        android:lineSpacingMultiplier="1.12" />
+                        android:lineSpacingMultiplier="1.1" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/login_block_yellow_line3"
                         android:textColor="@color/qm_ink"
-                        android:textSize="15sp"
+                        android:textSize="@dimen/qm_login_yellow_text"
                         android:textStyle="bold"
                         android:fontFamily="sans-serif-black"
-                        android:lineSpacingMultiplier="1.12" />
+                        android:lineSpacingMultiplier="1.1" />
 
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="@string/login_block_yellow_line4"
                         android:textColor="@color/qm_ink"
-                        android:textSize="15sp"
+                        android:textSize="@dimen/qm_login_yellow_text"
                         android:textStyle="bold"
                         android:fontFamily="sans-serif-black"
-                        android:lineSpacingMultiplier="1.12" />
+                        android:lineSpacingMultiplier="1.1" />
 
                     <!-- Minimal accent line -->
                     <View
                         android:layout_width="24dp"
                         android:layout_height="3dp"
-                        android:layout_marginTop="8dp"
+                        android:layout_marginTop="7dp"
                         android:background="@color/qm_ink" />
                 </LinearLayout>
             </LinearLayout>
-
-            <!-- Flexible spacer above the form -->
-            <Space
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="18"
-                android:minHeight="10dp" />
 
             <!-- ═══ Login form ═══ -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
                 android:orientation="vertical">
 
                 <!-- Work email -->
@@ -354,7 +243,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
+                    android:layout_marginTop="10dp"
                     android:text="@string/login_label_password"
                     android:textColor="@color/qm_ink"
                     android:textSize="13sp"
@@ -418,7 +307,7 @@
                     tools:text="Enter your password"
                     tools:visibility="visible" />
 
-                <!-- Forgot password — right aligned, tight but 40dp target -->
+                <!-- Forgot password — right aligned, 40dp touch target -->
                 <TextView
                     android:id="@+id/login_forgot"
                     android:layout_width="wrap_content"
@@ -450,7 +339,7 @@
                 <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="@dimen/qm_login_field_height"
-                    android:layout_marginTop="10dp">
+                    android:layout_marginTop="8dp">
 
                     <Button
                         android:id="@+id/login_submit"
@@ -465,7 +354,6 @@
                         android:paddingEnd="14dp"
                         android:stateListAnimator="@null" />
 
-                    <!-- Inline spinner shown inside the button while signing in -->
                     <ProgressBar
                         android:id="@+id/login_progress"
                         android:layout_width="22dp"
@@ -476,7 +364,6 @@
                         android:visibility="gone"
                         tools:visibility="visible" />
 
-                    <!-- Arrow "→" -->
                     <TextView
                         android:id="@+id/login_arrow"
                         android:layout_width="wrap_content"
@@ -490,15 +377,121 @@
                 </FrameLayout>
             </LinearLayout>
 
-            <!-- Flexible spacer below the form (weight 10; with fillViewport
-                 the leftover space splits 18:10 above/below the form so the
-                 composition stays balanced, while the bottom decorative
-                 peeks — layered beneath this scroll — fill the visual base) -->
-            <Space
+            <!-- ═══ Bottom color composition — compact posters, FULLY visible
+                 inside the safe area (no negative margins, no clipping) ═══ -->
+            <LinearLayout
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="10"
-                android:minHeight="8dp" />
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:orientation="horizontal"
+                android:gravity="bottom"
+                android:baselineAligned="false"
+                android:importantForAccessibility="no">
+
+                <!-- GREEN card — wider, lower-left. Fixed height. -->
+                <LinearLayout
+                    android:id="@+id/login_card_green"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/qm_login_green_height"
+                    android:layout_weight="1.3"
+                    android:orientation="vertical"
+                    android:gravity="center_vertical"
+                    android:background="@drawable/qm_block_forest"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/login_block_green_line1"
+                        android:textColor="@color/qm_lime"
+                        android:textSize="@dimen/qm_login_bottom_card_text"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black"
+                        android:lineSpacingMultiplier="1.08" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/login_block_green_line2"
+                        android:textColor="@color/qm_lime"
+                        android:textSize="@dimen/qm_login_bottom_card_text"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black"
+                        android:lineSpacingMultiplier="1.08" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/login_block_green_line3"
+                        android:textColor="@color/qm_lime"
+                        android:textSize="@dimen/qm_login_bottom_card_text"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black"
+                        android:lineSpacingMultiplier="1.08" />
+                </LinearLayout>
+
+                <Space
+                    android:layout_width="12dp"
+                    android:layout_height="1dp" />
+
+                <!-- BLUE card — smaller, lower-right. Fixed height. -->
+                <LinearLayout
+                    android:id="@+id/login_card_blue"
+                    android:layout_width="0dp"
+                    android:layout_height="@dimen/qm_login_blue_height"
+                    android:layout_weight="1"
+                    android:orientation="vertical"
+                    android:gravity="center_vertical"
+                    android:background="@drawable/qm_block_cobalt"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/login_block_blue_line1"
+                        android:textColor="@color/qm_cobalt_text"
+                        android:textSize="@dimen/qm_login_bottom_card_text"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black"
+                        android:lineSpacingMultiplier="1.08" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/login_block_blue_line2"
+                        android:textColor="@color/qm_cobalt_text"
+                        android:textSize="@dimen/qm_login_bottom_card_text"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black"
+                        android:lineSpacingMultiplier="1.08" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/login_block_blue_line3"
+                        android:textColor="@color/qm_lime"
+                        android:textSize="@dimen/qm_login_bottom_card_text"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black"
+                        android:lineSpacingMultiplier="1.08" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/login_block_blue_line4"
+                        android:textColor="@color/qm_lime"
+                        android:textSize="@dimen/qm_login_bottom_card_text"
+                        android:textStyle="bold"
+                        android:fontFamily="sans-serif-black"
+                        android:lineSpacingMultiplier="1.08" />
+                </LinearLayout>
+            </LinearLayout>
         </LinearLayout>
     </ScrollView>
 </FrameLayout>

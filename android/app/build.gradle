@@ -10,8 +10,8 @@ android {
         applicationId "dev.drytis.qolab"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 4
-        versionName "1.4"
+        versionCode 5
+        versionName "1.4.2"
 
         // ── Environment-aware server origin ─────────────────────────
         // DEBUG / DEVELOPMENT  -> Qolab DEVELOPMENT backend
@@ -34,6 +34,12 @@ android {
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
@@ -57,6 +63,9 @@ dependencies {
     testImplementation "junit:junit:$junitVersion"
     // Real org.json for local unit tests (Android's is a stub that throws)
     testImplementation "org.json:json:20240303"
+    // Robolectric — real view measurement for layout validation tests
+    testImplementation "org.robolectric:robolectric:4.14.1"
+    testImplementation "androidx.test:core:1.6.1"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')

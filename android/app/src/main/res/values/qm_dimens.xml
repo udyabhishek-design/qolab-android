@@ -1,9 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Qolab Mobile Login — default (compact) sizing.
-         Budget ≈ 688dp @393w → no scroll on 780dp-class viewports
-         (Motorola G32 class) with keyboard closed. -->
-    <dimen name="qm_login_top_pad">12dp</dimen>
-    <dimen name="qm_login_headline">28sp</dimen>
-    <dimen name="qm_login_field_height">54dp</dimen>
+    <!-- Qolab Mobile Login — default (compact) sizing for ~780dp-class
+         viewports. Natural content ≈ 600dp @360w incl. bottom cards.
+         Decorative cards have FIXED heights so typography / font scaling
+         can never push the form below the fold — the ScrollView remains
+         an emergency fallback only. -->
+    <dimen name="qm_login_top_pad">8dp</dimen>
+    <dimen name="qm_login_headline">26sp</dimen>
+    <dimen name="qm_login_field_height">52dp</dimen>
+    <dimen name="qm_login_yellow_text">13sp</dimen>
+    <dimen name="qm_login_yellow_height">96dp</dimen>
+    <dimen name="qm_login_bottom_card_text">12sp</dimen>
+    <dimen name="qm_login_green_height">100dp</dimen>
+    <dimen name="qm_login_blue_height">92dp</dimen>
 </resources>
