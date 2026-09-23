@@ -335,11 +335,11 @@
                     tools:text="These credentials do not match our records."
                     tools:visibility="visible" />
 
-                <!-- ═══ Primary Sign In button ═══ -->
-                <FrameLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="@dimen/qm_login_field_height"
-                    android:layout_marginTop="8dp">
+                    <!-- ═══ Primary Sign In button ═══ -->
+                    <FrameLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/qm_login_field_height"
+                        android:layout_marginTop="8dp">
 
                     <Button
                         android:id="@+id/login_submit"
@@ -375,6 +375,61 @@
                         android:textSize="18sp"
                         android:textStyle="bold" />
                 </FrameLayout>
+
+                <!-- ═══ DEVELOPMENT diagnostics panel (v1.4.4, TEMPORARY)
+                     Renders ONLY after a failed sign-in, ONLY when
+                     BuildConfig.DEBUG is true (removed entirely from
+                     release view at runtime). Approved design untouched —
+                     this sits below the Sign In button, collapsed by
+                     default, scrolls with the form. NO secrets: statuses,
+                     durations, exception class names, yes/no flags only. ═══ -->
+                <LinearLayout
+                    android:id="@+id/login_diag"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:orientation="vertical"
+                    android:background="@drawable/qm_field"
+                    android:padding="12dp"
+                    android:visibility="gone"
+                    tools:visibility="gone">
+
+                    <TextView
+                        android:id="@+id/login_diag_toggle"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:gravity="center_vertical"
+                        android:text="@string/login_diag_title"
+                        android:textColor="@color/qm_muted"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:background="?attr/selectableItemBackground" />
+
+                    <TextView
+                        android:id="@+id/login_diag_body"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/qm_ink"
+                        android:textSize="12sp"
+                        android:fontFamily="monospace"
+                        android:lineSpacingMultiplier="1.3"
+                        android:visibility="gone"
+                        tools:text="Origin: workpulse-gbpedt.drytis.dev"
+                        tools:visibility="visible" />
+
+                    <TextView
+                        android:id="@+id/login_diag_probe"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:gravity="center_vertical"
+                        android:text="@string/login_diag_test_connection"
+                        android:textColor="@color/qm_wine"
+                        android:textSize="13sp"
+                        android:textStyle="bold"
+                        android:background="?attr/selectableItemBackground"
+                        android:visibility="gone"
+                        tools:visibility="visible" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- ═══ Bottom color composition — compact posters, FULLY visible

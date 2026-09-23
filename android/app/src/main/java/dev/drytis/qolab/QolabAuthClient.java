@@ -1,5 +1,6 @@
 package dev.drytis.qolab;
 
+import android.os.SystemClock;
 import android.text.TextUtils;
 
 import org.json.JSONObject;
@@ -72,10 +73,15 @@ public final class QolabAuthClient {
         public final String ioError;
         /** All cookies received during the flow (csrf + authenticated session). */
         public final List<Cookie> cookies;
+        /** GET /sanctum/csrf-cookie duration in ms (-1 if not reached). */
+        public final long csrfDurationMs;
+        /** POST /login duration in ms (-1 if not reached). */
+        public final long loginDurationMs;
 
         LoginResult(boolean success, String errorMessage, int status, String stage,
                     int csrfStatus, boolean xsrfCookiePresent, boolean sessionCookiePresent,
-                    String redirectLocation, String ioError, List<Cookie> cookies) {
+                    String redirectLocation, String ioError, List<Cookie> cookies,
+                    long csrfDurationMs, long loginDurationMs) {
             this.success = success;
             this.errorMessage = errorMessage;
             this.status = status;
@@ -86,6 +92,8 @@ public final class QolabAuthClient {
             this.redirectLocation = redirectLocation;
             this.ioError = ioError;
             this.cookies = cookies;
+            this.csrfDurationMs = csrfDurationMs;
+            this.loginDurationMs = loginDurationMs;
             List<String> names = new ArrayList<>();
             for (Cookie c : cookies) names.add(c.name);
             this.cookieNames = names;
@@ -135,16 +143,19 @@ public final class QolabAuthClient {
     private LoginResult loginOnce(String email, String password, boolean remember) {
         int csrfStatus = 0;
         String ioError = null;
+        long csrfStart = -1, csrfMs = -1, loginMs = -1;
         try {
             // 1. CSRF handshake
+            csrfStart = SystemClock.elapsedRealtime();
             csrfStatus = httpGet(baseUrl + "/sanctum/csrf-cookie");
+            csrfMs = SystemClock.elapsedRealtime() - csrfStart;
             String xsrf = cookieJar.get("XSRF-TOKEN");
             boolean xsrfOk = xsrf != null;
             if (csrfStatus / 100 != 2 || !xsrfOk) {
                 // No usable handshake — fail with full diagnostics.
                 return new LoginResult(false, null, csrfStatus, "csrf",
                         csrfStatus, xsrfOk, hasSessionCookie(),
-                        null, null, snapshotCookies());
+                        null, null, snapshotCookies(), csrfMs, loginMs);
             }
 
             // 2. POST /login (Accept: application/json → 422 JSON on error)
@@ -154,21 +165,66 @@ public final class QolabAuthClient {
             form.put("remember", remember ? "on" : "");
 
             String[] redirectOut = new String[1];
+            long loginStart = SystemClock.elapsedRealtime();
             int status = httpPostForm(baseUrl + "/login", form, xsrf, redirectOut);
+            loginMs = SystemClock.elapsedRealtime() - loginStart;
             boolean session = hasSessionCookie();
             if (status == 422) {
                 return new LoginResult(false, null, status, "login",
                         csrfStatus, true, session,
-                        redirectOut[0], null, snapshotCookies());
+                        redirectOut[0], null, snapshotCookies(), csrfMs, loginMs);
             }
             boolean ok = status / 100 == 2 || status / 100 == 3;
             return new LoginResult(ok, null, status, ok ? "" : "login",
                     csrfStatus, true, session,
-                    redirectOut[0], null, snapshotCookies());
+                    redirectOut[0], null, snapshotCookies(), csrfMs, loginMs);
         } catch (Exception e) {
+            if (csrfMs < 0 && csrfStart >= 0) {
+                // The exception happened DURING the csrf request.
+                csrfMs = SystemClock.elapsedRealtime() - csrfStart;
+            } else if (loginMs < 0 && csrfMs >= 0) {
+                // The exception happened DURING the login POST.
+                loginMs = -2; // marker: login stage timed out / failed
+            }
             return new LoginResult(false, null, 0, "io",
                     csrfStatus, cookieJar.containsKey("XSRF-TOKEN"), hasSessionCookie(),
-                    null, e.getClass().getSimpleName(), new ArrayList<>(0));
+                    null, e.getClass().getSimpleName(), new ArrayList<>(0), csrfMs, loginMs);
+        }
+    }
+
+    /**
+     * DEVELOPMENT-ONLY connectivity probe: harmless GET against the
+     * Development origin's CSRF endpoint. No auth, no data written, no
+     * cookie mutation (jar untouched — a fresh client should be used).
+     * Safe output: status, duration ms, exception class only.
+     */
+    public static final class ProbeResult {
+        public final boolean reachable;
+        public final int status;
+        public final long durationMs;
+        public final String ioError;
+
+        ProbeResult(boolean reachable, int status, long durationMs, String ioError) {
+            this.reachable = reachable;
+            this.status = status;
+            this.durationMs = durationMs;
+            this.ioError = ioError;
+        }
+    }
+
+    public ProbeResult probeConnectivity() {
+        long start = SystemClock.elapsedRealtime();
+        try {
+            HttpURLConnection c = open(baseUrl + "/sanctum/csrf-cookie");
+            c.setRequestMethod("GET");
+            c.setRequestProperty("Accept", "application/json");
+            drain(c);
+            int code = c.getResponseCode();
+            return new ProbeResult(code / 100 == 2 || code / 100 == 3 || code / 100 == 4,
+                    code, SystemClock.elapsedRealtime() - start, null);
+        } catch (Exception e) {
+            return new ProbeResult(false, 0, SystemClock.elapsedRealtime() - start,
+                    e.getClass().getSimpleName());
         }
     }
 

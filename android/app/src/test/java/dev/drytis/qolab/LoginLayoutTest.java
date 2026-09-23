@@ -171,6 +171,18 @@ public class LoginLayoutTest {
                 emailTop <= 360);
     }
 
+    /** v1.4.4 regression: the DEVELOPMENT diagnostics panel must be hidden
+     *  before any failure — it may only appear after a failed sign-in, and
+     *  never in release builds (runtime-gated on BuildConfig.DEBUG). */
+    @Test
+    public void diagnosticsPanel_hiddenBeforeFailure() {
+        android.app.Activity activity = Robolectric.setupActivity(LoginActivity.class);
+        android.view.View diag = activity.findViewById(R.id.login_diag);
+        assertNotNull("diagnostics panel missing from layout", diag);
+        assertTrue("diagnostics panel visible without a failure",
+                diag.getVisibility() != android.view.View.VISIBLE);
+    }
+
     @Test
     public void contentHeight_isCompact() {
         // Guards against regressing into the tall v1.4 page: the natural

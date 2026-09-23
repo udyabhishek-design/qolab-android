@@ -32,4 +32,7 @@
     <string name="login_icon_mail">Email icon</string>
     <string name="login_icon_lock">Password icon</string>
     <string name="login_cd_decorative_block">Decorative design element</string>
+    <!-- v1.4.4 DEVELOPMENT-ONLY diagnostics (temporary tooling) -->
+    <string name="login_diag_title">Development diagnostics</string>
+    <string name="login_diag_test_connection">Test connection</string>
 </resources>

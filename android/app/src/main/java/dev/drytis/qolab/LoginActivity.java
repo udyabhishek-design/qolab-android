@@ -13,6 +13,7 @@ import android.view.inputmethod.InputMethodManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.ImageButton;
+import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -99,6 +100,7 @@ public class LoginActivity extends AppCompatActivity {
         setupPasswordToggle();
         setupForgotPassword();
         setupSignIn();
+        bindDiagnosticsViews();
     }
 
     private String readAppOrigin() {
@@ -240,6 +242,8 @@ public class LoginActivity extends AppCompatActivity {
                     + " sessionCookie=" + result.sessionCookiePresent
                     + " redirect=" + result.redirectLocation
                     + (result.ioError == null ? "" : " ioError=" + result.ioError)
+                    + " csrfMs=" + result.csrfDurationMs
+                    + " loginMs=" + result.loginDurationMs
                     + " cookieNames=" + result.cookieNames);
 
             if (result.success) {
@@ -253,6 +257,7 @@ public class LoginActivity extends AppCompatActivity {
                 if (bridged) {
                     runOnUiThread(this::onLoginSuccess);
                 } else {
+                    lastFailure = new DiagSnapshot(result, "cookie-bridge", "verification failed", 0);
                     runOnUiThread(() -> onLoginFailure(null));
                 }
                 return;
@@ -265,7 +270,142 @@ public class LoginActivity extends AppCompatActivity {
                 message = null;
             }
             final String msg = message;
+            lastFailure = new DiagSnapshot(result, result.stage, result.ioError, 0);
             runOnUiThread(() -> onLoginFailure(msg));
+        });
+    }
+
+    // ── DEVELOPMENT-ONLY diagnostics (v1.4.4, temporary) ───────────
+    // Safe fields ONLY: origin host, stage, statuses, durations, exception
+    // class name, yes/no flags. Never email/password/token/cookie VALUES.
+
+    /** Snapshot of the last failed attempt (null until one happened). */
+    private static final class DiagSnapshot {
+        final String originHost;
+        final String stage;
+        final int csrfStatus;
+        final int loginStatus;
+        final String failureType;
+        final long csrfMs;
+        final long loginMs;
+        final boolean xsrfCookie;
+        final boolean sessionCookie;
+        final boolean cookieBridgeOk;
+        final boolean mainActivityLaunched;
+
+        DiagSnapshot(QolabAuthClient.LoginResult r, String stage, String failureType,
+                     long probeUnused) {
+            this.originHost = safeHostOf(r);
+            this.stage = stage == null ? "?" : stage;
+            this.csrfStatus = r.csrfStatus;
+            this.loginStatus = r.status;
+            this.failureType = failureType == null
+                    ? (r.status == 422 ? "credentials rejected (422)"
+                       : r.status > 0 ? "HTTP error " + r.status : "unknown")
+                    : failureType;
+            this.csrfMs = r.csrfDurationMs;
+            this.loginMs = r.loginDurationMs;
+            this.xsrfCookie = r.xsrfCookiePresent;
+            this.sessionCookie = r.sessionCookiePresent;
+            this.cookieBridgeOk = false;
+            this.mainActivityLaunched = false;
+        }
+
+        private static String safeHostOf(QolabAuthClient.LoginResult r) {
+            // Cookie NAMES are safe; derive host from the first cookie name
+            // context is unnecessary — the origin host is fixed per build.
+            return null; // filled by the activity (has BuildConfig origin)
+        }
+    }
+
+    private DiagSnapshot lastFailure = null;
+    private boolean diagExpanded = false;
+    private LinearLayout diagPanel = null;
+    private TextView diagBody = null;
+    private TextView diagToggle = null;
+    private TextView diagProbe = null;
+
+    private void bindDiagnosticsViews() {
+        diagPanel = findViewById(R.id.login_diag);
+        diagBody = findViewById(R.id.login_diag_body);
+        diagToggle = findViewById(R.id.login_diag_toggle);
+        diagProbe = findViewById(R.id.login_diag_probe);
+        if (diagPanel == null) return;
+        if (!BuildConfig.DEBUG) {
+            // Release safety: the panel can never render in a release build.
+            diagPanel.setVisibility(View.GONE);
+            return;
+        }
+        diagToggle.setOnClickListener(v -> {
+            diagExpanded = !diagExpanded;
+            diagBody.setVisibility(diagExpanded ? View.VISIBLE : View.GONE);
+            diagProbe.setVisibility(diagExpanded ? View.VISIBLE : View.GONE);
+            if (diagExpanded) renderDiagnostics();
+        });
+        diagProbe.setOnClickListener(v -> runConnectivityProbe());
+    }
+
+    /** Refresh the panel contents from the latest snapshot (safe fields). */
+    private void renderDiagnostics() {
+        if (diagBody == null || !BuildConfig.DEBUG) return;
+        StringBuilder sb = new StringBuilder();
+        sb.append("Origin: ").append(appHost == null ? appOrigin : appHost).append('\n');
+        if (lastFailure == null) {
+            sb.append("No failed attempt recorded yet.");
+        } else {
+            sb.append("Stage: ").append(lastFailure.stage).append('\n');
+            sb.append("CSRF HTTP: ").append(fmtMs(lastFailure.csrfMs, lastFailure.csrfStatus)).append('\n');
+            sb.append("Login HTTP: ").append(fmtMs(lastFailure.loginMs, lastFailure.loginStatus)).append('\n');
+            sb.append("Failure type: ").append(lastFailure.failureType).append('\n');
+            sb.append("Network available: ").append(networkAvailable()).append('\n');
+            sb.append("Session cookie received: ")
+                    .append(lastFailure.csrfStatus == 0 && lastFailure.loginStatus == 0
+                            ? "Not reached" : lastFailure.sessionCookie ? "Yes" : "No").append('\n');
+            sb.append("Cookie bridge: ").append(lastFailure.cookieBridgeOk ? "Yes" : "No").append('\n');
+            sb.append("MainActivity launched: ").append(lastFailure.mainActivityLaunched ? "Yes" : "No");
+        }
+        diagBody.setText(sb.toString());
+    }
+
+    /** "204 (312 ms)" / "timeout (15003 ms)" / "not reached". */
+    private static String fmtMs(long ms, int status) {
+        if (ms < 0) return "not reached";
+        if (ms == -2) return "timeout/failed (see Failure type)";
+        if (status == 0) return "failed (" + ms + " ms)";
+        return status + " (" + ms + " ms)";
+    }
+
+    private String networkAvailable() {
+        try {
+            android.net.ConnectivityManager cm =
+                    (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            android.net.NetworkInfo n = cm.getActiveNetworkInfo();
+            return n != null && n.isConnected() ? "Yes" : "No";
+        } catch (Exception e) {
+            return "?";
+        }
+    }
+
+    /** Harmless GET to the Development origin — no auth, no writes. */
+    private void runConnectivityProbe() {
+        if (diagBody == null) return;
+        diagProbe.setEnabled(false);
+        networkExecutor.execute(() -> {
+            QolabAuthClient probe = new QolabAuthClient(appOrigin);
+            QolabAuthClient.ProbeResult r = probe.probeConnectivity();
+            android.util.Log.i(TAG, "probe reachable=" + r.reachable
+                    + " status=" + r.status + " ms=" + r.durationMs
+                    + (r.ioError == null ? "" : " ioError=" + r.ioError));
+            runOnUiThread(() -> {
+                diagProbe.setEnabled(true);
+                StringBuilder sb = new StringBuilder();
+                sb.append("Development server: ").append(r.reachable ? "Reachable" : "Unreachable").append('\n');
+                sb.append("HTTP: ").append(r.status > 0 ? String.valueOf(r.status) : "no response").append('\n');
+                sb.append("Duration: ").append(r.durationMs).append(" ms");
+                if (r.ioError != null) sb.append('\n').append("Probe error: ").append(r.ioError);
+                // Show probe result appended under the main diagnostics body
+                diagBody.append("\n\n[Connection test]\n" + sb);
+            });
         });
     }
 
@@ -326,6 +466,12 @@ public class LoginActivity extends AppCompatActivity {
             showFieldError(formError, serverMessage);
         } else {
             showFieldError(formError, getString(R.string.login_error_generic));
+        }
+        // DEVELOPMENT-ONLY: surface the safe diagnostics panel after failure.
+        // (In release builds bindDiagnosticsViews() has already removed it.)
+        if (BuildConfig.DEBUG && diagPanel != null && lastFailure != null) {
+            diagPanel.setVisibility(View.VISIBLE);
+            if (diagExpanded) renderDiagnostics();
         }
         // Bring the error into view on small screens
         scroll.post(() -> formError.requestRectangleOnScreen(
