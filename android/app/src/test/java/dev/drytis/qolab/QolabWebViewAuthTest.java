@@ -107,6 +107,41 @@ public class QolabWebViewAuthTest {
         assertTrue(r.success);
     }
 
+    // ── v1.4.6.1: watchdog + fallback contract ───────────────────────
+
+    @Test
+    public void parse_timeout_isCallableFailure() {
+        // The watchdog delivers stage "timeout" — LoginActivity must treat
+        // it as bridge-unusable (Java fallback), NOT a user-facing error.
+        QolabWebViewAuth.Result r = parse("{\"stage\":\"timeout\"}");
+        assertNotNull(r);
+        assertFalse(r.success);
+        assertEquals("timeout", r.stage);
+    }
+
+    @Test
+    public void parse_bridgeError_isCallableFailure() {
+        QolabWebViewAuth.Result r = parse("{\"stage\":\"bridge\",\"err\":\"JsError\"}");
+        assertNotNull(r);
+        assertFalse(r.success);
+        assertEquals("bridge", r.stage);
+        assertEquals("JsError", r.ioError);
+    }
+
+    @Test
+    public void xsrfHeaderValue_decodedFromCookieHeader() {
+        // The header value must come out DECODED (Laravel contract: raw → 419).
+        String jar = "qolab-session=abc; XSRF-TOKEN=eyJ0eXAiOiJKV1QiIn0%3D; other=x";
+        String header = QolabWebViewAuth.xsrfHeaderValue(jar);
+        assertEquals("eyJ0eXAiOiJKV1QiIn0=", header); // %3D decoded to '='
+    }
+
+    @Test
+    public void xsrfHeaderValue_absentCookie() {
+        assertNull(QolabWebViewAuth.xsrfHeaderValue("qolab-session=abc"));
+        assertNull(QolabWebViewAuth.xsrfHeaderValue(null));
+    }
+
     // ── security shape ───────────────────────────────────────────────
 
     @Test

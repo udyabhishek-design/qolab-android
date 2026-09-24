@@ -2,7 +2,8 @@ package dev.drytis.qolab;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.os.Build;
+import android.os.Handler;
+import android.os.Looper;
 import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
@@ -13,7 +14,7 @@ import android.webkit.WebViewClient;
 import org.json.JSONObject;
 
 /**
- * WebView-backed authentication bridge (v1.4.6).
+ * WebView-backed authentication bridge (v1.4.6.1 — hardened).
  *
  * Authenticates the user through the EXISTING Laravel/Fortify browser
  * flow, executed inside a hidden WebView whose document origin is the
@@ -21,20 +22,20 @@ import org.json.JSONObject;
  * in the SAME global CookieManager that Capacitor/MainActivity use —
  * no Java-side cookie reconstruction, no manual CSRF jar.
  *
- * Security notes:
- *  - The WebView loads a minimal EMPTY document with the app origin as
- *    base URL — no remote page scripts run, so no third-party JS can
- *    observe the fetch or the bridge.
- *  - Credentials reach the fetch ONLY through a @JavascriptInterface
- *    bridge method call; they never appear in any evaluateJavascript
- *    source string, log, or persisted storage.
- *  - The bridge object is removed as soon as the flow completes and the
- *    WebView is destroyed.
- *  - CSRF, TLS and the Fortify contract are fully intact — this is a
- *    browser login, nothing weakened.
+ * v1.4.6.1 fixes (device: infinite spinner, no callback):
+ *  - 45s watchdog guarantees a callback — the spinner can never hang.
+ *  - JS-side AbortController (30s) cancels stalled fetches.
+ *  - XSRF header value is produced in JAVA (from CookieManager) instead
+ *    of document.cookie — loadDataWithBaseURL documents don't reliably
+ *    expose cookies to JS on all WebView builds.
+ *  - 419 fallback: retry once with the raw (undecoded) representation.
+ *  - Progress stages reported through the bridge for diagnostics.
+ *  - JS console piped to QolabAuth logs (debug builds).
  *
- * Not unit-testable end-to-end (needs a real WebView + network); the
- * result parsing and URL classification have dedicated unit tests.
+ * Security: the WebView loads an EMPTY document with the app origin as
+ * base URL (no remote scripts). Credentials reach the fetch ONLY via
+ * @JavascriptInterface; the interface is removed and the WebView
+ * destroyed after the flow. CSRF/TLS/Fortify fully intact.
  */
 public final class QolabWebViewAuth {
 
@@ -43,23 +44,17 @@ public final class QolabWebViewAuth {
         void onAuthResult(Result r);
     }
 
-    /**
-     * Safe result — statuses, durations, final URL and (for 422 only)
-     * the server's error body for friendly-message parsing. Never any
-     * credential, cookie, or token value.
-     */
+    /** Safe result — statuses, timings, final URL, 422 body. Never values. */
     public static final class Result {
         public final boolean success;
-        /** "csrf-io" | "csrf-cookie" | "login-io" | "done" */
+        /** "csrf" | "login" | "fetch-io" | "timeout" | "bridge" | "done" */
         public final String stage;
         public final int csrfStatus;
         public final int loginStatus;
         public final long csrfMs;
         public final long loginMs;
         public final String finalUrl;
-        /** Raw 422 body (Laravel JSON), or null. Used for the friendly message. */
         public final String errorBody;
-        /** Exception-ish name reported by the fetch layer, or null. */
         public final String ioError;
 
         Result(boolean success, String stage, int csrfStatus, int loginStatus,
@@ -84,7 +79,7 @@ public final class QolabWebViewAuth {
         try {
             JSONObject o = new JSONObject(stripJsonWrapper(json));
             String stage = o.optString("stage", "done");
-            String io = o.has("err") ? o.optString("err") : null;
+            String io = o.has("err") && !o.isNull("err") ? o.optString("err") : null;
             int csrf = o.optInt("csrfStatus", 0);
             int status = o.optInt("status", 0);
             long csrfMs = o.optLong("csrfMs", -1);
@@ -103,7 +98,6 @@ public final class QolabWebViewAuth {
         if (s == null) return null;
         s = s.trim();
         if (s.length() >= 2 && s.charAt(0) == '"' && s.charAt(s.length() - 1) == '"') {
-            // unescape minimal JSON string escapes
             s = s.substring(1, s.length() - 1)
                     .replace("\\\"", "\"")
                     .replace("\\\\", "\\")
@@ -112,9 +106,27 @@ public final class QolabWebViewAuth {
         return s;
     }
 
+    /**
+     * Extract the XSRF-TOKEN value from a CookieManager cookie header and
+     * return the DECODED representation Laravel expects in X-XSRF-TOKEN
+     * (verified A/B: decoded → accepted, raw → 419). Null if absent.
+     */
+    public static String xsrfHeaderValue(String cookieHeader) {
+        if (cookieHeader == null) return null;
+        for (String part : cookieHeader.split(";")) {
+            String p = part.trim();
+            if (p.startsWith("XSRF-TOKEN=")) {
+                return QolabAuthClient.urlDecode(p.substring("XSRF-TOKEN=".length()));
+            }
+        }
+        return null;
+    }
+
     /** The empty document — zero scripts, origin comes from base URL. */
     private static final String BLANK_DOC =
             "<!DOCTYPE html><html><head><meta charset='utf-8'></head><body></body></html>";
+
+    private static final long WATCHDOG_MS = 45_000;
 
     // ── runtime ─────────────────────────────────────────────────────
 
@@ -123,8 +135,11 @@ public final class QolabWebViewAuth {
     private final String email;
     private final String password;
     private final Listener listener;
+    private final Handler main = new Handler(Looper.getMainLooper());
     private WebView webView;
-    private boolean finished = false;
+    private volatile boolean finished = false;
+    private volatile String lastStage = "start";
+    private String rawXsrf = null;
 
     public QolabWebViewAuth(Context context, String origin, String email,
                             String password, Listener listener) {
@@ -140,56 +155,98 @@ public final class QolabWebViewAuth {
         return s;
     }
 
+    private final Runnable watchdog = () -> {
+        if (!finished) {
+            android.util.Log.w("QolabAuth", "webview-auth watchdog fired, lastStage=" + lastStage);
+            deliver(new Result(false, "timeout", 0, 0, -1, -1, null, null, "WatchdogTimeout"));
+        }
+    };
+
     @SuppressLint("SetJavaScriptEnabled")
     public void start() {
-        webView = new WebView(context);
-        webView.setVisibility(android.view.View.GONE);
-        WebSettings s = webView.getSettings();
-        s.setJavaScriptEnabled(true);
-        s.setSavePassword(false);
-        s.setAllowFileAccess(false);
-        s.setAllowContentAccess(false);
-        CookieManager.getInstance().setAcceptCookie(true);
+        main.post(() -> {
+            if (finished) return;
+            webView = new WebView(context);
+            webView.setVisibility(android.view.View.GONE);
+            WebSettings s = webView.getSettings();
+            s.setJavaScriptEnabled(true);
+            s.setSavePassword(false);
+            s.setAllowFileAccess(false);
+            s.setAllowContentAccess(false);
+            CookieManager.getInstance().setAcceptCookie(true);
 
-        webView.addJavascriptInterface(new Bridge(), "QolabBridge");
-        webView.setWebViewClient(new WebViewClient() {
-            @Override
-            public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-                return true; // never navigate anywhere — this is a headless tool
-            }
+            webView.setWebChromeClient(new android.webkit.WebChromeClient() {
+                @Override
+                public boolean onConsoleMessage(android.webkit.ConsoleMessage cm) {
+                    android.util.Log.i("QolabAuth", "js-console: " + cm.message());
+                    return true;
+                }
+            });
 
-            @Override
-            public void onPageFinished(WebView view, String url) {
-                view.evaluateJavascript(AUTH_JS, null);
-            }
+            webView.addJavascriptInterface(new Bridge(), "QolabBridge");
+            webView.setWebViewClient(new WebViewClient() {
+                @Override
+                public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                    return true; // never navigate anywhere — headless tool
+                }
+
+                private int injected = 0;
+
+                @Override
+                public void onPageFinished(WebView view, String url) {
+                    // Inject once (page-finished can fire multiple times).
+                    if (injected++ == 0) {
+                        android.util.Log.i("QolabAuth", "auth doc loaded, injecting bridge js");
+                        view.evaluateJavascript(AUTH_JS, null);
+                        // Re-inject guard: if the first injection silently
+                        // failed (JS not ready), a second attempt shortly
+                        // after still helps and is harmless (idempotent —
+                        // the bridge ignores repeats once finished).
+                        view.postDelayed(() -> {
+                            if (!finished) view.evaluateJavascript(AUTH_JS, null);
+                        }, 1500);
+                    }
+                }
+            });
+            main.postDelayed(watchdog, WATCHDOG_MS);
+            // Empty document with the app origin as base → same-origin
+            // fetch privileges, no remote scripts in the document.
+            webView.loadDataWithBaseURL(origin + "/", BLANK_DOC, "text/html", "utf-8", null);
         });
-        // Empty document with the app origin as base → same-origin fetch
-        // privileges, no remote scripts in the document.
-        webView.loadDataWithBaseURL(origin + "/", BLANK_DOC, "text/html", "utf-8", null);
     }
 
     public void destroy() {
-        if (webView != null) {
-            try {
-                webView.removeJavascriptInterface("QolabBridge");
-                webView.stopLoading();
-                webView.destroy();
-            } catch (Exception ignored) {
+        main.post(() -> {
+            if (webView != null) {
+                try {
+                    webView.removeJavascriptInterface("QolabBridge");
+                    webView.stopLoading();
+                    webView.destroy();
+                } catch (Exception ignored) {
+                }
+                webView = null;
             }
-            webView = null;
-        }
+        });
     }
 
     private void deliver(final Result r) {
         if (finished) return;
         finished = true;
+        main.removeCallbacks(watchdog);
         final WebView wv = webView;
-        if (wv != null) {
-            wv.post(() -> {
-                destroy();
-                listener.onAuthResult(r);
-            });
-        }
+        Runnable fire = () -> {
+            if (wv != null) {
+                try {
+                    wv.removeJavascriptInterface("QolabBridge");
+                    wv.stopLoading();
+                    wv.destroy();
+                } catch (Exception ignored) {
+                }
+            }
+            if (webView == wv) webView = null;
+            listener.onAuthResult(r);
+        };
+        if (wv != null) wv.post(fire); else main.post(fire);
     }
 
     /** JS→Java bridge. Credentials leave ONLY through getEmail/getPassword. */
@@ -204,6 +261,42 @@ public final class QolabWebViewAuth {
             return password;
         }
 
+        /** Decoded XSRF header value, read from the shared CookieManager. */
+        @JavascriptInterface
+        public String getXsrfToken() {
+            try {
+                String header = CookieManager.getInstance().getCookie(origin);
+                String raw = null;
+                if (header != null) {
+                    for (String part : header.split(";")) {
+                        String p = part.trim();
+                        if (p.startsWith("XSRF-TOKEN=")) {
+                            raw = p.substring("XSRF-TOKEN=".length());
+                            break;
+                        }
+                    }
+                }
+                if (raw == null) return "";
+                rawXsrf = raw;
+                return QolabAuthClient.urlDecode(raw);
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
+        /** Raw (undecoded) representation — 419 fallback. */
+        @JavascriptInterface
+        public String getXsrfTokenRaw() {
+            return rawXsrf == null ? "" : rawXsrf;
+        }
+
+        /** Progress beacon for diagnostics (stage names only). */
+        @JavascriptInterface
+        public void onStage(String stage) {
+            lastStage = stage == null ? "?" : stage;
+            android.util.Log.i("QolabAuth", "webview-auth stage: " + lastStage);
+        }
+
         @JavascriptInterface
         public void onDone(String json) {
             Result r = parseBridgeJson(json);
@@ -215,29 +308,33 @@ public final class QolabWebViewAuth {
     }
 
     /**
-     * Replicates the working web login exactly: csrf-cookie GET →
-     * X-XSRF-TOKEN from document.cookie (decoded) → POST /login with the
-     * platform attaching cookies natively. Same request Inertia makes.
+     * Browser-equivalent login: csrf-cookie GET → X-XSRF-TOKEN (decoded,
+     * supplied from Java's CookieManager) → POST /login with the platform
+     * attaching cookies natively. 419 → single retry with the raw value.
+     * AbortController + the Java watchdog guarantee termination.
      */
     private static final String AUTH_JS =
-            "(function(){var b=window.QolabBridge;if(!b){b&&b.onDone('{\"stage\":\"bridge\"}');return;}" +
-            "var t0=performance.now();" +
-            "fetch('/sanctum/csrf-cookie',{credentials:'same-origin'})" +
+            "(function(){try{var b=window.QolabBridge;if(!b){return;}" +
+            "var ctl=new AbortController();setTimeout(function(){try{ctl.abort();}catch(e){}},30000);" +
+            "function done(o){try{b.onDone(JSON.stringify(o));}catch(e){}}" +
+            "var t0=performance.now();b.onStage('csrf');" +
+            "fetch('/sanctum/csrf-cookie',{credentials:'same-origin',signal:ctl.signal})" +
             ".then(function(r1){" +
             " var csrfStatus=r1.status,csrfMs=Math.round(performance.now()-t0);" +
-            " var m=document.cookie.match(/(?:^|;\\\\s*)XSRF-TOKEN=([^;]+)/);" +
-            " if(!m){b.onDone(JSON.stringify({stage:'csrf-cookie',csrfStatus:csrfStatus,csrfMs:csrfMs}));return;}" +
-            " var token=decodeURIComponent(m[1]);var t1=performance.now();" +
-            " return fetch('/login',{method:'POST',credentials:'same-origin'," +
+            " b.onStage('login');var t1=performance.now();var tok=b.getXsrfToken();" +
+            " function post(token){return fetch('/login',{method:'POST',credentials:'same-origin',signal:ctl.signal," +
             "  headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded','X-XSRF-TOKEN':token}," +
-            "  body:'email='+encodeURIComponent(b.getEmail())+'&password='+encodeURIComponent(b.getPassword())+'&remember='})" +
-            " .then(function(r2){" +
-            "  var loginMs=Math.round(performance.now()-t1);" +
-            "  var p=r2.status===422?r2.text():Promise.resolve('');" +
-            "  return p.then(function(body){" +
-            "   b.onDone(JSON.stringify({stage:'done',csrfStatus:csrfStatus,csrfMs:csrfMs,status:r2.status,loginMs:loginMs,finalUrl:r2.url||'',body422:body}));});" +
+            "  body:'email='+encodeURIComponent(b.getEmail())+'&password='+encodeURIComponent(b.getPassword())+'&remember='});}" +
+            " return post(tok).then(function(r2){" +
+            "  var attempt=function(r){if(r.status===419){b.onStage('login-retry-raw');return post(b.getXsrfTokenRaw());}return Promise.resolve(r);};" +
+            "  return attempt(r2).then(function(r3){" +
+            "   var loginMs=Math.round(performance.now()-t1);" +
+            "   var p=(r3.status===422)?r3.text():Promise.resolve('');" +
+            "   return p.then(function(body){b.onStage('done');" +
+            "    done({stage:'done',status:r3.status,csrfStatus:csrfStatus,csrfMs:csrfMs,loginMs:loginMs,finalUrl:(r3.url||''),body422:body});});" +
+            "  });" +
             " });" +
             "})" +
-            ".catch(function(e){b.onDone(JSON.stringify({stage:'login-io',err:e&&e.name?e.name:'FetchError'}));});" +
-            "})()";
+            ".catch(function(e){done({stage:'fetch-io',err:((e&&e.name)||'FetchError')});});" +
+            "}catch(ex){try{window.QolabBridge.onDone(JSON.stringify({stage:'bridge',err:'JsError'}));}catch(e2){}}})()";
 }

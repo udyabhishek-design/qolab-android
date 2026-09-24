@@ -251,10 +251,9 @@ public class LoginActivity extends AppCompatActivity {
         final String email = emailInput.getText().toString().trim();
         final String password = passwordInput.getText().toString();
 
-        // v1.4.6: authenticate through the WebView session context using the
-        // proven Laravel/Fortify browser flow — cookies land directly in the
-        // CookieManager Capacitor/MainActivity share. No Java cookie jar,
-        // no manual CSRF reconstruction.
+        // v1.4.6.1: primary path = WebView session context (proven browser
+        // flow). Watchdog/bridge failures fall back to the Java client so
+        // the user ALWAYS gets a resolution, never a dead spinner.
         QolabWebViewAuth auth = new QolabWebViewAuth(this, appOrigin, email, password,
                 r -> runOnUiThread(() -> {
                     android.util.Log.i(TAG, "webview-auth success=" + r.success
@@ -262,9 +261,9 @@ public class LoginActivity extends AppCompatActivity {
                             + " csrfStatus=" + r.csrfStatus
                             + " loginStatus=" + r.loginStatus
                             + " csrfMs=" + r.csrfMs + " loginMs=" + r.loginMs
-                            + " finalUrl=" + r.finalUrl
                             + (r.ioError == null ? "" : " ioError=" + r.ioError));
 
+                    boolean bridgeBroke = "timeout".equals(r.stage) || "bridge".equals(r.stage);
                     if (r.success) {
                         // The authenticated session now lives in the SHARED
                         // CookieManager — same context MainActivity/WebView use.
@@ -272,12 +271,14 @@ public class LoginActivity extends AppCompatActivity {
                         android.util.Log.i(TAG, "cookieManagerHasSession=" + bridged);
                         if (bridged) {
                             onLoginSuccess();
-                        } else {
-                            lastFailure = snapshotOf(r, "cookie-bridge", "verification failed");
-                            lastXsrfAppearedEncoded = null;
-                            lastXsrfHeaderDecoded = null;
-                            onLoginFailure(null);
+                            return;
                         }
+                        bridgeBroke = true; // fetch said OK but no session — bridge is untrustworthy
+                    }
+                    if (bridgeBroke) {
+                        android.util.Log.w(TAG, "webview-auth unusable (" + r.stage
+                                + ") → falling back to Java client");
+                        loginWithJavaClient(email, password);
                         return;
                     }
 
@@ -297,6 +298,57 @@ public class LoginActivity extends AppCompatActivity {
                     onLoginFailure(message);
                 }));
         auth.start();
+    }
+
+    /**
+     * Fallback: the proven v1.4.5 Java flow (HttpURLConnection + read-back
+     * cookie verification). Used only when the WebView bridge is unusable
+     * (timeout / silent failure). Keeps its own classification + diagnostics.
+     */
+    private void loginWithJavaClient(String email, String password) {
+        networkExecutor.execute(() -> {
+            QolabAuthClient client = new QolabAuthClient(appOrigin);
+            QolabAuthClient.LoginResult result = client.login(email, password, false);
+            android.util.Log.i(TAG, "java-fallback success=" + result.success
+                    + " stage=" + result.stage + " loginStatus=" + result.status
+                    + (result.ioError == null ? "" : " ioError=" + result.ioError));
+            if (result.success) {
+                boolean bridged = cookieManagerHasSession();
+                if (!bridged) {
+                    // Java flow succeeded on the wire but the shared store
+                    // never saw the session — surface as generic failure.
+                    runOnUiThread(() -> {
+                        lastFailure = new DiagSnapshot("cookie-bridge", result.csrfStatus,
+                                result.status, "verification failed",
+                                result.csrfDurationMs, result.loginDurationMs, true);
+                        onLoginFailure(null);
+                    });
+                    return;
+                }
+                runOnUiThread(this::onLoginSuccess);
+                return;
+            }
+            String message = null;
+            if (result.status == 422) {
+                message = QolabAuthClient.parseErrorMessage(client.lastBody());
+            } else if (result.status == 419) {
+                message = getString(R.string.login_error_csrf);
+            } else if (result.status / 100 == 5) {
+                message = getString(R.string.login_error_server);
+            }
+            final String msg = message;
+            runOnUiThread(() -> {
+                lastFailure = new DiagSnapshot(result.stage, result.csrfStatus, result.status,
+                        result.ioError != null ? result.ioError
+                                : result.status == 422 ? "credentials rejected (422)"
+                                : result.status == 419 ? "session/CSRF rejected (419)"
+                                : "HTTP error " + result.status,
+                        result.csrfDurationMs, result.loginDurationMs, result.xsrfCookiePresent);
+                lastXsrfAppearedEncoded = null;
+                lastXsrfHeaderDecoded = null;
+                onLoginFailure(msg);
+            });
+        });
     }
 
     /** Build a diagnostics snapshot from a WebView-bridge result (safe fields). */
