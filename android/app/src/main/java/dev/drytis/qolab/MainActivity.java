@@ -739,12 +739,16 @@ public class MainActivity extends BridgeActivity {
         // The fetch wrapper is kept as belt-and-braces for any fetch users.
         view.evaluateJavascript(AuthNavRules.buildXhrTakeoverJs(), null);
         view.evaluateJavascript(AuthNavRules.buildLogoutTakeoverJs(), null);
-        if (BuildConfig.DEBUG) {
-            view.evaluateJavascript(
-                "(function(){var ok=!!window.XMLHttpRequest&&!!window.QolabNative;"
-                + "window.QolabNative&&window.QolabNative.takeoverInstalled&&"
-                + "window.QolabNative.takeoverInstalled();})()", null);
-        }
+        // v1.4.12: verify BOTH takeover + bridge are actually live in the
+        // page's JS context, and re-assert the flag on every page finish
+        // (a page reload recreates the JS context — the old one-shot check
+        // after injection raced Inertia's init and reported No wrongly).
+        view.evaluateJavascript(
+            "(function(){try{var xhrOk=window.__qolabXhrTakeover===true;"
+            + "var bridgeOk=!!window.QolabNative;"
+            + "window.QolabNative.takeoverInstalled(xhrOk&&bridgeOk, xhrOk, bridgeOk);"
+            + "}catch(e){window.QolabNative.takeoverInstalled(false,false,false);}})()",
+            null);
     }
 
     /**
@@ -758,97 +762,135 @@ public class MainActivity extends BridgeActivity {
         view.addJavascriptInterface(new Object() {
             @android.webkit.JavascriptInterface
             public org.json.JSONObject logout() {
-                // Record + run the native logout. A plain JSON object is
-                // returned to JS as a string (not a Promise) — the patched
-                // XHR ignores it; the native side owns the transition.
-                return nativeLogout();
+                // v1.4.12: NEVER a native-HTTP logout (that split cookie
+                // contexts → 419s, physically proven). This entry point now
+                // only records the tap and runs the logout INSIDE this same
+                // authenticated WebView's browser context; the result comes
+                // back asynchronously via onLogoutResult().
+                onLogoutTapped();
+                return null;
             }
 
             @android.webkit.JavascriptInterface
-            public void takeoverInstalled() {
-                LogoutTrace.bridgeAvailable = true;
-                android.util.Log.i("QolabAuth", "logout takeover JS installed"
-                        + (LogoutTrace.bridgeAvailable ? " (bridge reachable)" : ""));
+            public void onLogoutResult(String json) {
+                // Async result from the WebView-context transaction.
+                try {
+                    org.json.JSONObject r = new org.json.JSONObject(json);
+                    onWebviewLogoutResult(r.optInt("status", 0), r.optInt("attempts", 0),
+                            r.optLong("ms", 0), r.optBoolean("xsrfPresent", false),
+                            r.optString("error", null));
+                } catch (Exception e) {
+                    onWebviewLogoutResult(0, 0, 0, false, "BadResultJson");
+                }
+            }
+
+            @android.webkit.JavascriptInterface
+            public void takeoverInstalled(boolean allOk, boolean xhrFlag, boolean bridgeOk) {
+                LogoutTrace.takeoverInstalled = allOk;
+                LogoutTrace.xhrTakeoverFlag = xhrFlag;
+                LogoutTrace.bridgeAvailable = bridgeOk;
+                android.util.Log.i("QolabAuth", "takeover state: xhr=" + xhrFlag
+                        + " bridge=" + bridgeOk);
             }
         }, "QolabNative");
     }
 
-    /**
-     * v1.4.11: full native logout with runtime trace. The patched XHR is
-     * never completed by JS — native Android owns the ENTIRE success
-     * transition (freeze → server-confirmed → cookie cleanup → native
-     * LoginActivity), so Inertia never gets a response to render /login
-     * from. Safe fields only — never values/tokens/credentials.
-     */
-    public org.json.JSONObject nativeLogout() {
+    /** Single-flight guard: only ONE logout transaction may run at a time. */
+    private volatile boolean logoutInFlight = false;
+
+    /** Records a Logout tap and kicks off the WebView-context transaction. */
+    private void onLogoutTapped() {
         final LogoutTrace.Attempt a = LogoutTrace.begin(lastLoadedUrl);
         a.uiLogoutTapped = true;
         a.bridgeInvoked = true;
-        android.util.Log.i("QolabAuth", "logout tap #" + a.tapIndex + " → native takeover");
-        final String origin = appOriginUrl();
-
-        final QolabAuthClient.LogoutResult[] out = new QolabAuthClient.LogoutResult[1];
-        Thread t = new Thread(() -> {
-            try {
-                a.nativeTransactionStarted = true;
-                a.csrfStarted = true;
-                QolabAuthClient client = new QolabAuthClient(origin);
-                client.setTimeouts(15_000, 30_000);
-                QolabAuthClient.LogoutResult r = client.logout();
-                out[0] = r;
-                a.csrfStatus = r.csrfStatus;
-                a.csrfMs = r.csrfDurationMs;
-                a.postStatus = r.status;
-                a.postMs = r.durationMs;
-                a.postStarted = true;
-                a.had419 = r.had419;
-                a.httpAttempts = r.attempts;
-                a.serverConfirmed = r.success;
-                a.ioError = r.ioError;
-            } catch (Exception e) {
-                out[0] = null;
-                a.ioError = e.getClass().getSimpleName();
-            }
-        }, "qolab-logout");
-        t.start();
-        try {
-            t.join(45_000);
-        } catch (InterruptedException ignored) {
-            Thread.currentThread().interrupt();
+        a.webviewSessionBefore = hasSessionCookie();
+        a.webviewXsrfBefore = hasXsrfCookie();
+        android.util.Log.i("QolabAuth", "logout tap #" + a.tapIndex
+                + " (context: webview browser)");
+        if (logoutInFlight) {
+            a.note = "ignored: transaction already in flight";
+            android.util.Log.w("QolabAuth", "logout tap while in flight — ignored");
+            return;
         }
-
-        QolabAuthClient.LogoutResult r = out[0];
-        boolean ok = r != null && r.success;
-        a.webviewUrlAfter = lastLoadedUrl;
-        android.util.Log.i("QolabAuth", "logout #" + a.tapIndex + ": success=" + ok
-                + " http=" + (r != null ? r.status : 0) + " attempts=" + (r != null ? r.attempts : 0)
-                + " 419seen=" + a.had419);
-        final boolean success = ok;
-        final QolabAuthClient.LogoutResult result = r;
+        logoutInFlight = true;
+        a.nativeTransactionStarted = true; // transaction = webview-context run
+        a.csrfStarted = true;
         mainHandler.post(() -> {
-            a.transitionRequested = success;
-            if (success) {
+            WebView wv = getBridge() != null ? getBridge().getWebView() : null;
+            if (wv == null) {
+                finishLogoutTransaction(a, 0, 0, "NoWebView");
+                return;
+            }
+            // Execute INSIDE the authenticated WebView — same cookie
+            // context that serves /dashboard. Result → onLogoutResult.
+            wv.evaluateJavascript(AuthNavRules.buildWebviewLogoutJs(), null);
+        });
+    }
+
+    private void onWebviewLogoutResult(int status, int attempts, long ms,
+                                       boolean xsrfPresent, String error) {
+        LogoutTrace.Attempt a = LogoutTrace.current;
+        if (a == null) {
+            a = LogoutTrace.begin(lastLoadedUrl);
+            a.uiLogoutTapped = true;
+            a.bridgeInvoked = true;
+        }
+        a.csrfStatus = 204; // handshake precedes POST inside the JS
+        a.csrfMs = -1;
+        a.postStarted = true;
+        a.postStatus = status;
+        a.postMs = ms;
+        a.httpAttempts = attempts;
+        a.had419 = status == 419;
+        a.ioError = error;
+        a.serverConfirmed = status / 100 == 2 || status / 100 == 3;
+        a.webviewSessionAfter = hasSessionCookie();
+        a.webviewXsrfAfter = hasXsrfCookie();
+        finishLogoutTransaction(a, status, attempts, error);
+    }
+
+    private void finishLogoutTransaction(LogoutTrace.Attempt a, int status,
+                                         int attempts, String error) {
+        logoutInFlight = false;
+        boolean ok = a.serverConfirmed;
+        a.webviewUrlAfter = lastLoadedUrl;
+        android.util.Log.i("QolabAuth", "logout #" + a.tapIndex + " result: http=" + status
+                + " attempts=" + attempts + " confirmed=" + ok);
+        mainHandler.post(() -> {
+            a.transitionRequested = ok;
+            if (ok) {
                 handleLoggedOut();
                 a.nativeLoginLaunched = true;
             } else {
-                android.util.Log.w("QolabAuth", "logout failed; "
-                        + (result != null && result.ioError != null
-                           ? result.ioError : "http " + (result != null ? result.status : 0)));
+                android.util.Log.w("QolabAuth", "logout failed: http " + status
+                        + (error != null ? " / " + error : ""));
                 Toast.makeText(MainActivity.this,
                         "Couldn't sign out. Please try again.",
                         Toast.LENGTH_LONG).show();
             }
         });
-        // Plain JSON ack — the patched XHR ignores it; JS does NOT drive
-        // any navigation from this (no Inertia render of /login).
-        try {
-            org.json.JSONObject resp = new org.json.JSONObject();
-            resp.put("status", 204);
-            return resp;
-        } catch (Exception e) {
-            return null;
-        }
     }
+
+    private boolean hasXsrfCookie() {
+        try {
+            String header = android.webkit.CookieManager.getInstance().getCookie(appOriginUrl());
+            if (header == null) return false;
+            for (String part : header.split(";")) {
+                if (part.trim().startsWith("XSRF-TOKEN=")) return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    /**
+     * v1.4.12: REMOVED the native-HTTP logout (nativeLogout()). Physical
+     * trace proved it split cookie contexts (CSRF GET via HttpURLConnection
+     * + hand-copied jar ≠ the authenticated WebView session) → 419 every
+     * time. The logout HTTP transaction now runs INSIDE the authenticated
+     * WebView (see registerLogoutBridge / buildWebviewLogoutJs); native
+     * Android still owns the post-success transition (handleLoggedOut).
+     */
 
     /** DEBUG-only persistent overlay button showing the live logout trace. */
     private void installAuthDebugOverlay() {

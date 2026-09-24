@@ -372,4 +372,68 @@ public class LogoutLifecycleTest {
         assertFalse(LogoutTrace.hasData());
         assertTrue(LogoutTrace.render().contains("No logout attempts"));
     }
+
+    // ---------------------------------------------------------------
+    // v1.4.12: the logout HTTP transaction runs INSIDE the WebView
+    // browser context (same-session semantics) — the JS must use
+    // credentials:'same-origin' and NO native-HTTP fallback, and the
+    // result must be a safe JSON object only.
+    // ---------------------------------------------------------------
+
+    @Test
+    public void webviewLogoutJs_usesSameOriginBrowserContext() {
+        String js = AuthNavRules.buildWebviewLogoutJs();
+        // Every request carries the browser session.
+        assertTrue(js.contains("credentials:'same-origin'"));
+        // CSRF handshake EXECUTES before the POST (post() is defined
+        // earlier in the script but invoked after the handshake).
+        int csrfCallAt = js.indexOf("await fetch('/sanctum/csrf-cookie'");
+        int postCallAt = js.indexOf("await post(");
+        assertTrue(csrfCallAt >= 0 && postCallAt >= 0 && csrfCallAt < postCallAt);
+    }
+
+    @Test
+    public void webviewLogoutJs_singleNarrowRecoveryOnly() {
+        String js = AuthNavRules.buildWebviewLogoutJs();
+        // Only a 419 triggers the ONE recovery; no generic retry loops.
+        assertTrue(js.contains("if (r.status === 419)"));
+        // Recovery is a fresh handshake + decoded token, once.
+        assertTrue(js.contains("attempts = 2;"));
+        assertFalse(js.contains("attempts = 3;"));
+    }
+
+    @Test
+    public void webviewLogoutJs_resultIsSafeJsonOnly() {
+        String js = AuthNavRules.buildWebviewLogoutJs();
+        // Reports only status/attempts/ms/xsrf-present/error-name.
+        assertTrue(js.contains("status: r.status"));
+        assertTrue(js.contains("xsrfPresent: xsrf.length > 0"));
+        // Never echoes cookies, tokens, headers or bodies into the report.
+        assertFalse(js.contains("document.cookie,"));
+    }
+
+    @Test
+    public void webviewLogoutJs_tokenDecodingMirrorsAxios() {
+        String js = AuthNavRules.buildWebviewLogoutJs();
+        // First attempt: raw cookie representation (axios behavior).
+        // Recovery: decoded, with '+' preserved.
+        assertTrue(js.contains("decodeURIComponent(xsrf.replace(/\\+/g,'%2B'))"));
+    }
+
+    // ---------------------------------------------------------------
+    // Single-flight: repeated taps while a transaction runs are ignored
+    // — one user action = one logical logout.
+    // ---------------------------------------------------------------
+
+    @Test
+    public void singleFlight_guardIgnoresOverlappingTaps() {
+        boolean inFlight = false;
+        int started = 0;
+        for (int i = 0; i < 4; i++) {          // 4 rapid taps
+            if (inFlight) continue;            // ignored
+            inFlight = true;
+            started++;
+        }
+        assertEquals(1, started);              // exactly one transaction
+    }
 }

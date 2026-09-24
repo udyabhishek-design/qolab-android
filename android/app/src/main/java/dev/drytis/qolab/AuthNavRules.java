@@ -134,6 +134,64 @@ public final class AuthNavRules {
                 && url.replaceAll("[?#].*$", "").endsWith("/logout");
     }
 
+    /**
+     * v1.4.12: the logout HTTP transaction executed INSIDE the
+     * authenticated WebView's browser context (same architecture as the
+     * physically-verified QolabWebViewAuth login). The page's cookie
+     * engine attaches the REAL session cookie natively — no manual cookie
+     * copying between contexts (which caused the 419s). Semantics:
+     *   1. GET /sanctum/csrf-cookie (credentials same-origin)
+     *   2. read XSRF-TOKEN from document.cookie
+     *   3. POST /logout with X-XSRF-TOKEN (raw cookie representation,
+     *      exactly what axios/Inertia does in a browser)
+     *   4. ONE narrow recovery on 419 only: fresh csrf handshake + decoded
+     *      token retry (Laravel rotates the token on 419)
+     * Result is reported to the bridge as safe JSON: status, attempts,
+     * duration ms, xsrf-present booleans — never values.
+     */
+    public static String buildWebviewLogoutJs() {
+        return "(async function(){"
+            + "  function readXsrf(){"
+            + "    var m = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]*)/);"
+            + "    return m ? m[1] : '';"
+            + "  }"
+            + "  function post(token){"
+            + "    return fetch('/logout', {"
+            + "      method:'POST', credentials:'same-origin',"
+            + "      headers:{'X-XSRF-TOKEN':token,'Accept':'application/json',"
+            + "               'X-Requested-With':'XMLHttpRequest',"
+            + "               'Content-Type':'application/x-www-form-urlencoded'},"
+            + "      body:''"
+            + "    });"
+            + "  }"
+            + "  try {"
+            + "    var t0 = Date.now();"
+            + "    await fetch('/sanctum/csrf-cookie',"
+            + "      {credentials:'same-origin', headers:{'Accept':'application/json'}});"
+            + "    var xsrf = readXsrf();"
+            + "    var attempts = 1;"
+            + "    var r = await post(xsrf);"
+            + "    if (r.status === 419) {"
+            + "      attempts = 2;"
+            + "      await fetch('/sanctum/csrf-cookie',"
+            + "        {credentials:'same-origin', headers:{'Accept':'application/json'}});"
+            + "      xsrf = readXsrf();"
+            + "      try { xsrf = decodeURIComponent(xsrf.replace(/\\+/g,'%2B')); } catch(e){}"
+            + "      r = await post(xsrf);"
+            + "    }"
+            + "    window.QolabNative.onLogoutResult(JSON.stringify({"
+            + "      status: r.status, attempts: attempts,"
+            + "      ms: Date.now() - t0, xsrfPresent: xsrf.length > 0"
+            + "    }));"
+            + "  } catch (e) {"
+            + "    window.QolabNative.onLogoutResult(JSON.stringify({"
+            + "      status: 0, attempts: 0, ms: 0, xsrfPresent: false,"
+            + "      error: (e && e.name) ? e.name : 'Error'"
+            + "    }));"
+            + "  }"
+            + "})()";
+    }
+
     private static boolean isAppPath(String url, String appOrigin, String expectedPath) {
         if (url == null || appOrigin == null) return false;
         try {

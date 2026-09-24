@@ -34,6 +34,12 @@ public final class LogoutTrace {
         public String webviewUrlAfter;
         public boolean transitionRequested;
         public boolean nativeLoginLaunched;
+        // v1.4.12 cookie-context booleans (names/presence only — never values)
+        public boolean webviewSessionBefore;
+        public boolean webviewXsrfBefore;
+        public boolean webviewSessionAfter;
+        public boolean webviewXsrfAfter;
+        public String note;                 // single-flight ignore, etc.
 
         @Override
         public String toString() {
@@ -52,6 +58,12 @@ public final class LogoutTrace {
             sb.append("  HTTP attempts: ").append(httpAttempts).append('\n');
             sb.append("  Server confirmed logout: ").append(yn(serverConfirmed)).append('\n');
             if (ioError != null) sb.append("  IO error class: ").append(ioError).append('\n');
+            sb.append("  Execution context: WebView browser (same session)").append('\n');
+            sb.append("  Session cookie before: ").append(yn(webviewSessionBefore)).append('\n');
+            sb.append("  XSRF cookie before: ").append(yn(webviewXsrfBefore)).append('\n');
+            sb.append("  Session cookie after: ").append(yn(webviewSessionAfter)).append('\n');
+            sb.append("  XSRF cookie after: ").append(yn(webviewXsrfAfter)).append('\n');
+            if (note != null) sb.append("  Note: ").append(note).append('\n');
             sb.append("  WebView URL before: ").append(path(webviewUrlBefore)).append('\n');
             sb.append("  WebView URL after: ").append(path(webviewUrlAfter)).append('\n');
             sb.append("  Transition requested: ").append(yn(transitionRequested)).append('\n');
@@ -80,6 +92,9 @@ public final class LogoutTrace {
 
     /** Set when the injected JS confirms the takeover + bridge are live. */
     public static volatile boolean takeoverInstalled;
+
+    /** v1.4.12: separate flags — the JS context reports both. */
+    public static volatile boolean xhrTakeoverFlag;
 
     /** Set when the JS bridge reports QolabNative reachable from the page. */
     public static volatile boolean bridgeAvailable;
