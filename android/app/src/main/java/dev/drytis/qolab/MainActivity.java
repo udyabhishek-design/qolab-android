@@ -7,6 +7,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
 import android.webkit.GeolocationPermissions;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -26,6 +27,7 @@ import com.getcapacitor.BridgeActivity;
 import android.annotation.SuppressLint;
 import android.graphics.Color;
 import android.os.Handler;
+import android.widget.Toast;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
@@ -97,6 +99,72 @@ public class MainActivity extends BridgeActivity {
     private String lastLoadedUrl = null;
     /** One-shot guard so an expired-session /login redirect can't loop. */
     private boolean authRedirectHandled = false;
+
+    /**
+     * v1.4.9: the authenticated session has ended (logout POST completed on
+     * the server, or the session expired). Called ONLY from the /login
+     * interception paths — i.e. AFTER Laravel confirmed logged-out state
+     * (Fortify already invalidated the session; the /login redirect IS the
+     * confirmation). Sequence:
+     *   1. freeze the WebView immediately (no web-login flash),
+     *   2. expire ONLY the app-origin *-session cookies (names only;
+     *      unrelated cookies/domains untouched),
+     *   3. launch the native LoginActivity as the NEW TASK ROOT
+     *      (Back cannot return to the authenticated screen),
+     *   4. finish this activity.
+     * Idempotent via authRedirectHandled — no duplicate launches, no loop
+     * (LoginActivity only returns here after a fresh successful login).
+     */
+    private void handleLoggedOut() {
+        if (authRedirectHandled) return;
+        authRedirectHandled = true;
+
+        // 1. Freeze instantly — the web login must never visibly render.
+        try {
+            WebView frozen = getBridge() != null ? getBridge().getWebView() : null;
+            if (frozen != null) {
+                frozen.stopLoading();
+                frozen.onPause();
+                frozen.setVisibility(View.GONE);
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 2. Clean local authenticated state: expire only the app-origin
+        //    *-session cookies. The SERVER session is already invalidated
+        //    by Laravel (this method runs after the logout redirect).
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            String origin = appOriginUrl();
+            String header = cm.getCookie(origin);
+            for (String name : AuthNavRules.sessionCookieNames(header)) {
+                cm.setCookie(origin + "/", AuthNavRules.expireCookieValue(name));
+            }
+            cm.flush();
+            android.util.Log.i("QolabAuth", "logged-out: session cookies expired ("
+                    + AuthNavRules.sessionCookieNames(header).size() + ")");
+        } catch (Exception e) {
+            android.util.Log.w("QolabAuth", "cookie cleanup failed: "
+                    + e.getClass().getSimpleName());
+        }
+
+        // 3. Native login becomes the new task root — the authenticated
+        //    activity is finished, so Back cannot resurrect it.
+        Log.i("QolabAuth", "logged-out → native LoginActivity (task reset)");
+        Intent login = new Intent(this, LoginActivity.class);
+        login.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_CLEAR_TASK
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(login);
+
+        // 4. Remove any authenticated page from WebView history/state.
+        try {
+            WebView wv2 = getBridge() != null ? getBridge().getWebView() : null;
+            if (wv2 != null) wv2.clearHistory();
+        } catch (Exception ignored) {
+        }
+        finish();
+    }
     /** Failsafe timeout so the splash can never permanently block the UI. */
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private static final long SPLASH_FAILSAFE_MS = 12_000;
@@ -173,6 +241,16 @@ public class MainActivity extends BridgeActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, android.webkit.WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                String url = uri.toString();
+                // v1.4.9: any navigation toward the app's /login page means
+                // the authenticated session ended (intentional logout or
+                // expiry). Intercept BEFORE the page loads — the old web
+                // Login must never render.
+                if (!authRedirectHandled && AuthNavRules.isLoginUrl(url, appOriginUrl())) {
+                    android.util.Log.i("QolabAuth", "/login navigation intercepted (nav)");
+                    handleLoggedOut();
+                    return true;
+                }
                 String scheme = uri.getScheme() == null ? "" : uri.getScheme().toLowerCase();
                 if (!scheme.equals("https") && !scheme.equals("http")) {
                     openExternally(uri);
@@ -187,6 +265,27 @@ public class MainActivity extends BridgeActivity {
             }
 
             @Override
+            public android.webkit.WebResourceResponse shouldInterceptRequest(
+                    WebView view, android.webkit.WebResourceRequest request) {
+                // v1.4.9: Inertia performs its post-logout redirect as a
+                // client-side XHR page visit — that NEVER fires
+                // shouldOverrideUrlLoading or onPageStarted. Catch the /login
+                // page GET here, before the response can render.
+                try {
+                    String url = request.getUrl().toString();
+                    String method = request.getMethod();
+                    if (method != null && method.equalsIgnoreCase("GET")
+                            && !authRedirectHandled
+                            && AuthNavRules.isLoginUrl(url, appOriginUrl())) {
+                        android.util.Log.i("QolabAuth", "/login request intercepted (inertia xhr)");
+                        view.post(MainActivity.this::handleLoggedOut);
+                    }
+                } catch (Exception ignored) {
+                }
+                return null;
+            }
+
+            @Override
             public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
                 // Track the last app-origin URL for state restoration.
                 String host = url == null ? null : Uri.parse(url).getHost();
@@ -195,21 +294,14 @@ public class MainActivity extends BridgeActivity {
                 }
                 if (BuildConfig.DEBUG) {
                     android.util.Log.i("QolabAuth", "webview navigation: " + url
-                            + (url != null && url.endsWith("/login") ? "  ← redirected to /login" : ""));
+                            + (AuthNavRules.isLoginUrl(url, appOriginUrl())
+                               ? "  ← redirected to /login" : ""));
                 }
-                // Session expired while using the app: Laravel redirects to
-                // /login. NEVER show the old web login — route cleanly back
-                // to the native LoginActivity instead. Guarded so a redirect
-                // storm can't launch it twice (no loop: LoginActivity waits
-                // for user input before returning here).
-                if (url != null && url.equals(appOriginUrl() + "/login")
-                        && !authRedirectHandled) {
-                    authRedirectHandled = true;
-                    Log.i("QolabAuth", "session expired → native LoginActivity");
-                    Intent login = new Intent(MainActivity.this, LoginActivity.class);
-                    login.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP);
-                    startActivity(login);
-                    finish();
+                // Session expired while using the app (classic full-page
+                // redirect path). The /login page must never become visible.
+                if (!authRedirectHandled && AuthNavRules.isLoginUrl(url, appOriginUrl())) {
+                    android.util.Log.i("QolabAuth", "/login navigation intercepted (page-start)");
+                    handleLoggedOut();
                 }
             }
 
@@ -217,6 +309,7 @@ public class MainActivity extends BridgeActivity {
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
                 dismissSplash();
+                installLogoutTakeover(view);
             }
         });
 
@@ -605,18 +698,76 @@ public class MainActivity extends BridgeActivity {
      * on the first CSRF handshake or login. Absent → assume signed out.
      */
     private boolean hasSessionCookie() {
-        try {
-            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
-            String cookies = cm.getCookie(appOriginUrl());
-            if (cookies == null) return false;
-            for (String part : cookies.split(";")) {
-                String name = part.split("=", 2)[0].trim();
-                if (name.toLowerCase().endsWith("session")) {
-                    return true;
+        // v1.4.9: shared logic — names only, never values.
+        return !AuthNavRules.sessionCookieNames(
+                android.webkit.CookieManager.getInstance().getCookie(appOriginUrl())).isEmpty();
+    }
+
+    /**
+     * v1.4.9: takeover of the SPA's logout. The web Logout button does
+     * several async things (presence beacon, heartbeat teardown, Inertia
+     * POST /logout); a stale XSRF token made that POST 419 — the UI stayed
+     * on /dashboard and the user tapped again. We intercept
+     * window.fetch('.../logout', {method:'POST'}) in the page and hand it
+     * to the native client, which ALWAYS performs a fresh CSRF handshake
+     * first and retries once on 419 — so one tap deterministically
+     * invalidates the server session. The native client then triggers the
+     * same handleLoggedOut() path used for expiry (freeze → expire app
+     * session cookies → native LoginActivity as task root). CSRF is never
+     * bypassed; only the transport of the exact same request moves to Java.
+     */
+    private void installLogoutTakeover(WebView view) {
+        String origin = appOriginUrl();
+        String js =
+            "(function(){" +
+            "  if (window.__qolabLogoutTakeover) return;" +
+            "  window.__qolabLogoutTakeover = true;" +
+            "  var orig = window.fetch;" +
+            "  if (!orig) return;" +
+            "  window.fetch = function(input, init) {" +
+            "    try {" +
+            "      var url = (typeof input === 'string') ? input : (input && input.url) || '';" +
+            "      var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();" +
+            "      if (method === 'POST' && /\\/logout(\\?|#|$)/.test(url)) {" +
+            "        var body = init && init.body;" +
+            "        window.QolabNative && window.QolabNative.logout && window.QolabNative.logout();" +
+            "        return orig.apply(this, arguments);" +
+            "      }" +
+            "    } catch (e) {}" +
+            "    return orig.apply(this, arguments);" +
+            "  };" +
+            "}())";
+        view.evaluateJavascript(js, null);
+    }
+
+    /**
+     * v1.4.9: perform the native logout (background thread), then the
+     * unified logged-out transition. Called by the injected JS bridge —
+     * safe fields logged only.
+     */
+    public void nativeLogout() {
+        android.util.Log.i("QolabAuth", "logout requested (native takeover)");
+        final String origin = appOriginUrl();
+        new Thread(() -> {
+            QolabAuthClient client = new QolabAuthClient(origin);
+            QolabAuthClient.LogoutResult r = client.logout();
+            android.util.Log.i("QolabAuth", "logout result: success=" + r.success
+                    + " http=" + r.status + " attempts=" + r.attempts
+                    + " freshCsrfRetry=" + r.retriedWithFreshCsrf);
+            mainHandler.post(() -> {
+                if (r.success) {
+                    handleLoggedOut();
+                } else {
+                    // Server unreachable/errored: still leave the app, but
+                    // keep the SERVER session intact — the user can re-enter.
+                    android.util.Log.w("QolabAuth", "logout failed server-side; "
+                            + (r.ioError != null ? r.ioError : "http " + r.status));
+                    Toast.makeText(this,
+                            "Couldn't sign out completely. Please try again.",
+                            Toast.LENGTH_LONG).show();
                 }
-            }
-        } catch (Exception ignored) {}
-        return false;
+            });
+        }, "qolab-logout").start();
     }
 
     private void openExternally(Uri uri) {

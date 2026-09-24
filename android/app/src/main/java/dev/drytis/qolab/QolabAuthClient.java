@@ -209,6 +209,85 @@ public final class QolabAuthClient {
     boolean xsrfAppearedEncoded = false;
     boolean xsrfHeaderUsedDecoded = true;
 
+    // ------------------------------------------------------------------
+    // v1.4.9 — native logout (multi-tap fix)
+    // ------------------------------------------------------------------
+
+    public static final class LogoutResult {
+        public final boolean success;
+        public final int status;
+        public final int attempts;
+        public final String ioError;   // exception class only
+        public final boolean retriedWithFreshCsrf;
+        public final boolean sessionGone; // server no longer treats us as authed
+
+        LogoutResult(boolean success, int status, int attempts, String ioError,
+                     boolean retriedWithFreshCsrf, boolean sessionGone) {
+            this.success = success;
+            this.status = status;
+            this.attempts = attempts;
+            this.ioError = ioError;
+            this.retriedWithFreshCsrf = retriedWithFreshCsrf;
+            this.sessionGone = sessionGone;
+        }
+    }
+
+    /**
+     * Native logout: POST /logout against the session the WebView holds.
+     * The WebView session cookies are seeded into this client's jar so the
+     * request invalidates the REAL session — never a client-only cookie
+     * clear. CSRF-never-weakened 419 recovery: on a stale XSRF token the
+     * client performs a FRESH /sanctum/csrf-cookie handshake (Laravel
+     * rotates the token on 419) and re-POSTs once with the new token.
+     * Blocking — background thread.
+     */
+    public LogoutResult logout() {
+        int attempts = 0;
+        boolean freshCsrfRetry = false;
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            attempts = attempt;
+            try {
+                // Seed from the WebView's CookieManager (the live session).
+                android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+                String origin = baseUrl;
+                String header = cm.getCookie(origin);
+                if (header != null) {
+                    for (String part : header.split(";")) {
+                        String[] nv = part.split("=", 2);
+                        if (nv.length == 2) {
+                            cookieJar.put(nv[0].trim(), nv[1].trim());
+                        }
+                    }
+                }
+                // Always refresh the CSRF token first: cheap, and removes
+                // the stale-XSRF 419 that made logout need multiple taps.
+                httpGet(baseUrl + "/sanctum/csrf-cookie");
+                String xsrf = cookieJar.get("XSRF-TOKEN");
+                if (xsrf == null) {
+                    return new LogoutResult(false, 0, attempts, null, false, false);
+                }
+                String decoded = urlDecode(xsrf);
+                Map<String, String> form = new LinkedHashMap<>();
+                String[] redirectOut = new String[1];
+                int status = httpPostForm(baseUrl + "/logout", form, decoded, redirectOut);
+                if (status == 419 && attempt < 3) {
+                    freshCsrfRetry = true;
+                    continue; // fresh handshake loop iteration
+                }
+                // 2xx/3xx = Fortify destroyed the session server-side (it
+                // also rotates the guest session cookie on the response).
+                boolean ok = status / 100 == 2 || status / 100 == 3;
+                return new LogoutResult(ok, status, attempts, null, freshCsrfRetry, ok);
+            } catch (Exception e) {
+                if (attempt == 3) {
+                    return new LogoutResult(false, 0, attempts,
+                            e.getClass().getSimpleName(), freshCsrfRetry, false);
+                }
+            }
+        }
+        return new LogoutResult(false, 0, attempts, null, freshCsrfRetry, false);
+    }
+
     /** True when the stored XSRF cookie value contains percent-encoding. */
     public boolean xsrfAppearedUrlEncoded() {
         return xsrfAppearedEncoded;
