@@ -143,7 +143,10 @@ public final class QolabWebViewAuth {
 
     public QolabWebViewAuth(Context context, String origin, String email,
                             String password, Listener listener) {
-        this.context = context.getApplicationContext();
+        // Keep the ACTIVITY context if it is one — the WebView must be
+        // attachable to the activity's content view (see start()).
+        this.context = (context instanceof android.app.Activity)
+                ? context : context.getApplicationContext();
         this.origin = trimSlash(origin);
         this.email = email;
         this.password = password;
@@ -166,8 +169,22 @@ public final class QolabWebViewAuth {
     public void start() {
         main.post(() -> {
             if (finished) return;
+            // v1.4.8: attach the hidden WebView to the activity's content
+            // view (1dp, GONE). A detached WebView never runs View.post()
+            // runnables and can silently skip load/evaluate steps on some
+            // builds — attachment is what guarantees the whole chain works
+            // like a normal WebView.
             webView = new WebView(context);
-            webView.setVisibility(android.view.View.GONE);
+            android.view.ViewGroup contentParent =
+                    (android.view.ViewGroup) ((android.app.Activity) context)
+                            .findViewById(android.R.id.content);
+            android.widget.FrameLayout host = new android.widget.FrameLayout(context);
+            host.setVisibility(android.view.View.GONE);
+            android.widget.FrameLayout.LayoutParams lp =
+                    new android.widget.FrameLayout.LayoutParams(1, 1);
+            host.addView(webView, lp);
+            contentParent.addView(host);
+
             WebSettings s = webView.getSettings();
             s.setJavaScriptEnabled(true);
             s.setSavePassword(false);
@@ -202,8 +219,10 @@ public final class QolabWebViewAuth {
                         // failed (JS not ready), a second attempt shortly
                         // after still helps and is harmless (idempotent —
                         // the bridge ignores repeats once finished).
-                        view.postDelayed(() -> {
-                            if (!finished) view.evaluateJavascript(AUTH_JS, null);
+                        main.postDelayed(() -> {
+                            if (!finished && webView != null) {
+                                webView.evaluateJavascript(AUTH_JS, null);
+                            }
                         }, 1500);
                     }
                 }
@@ -221,6 +240,11 @@ public final class QolabWebViewAuth {
                 try {
                     webView.removeJavascriptInterface("QolabBridge");
                     webView.stopLoading();
+                    android.view.ViewGroup parent = (android.view.ViewGroup) webView.getParent();
+                    if (parent != null) {
+                        android.view.ViewGroup grand = (android.view.ViewGroup) parent.getParent();
+                        if (grand != null) grand.removeView(parent);
+                    }
                     webView.destroy();
                 } catch (Exception ignored) {
                 }
@@ -234,19 +258,26 @@ public final class QolabWebViewAuth {
         finished = true;
         main.removeCallbacks(watchdog);
         final WebView wv = webView;
-        Runnable fire = () -> {
+        // v1.4.8: deliver through the MAIN HANDLER, never View.post() —
+        // an unattached view silently never runs posted runnables, which
+        // is what caused the eternal spinner with no error.
+        main.post(() -> {
             if (wv != null) {
                 try {
                     wv.removeJavascriptInterface("QolabBridge");
                     wv.stopLoading();
+                    android.view.ViewGroup parent = (android.view.ViewGroup) wv.getParent();
+                    if (parent != null) {
+                        android.view.ViewGroup grand = (android.view.ViewGroup) parent.getParent();
+                        if (grand != null) grand.removeView(parent);
+                    }
                     wv.destroy();
                 } catch (Exception ignored) {
                 }
             }
             if (webView == wv) webView = null;
             listener.onAuthResult(r);
-        };
-        if (wv != null) wv.post(fire); else main.post(fire);
+        });
     }
 
     /** JS→Java bridge. Credentials leave ONLY through getEmail/getPassword. */
