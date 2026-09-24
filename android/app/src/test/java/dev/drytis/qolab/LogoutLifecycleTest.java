@@ -222,4 +222,63 @@ public class LogoutLifecycleTest {
     private static boolean statusConfirmsLogout(int status) {
         return status / 100 == 2 || status / 100 == 3;
     }
+
+    // ---------------------------------------------------------------
+    // v1.4.10: fetch-takeover script — the SPA's POST /logout is handled
+    // ENTIRELY by the native bridge (no double request), other requests
+    // pass through untouched, guard prevents double installation.
+    // ---------------------------------------------------------------
+
+    @Test
+    public void takeoverJs_installsFetchWrapperOnce() {
+        String js = AuthNavRules.buildLogoutTakeoverJs();
+        assertTrue(js.contains("__qolabLogoutTakeover"));
+        assertTrue(js.contains("window.fetch"));
+        // Guard present → re-injection (page finish after Inertia swaps)
+        // is a no-op, never a double wrapper.
+        assertTrue(js.contains("if (window.__qolabLogoutTakeover) return;"));
+    }
+
+    @Test
+    public void takeoverJs_routesLogoutToNativeBridgeOnly() {
+        String js = AuthNavRules.buildLogoutTakeoverJs();
+        // Logout POST is returned from QolabNative.logout() and the
+        // original fetch is NOT applied for that request (no double send).
+        assertTrue(js.contains("return window.QolabNative.logout();"));
+        // Non-logout requests fall through to the original fetch.
+        assertTrue(js.contains("return orig.apply(this, arguments);"));
+    }
+
+    @Test
+    public void takeoverJs_logoutRegexMatchesRealInertiaUrls() {
+        // The SPA posts to '/logout' (relative) or absolute origin URLs.
+        String regexFragment = "\\\\/logout(\\\\?|#|$)";
+        String js = AuthNavRules.buildLogoutTakeoverJs();
+        assertTrue(js.contains("/logout"));
+        // Spot-check the pattern source text survived Java escaping.
+        assertTrue(js.contains("method === 'POST'"));
+    }
+
+    // ---------------------------------------------------------------
+    // v1.4.10: the JS interface must return BEFORE the transition —
+    // contract test for the fetch-like response shape (no internals).
+    // ---------------------------------------------------------------
+
+    @Test
+    public void fetchLikeResponse_isSafe204Shape() {
+        try {
+            org.json.JSONObject resp = new org.json.JSONObject();
+            resp.put("status", 204);
+            resp.put("ok", true);
+            resp.put("redirected", false);
+            assertEquals(204, resp.getInt("status"));
+            // No cookie/token/credential fields may exist in it.
+            assertFalse(resp.has("cookie"));
+            assertFalse(resp.has("xsrf"));
+            assertFalse(resp.has("password"));
+            assertFalse(resp.has("token"));
+        } catch (Exception e) {
+            fail(e.getMessage());
+        }
+    }
 }

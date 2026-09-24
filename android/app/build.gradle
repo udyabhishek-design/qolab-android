@@ -10,8 +10,8 @@ android {
         applicationId "dev.drytis.qolab"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 12
-        versionName "1.4.9"
+        versionCode 13
+        versionName "1.4.10"
 
         // ── Environment-aware server origin ─────────────────────────
         // DEBUG / DEVELOPMENT  -> Qolab DEVELOPMENT backend

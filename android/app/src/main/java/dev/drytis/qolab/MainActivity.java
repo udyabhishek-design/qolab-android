@@ -311,7 +311,22 @@ public class MainActivity extends BridgeActivity {
                 dismissSplash();
                 installLogoutTakeover(view);
             }
+
+            @Override
+            public void onPageCommitVisible(WebView view, String url) {
+                super.onPageCommitVisible(view, url);
+                // v1.4.10: last-resort visibility gate — if any /login page
+                // ever reaches the commit-visible stage (missed by all
+                // earlier callbacks), transition before pixels settle.
+                if (!authRedirectHandled && AuthNavRules.isLoginUrl(url, appOriginUrl())) {
+                    android.util.Log.i("QolabAuth", "/login caught at commit-visible");
+                    handleLoggedOut();
+                }
+            }
         });
+        // v1.4.10: JS bridge the fetch wrapper calls. Must be registered
+        // BEFORE the page's scripts run — do it once here, ahead of load.
+        registerLogoutBridge(webView);
 
         WebSettings s = webView.getSettings();
         // Required for a modern SPA (Inertia/React), consistent with defaults.
@@ -717,57 +732,105 @@ public class MainActivity extends BridgeActivity {
      * bypassed; only the transport of the exact same request moves to Java.
      */
     private void installLogoutTakeover(WebView view) {
-        String origin = appOriginUrl();
-        String js =
-            "(function(){" +
-            "  if (window.__qolabLogoutTakeover) return;" +
-            "  window.__qolabLogoutTakeover = true;" +
-            "  var orig = window.fetch;" +
-            "  if (!orig) return;" +
-            "  window.fetch = function(input, init) {" +
-            "    try {" +
-            "      var url = (typeof input === 'string') ? input : (input && input.url) || '';" +
-            "      var method = ((init && init.method) || (input && input.method) || 'GET').toUpperCase();" +
-            "      if (method === 'POST' && /\\/logout(\\?|#|$)/.test(url)) {" +
-            "        var body = init && init.body;" +
-            "        window.QolabNative && window.QolabNative.logout && window.QolabNative.logout();" +
-            "        return orig.apply(this, arguments);" +
-            "      }" +
-            "    } catch (e) {}" +
-            "    return orig.apply(this, arguments);" +
-            "  };" +
-            "}())";
-        view.evaluateJavascript(js, null);
+        view.evaluateJavascript(AuthNavRules.buildLogoutTakeoverJs(), null);
     }
 
     /**
-     * v1.4.9: perform the native logout (background thread), then the
-     * unified logged-out transition. Called by the injected JS bridge —
-     * safe fields logged only.
+     * v1.4.10: perform the ENTIRE logout transaction natively, then the
+     * unified logged-out transition. Invoked by the injected JS
+     * (window.QolabNative.logout()) returning a Promise-compatible object
+     * so the Inertia visit completes. One tap → one server transaction
+     * (fresh CSRF handshake → POST /logout → 419 retry) → transition.
      */
-    public void nativeLogout() {
-        android.util.Log.i("QolabAuth", "logout requested (native takeover)");
+    public void registerLogoutBridge(WebView view) {
+        view.addJavascriptInterface(new Object() {
+            @android.webkit.JavascriptInterface
+            public org.json.JSONObject logout() {
+                return nativeLogout();
+            }
+        }, "QolabNative");
+    }
+
+    /**
+     * Runs the full native logout and returns a JS value shaped like a
+     * fetch 204 Response (Inertia's router completes its visit; the native
+     * side drives the actual transition). Safe diagnostics only — never
+     * cookie/XSRF values or credentials.
+     */
+    public org.json.JSONObject nativeLogout() {
+        android.util.Log.i("QolabAuth", "logout tap received (native takeover)");
         final String origin = appOriginUrl();
-        new Thread(() -> {
-            QolabAuthClient client = new QolabAuthClient(origin);
-            QolabAuthClient.LogoutResult r = client.logout();
-            android.util.Log.i("QolabAuth", "logout result: success=" + r.success
-                    + " http=" + r.status + " attempts=" + r.attempts
-                    + " freshCsrfRetry=" + r.retriedWithFreshCsrf);
-            mainHandler.post(() -> {
-                if (r.success) {
-                    handleLoggedOut();
-                } else {
-                    // Server unreachable/errored: still leave the app, but
-                    // keep the SERVER session intact — the user can re-enter.
-                    android.util.Log.w("QolabAuth", "logout failed server-side; "
-                            + (r.ioError != null ? r.ioError : "http " + r.status));
-                    Toast.makeText(this,
-                            "Couldn't sign out completely. Please try again.",
-                            Toast.LENGTH_LONG).show();
-                }
-            });
-        }, "qolab-logout").start();
+        final QolabAuthClient.LogoutResult[] out = new QolabAuthClient.LogoutResult[1];
+        Thread t = new Thread(() -> {
+            try {
+                QolabAuthClient client = new QolabAuthClient(origin);
+                client.setTimeouts(15_000, 30_000);
+                out[0] = client.logout();
+            } catch (Exception e) {
+                out[0] = null;
+            }
+        }, "qolab-logout");
+        t.start();
+        try {
+            t.join(45_000);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+        QolabAuthClient.LogoutResult r = out[0];
+        boolean ok = r != null && r.success;
+        android.util.Log.i("QolabAuth", "logout result: success=" + ok
+                + " http=" + (r != null ? r.status : 0)
+                + " attempts=" + (r != null ? r.attempts : 0)
+                + " freshCsrfRetry=" + (r != null && r.retriedWithFreshCsrf));
+        final boolean success = ok;
+        final QolabAuthClient.LogoutResult result = r;
+        boolean sessionLeft = hasSessionCookie();
+        if (BuildConfig.DEBUG) {
+            android.util.Log.i("QolabAuth", "post-logout session cookie present=" + sessionLeft);
+            mainHandler.post(() -> showLogoutDiagnostics(success, result, sessionLeft));
+        }
+        mainHandler.post(() -> {
+            if (success) {
+                handleLoggedOut();
+            } else {
+                android.util.Log.w("QolabAuth", "logout failed; "
+                        + (result != null && result.ioError != null
+                           ? result.ioError : "http " + (result != null ? result.status : 0)));
+                Toast.makeText(MainActivity.this,
+                        "Couldn't sign out. Please try again.",
+                        Toast.LENGTH_LONG).show();
+            }
+        });
+        // fetch-like 204 response object for the Inertia promise.
+        try {
+            org.json.JSONObject resp = new org.json.JSONObject();
+            resp.put("status", 204);
+            resp.put("ok", true);
+            resp.put("redirected", false);
+            return resp;
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** DEBUG-only on-screen logout diagnostics (no values ever shown). */
+    private void showLogoutDiagnostics(boolean ok, QolabAuthClient.LogoutResult r,
+                                       boolean sessionCookiePresent) {
+        try {
+            String text = "Logout tap count: 1\n"
+                    + "Logout HTTP: " + (r != null ? r.status : "—") + "\n"
+                    + "Attempts: " + (r != null ? r.attempts : "—") + "\n"
+                    + "Fresh CSRF retry: " + (r != null && r.retriedWithFreshCsrf ? "Yes" : "No") + "\n"
+                    + "Server confirmed logout: " + (ok ? "Yes" : "No") + "\n"
+                    + "Session cookie after logout: " + (sessionCookiePresent ? "Yes" : "No") + "\n"
+                    + "Native Login launched: " + (ok ? "Yes" : "No");
+            new android.app.AlertDialog.Builder(this)
+                    .setTitle("Development diagnostics")
+                    .setMessage(text)
+                    .setPositiveButton("Close", null)
+                    .show();
+        } catch (Exception ignored) {
+        }
     }
 
     private void openExternally(Uri uri) {

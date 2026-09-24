@@ -53,6 +53,36 @@ public final class AuthNavRules {
         }
     }
 
+    /**
+     * v1.4.10: JS injected after every page finish. Wraps window.fetch so
+     * the SPA's POST /logout (Inertia visit) is handed ENTIRELY to the
+     * native client (fresh CSRF handshake → POST → 419 retry → local
+     * transition). The original fetch is NOT executed — exactly ONE
+     * logical logout transaction per tap, no duplicate requests. The
+     * promise resolves 204-shaped so Inertia's router treats the visit as
+     * finished (progress bar completes, no retry) while the native side
+     * drives the transition to LoginActivity.
+     */
+    public static String buildLogoutTakeoverJs() {
+        return "(function(){"
+            + "  if (window.__qolabLogoutTakeover) return;"
+            + "  window.__qolabLogoutTakeover = true;"
+            + "  var orig = window.fetch;"
+            + "  if (!orig) return;"
+            + "  window.fetch = function(input, init){"
+            + "    try {"
+            + "      var url = (typeof input === 'string') ? input"
+            + "        : (input && input.url) ? input.url : '';"
+            + "      var method = ((init && init.method)"
+            + "        || (input && input.method) || 'GET').toUpperCase();"
+            + "      if (method === 'POST' && /\\/logout(\\?|#|$)/.test(url))"
+            + "        return window.QolabNative.logout();"
+            + "    } catch (e) {}"
+            + "    return orig.apply(this, arguments);"
+            + "  };"
+            + "}())";
+    }
+
     private static boolean isAppPath(String url, String appOrigin, String expectedPath) {
         if (url == null || appOrigin == null) return false;
         try {
