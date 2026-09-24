@@ -215,20 +215,30 @@ public final class QolabAuthClient {
 
     public static final class LogoutResult {
         public final boolean success;
-        public final int status;
-        public final int attempts;
-        public final String ioError;   // exception class only
+        public final int status;          // final POST /logout status
+        public final int attempts;        // loop iterations used
+        public final String ioError;      // exception class only
         public final boolean retriedWithFreshCsrf;
         public final boolean sessionGone; // server no longer treats us as authed
+        // v1.4.11 trace fields (safe: statuses/durations/booleans only)
+        public final int csrfStatus;
+        public final long csrfDurationMs;
+        public final long durationMs;     // total logout() wall time
+        public final boolean had419;      // any 419 seen during attempts
 
         LogoutResult(boolean success, int status, int attempts, String ioError,
-                     boolean retriedWithFreshCsrf, boolean sessionGone) {
+                     boolean retriedWithFreshCsrf, boolean sessionGone,
+                     int csrfStatus, long csrfDurationMs, long durationMs, boolean had419) {
             this.success = success;
             this.status = status;
             this.attempts = attempts;
             this.ioError = ioError;
             this.retriedWithFreshCsrf = retriedWithFreshCsrf;
             this.sessionGone = sessionGone;
+            this.csrfStatus = csrfStatus;
+            this.csrfDurationMs = csrfDurationMs;
+            this.durationMs = durationMs;
+            this.had419 = had419;
         }
     }
 
@@ -242,8 +252,12 @@ public final class QolabAuthClient {
      * Blocking — background thread.
      */
     public LogoutResult logout() {
+        long startWall = SystemClock.elapsedRealtime();
         int attempts = 0;
         boolean freshCsrfRetry = false;
+        boolean saw419 = false;
+        int lastCsrfStatus = 0;
+        long csrfMs = -1;
         for (int attempt = 1; attempt <= 3; attempt++) {
             attempts = attempt;
             try {
@@ -261,31 +275,46 @@ public final class QolabAuthClient {
                 }
                 // Always refresh the CSRF token first: cheap, and removes
                 // the stale-XSRF 419 that made logout need multiple taps.
-                httpGet(baseUrl + "/sanctum/csrf-cookie");
+                long c0 = SystemClock.elapsedRealtime();
+                lastCsrfStatus = httpGet(baseUrl + "/sanctum/csrf-cookie");
+                csrfMs = SystemClock.elapsedRealtime() - c0;
                 String xsrf = cookieJar.get("XSRF-TOKEN");
                 if (xsrf == null) {
-                    return new LogoutResult(false, 0, attempts, null, false, false);
+                    return mkLogout(false, 0, attempts, null, freshCsrfRetry, false,
+                            lastCsrfStatus, csrfMs, startWall, saw419);
                 }
                 String decoded = urlDecode(xsrf);
                 Map<String, String> form = new LinkedHashMap<>();
                 String[] redirectOut = new String[1];
                 int status = httpPostForm(baseUrl + "/logout", form, decoded, redirectOut);
-                if (status == 419 && attempt < 3) {
-                    freshCsrfRetry = true;
-                    continue; // fresh handshake loop iteration
+                if (status == 419) {
+                    saw419 = true;
+                    if (attempt < 3) {
+                        freshCsrfRetry = true;
+                        continue; // fresh handshake loop iteration
+                    }
                 }
                 // 2xx/3xx = Fortify destroyed the session server-side (it
                 // also rotates the guest session cookie on the response).
                 boolean ok = status / 100 == 2 || status / 100 == 3;
-                return new LogoutResult(ok, status, attempts, null, freshCsrfRetry, ok);
+                return mkLogout(ok, status, attempts, null, freshCsrfRetry, ok,
+                        lastCsrfStatus, csrfMs, startWall, saw419);
             } catch (Exception e) {
                 if (attempt == 3) {
-                    return new LogoutResult(false, 0, attempts,
-                            e.getClass().getSimpleName(), freshCsrfRetry, false);
+                    return mkLogout(false, 0, attempts, e.getClass().getSimpleName(),
+                            freshCsrfRetry, false, lastCsrfStatus, csrfMs, startWall, saw419);
                 }
             }
         }
-        return new LogoutResult(false, 0, attempts, null, freshCsrfRetry, false);
+        return mkLogout(false, 0, attempts, null, freshCsrfRetry, false,
+                lastCsrfStatus, csrfMs, startWall, saw419);
+    }
+
+    private LogoutResult mkLogout(boolean ok, int status, int attempts, String io,
+                                  boolean retried, boolean sessionGone,
+                                  int csrfStatus, long csrfMs, long startWall, boolean had419) {
+        return new LogoutResult(ok, status, attempts, io, retried, sessionGone,
+                csrfStatus, csrfMs, SystemClock.elapsedRealtime() - startWall, had419);
     }
 
     /** True when the stored XSRF cookie value contains percent-encoding. */

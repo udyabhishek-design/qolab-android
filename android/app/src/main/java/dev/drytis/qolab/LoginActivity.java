@@ -98,6 +98,40 @@ public class LoginActivity extends AppCompatActivity {
         } catch (Exception ignored) {
         }
 
+        // v1.4.11: DEBUG-only access to the previous session's logout trace
+        // (LogoutTrace is static, so it survives the activity transition).
+        if (BuildConfig.DEBUG && LogoutTrace.hasData()) {
+            try {
+                android.widget.TextView traceLink = new android.widget.TextView(this);
+                traceLink.setText("Last logout diagnostics");
+                traceLink.setTextSize(12);
+                traceLink.setAlpha(0.7f);
+                traceLink.setPadding(16, 8, 16, 8);
+                traceLink.setOnClickListener(v -> {
+                    android.widget.ScrollView sv = new android.widget.ScrollView(this);
+                    android.widget.TextView tv = new android.widget.TextView(this);
+                    tv.setText(LogoutTrace.render());
+                    tv.setPadding(48, 24, 48, 24);
+                    tv.setTextIsSelectable(true);
+                    sv.addView(tv);
+                    new android.app.AlertDialog.Builder(this)
+                            .setTitle("Logout trace")
+                            .setView(sv)
+                            .setPositiveButton("Close", null)
+                            .show();
+                });
+                android.widget.FrameLayout root =
+                        (android.widget.FrameLayout) findViewById(android.R.id.content);
+                android.widget.FrameLayout.LayoutParams lp =
+                        new android.widget.FrameLayout.LayoutParams(
+                                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                                android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                                android.view.Gravity.TOP | android.view.Gravity.END);
+                root.addView(traceLink, lp);
+            } catch (Exception ignored) {
+            }
+        }
+
         emailInput = findViewById(R.id.login_email);
         passwordInput = findViewById(R.id.login_password);
         passwordToggle = findViewById(R.id.login_password_toggle);

@@ -281,4 +281,95 @@ public class LogoutLifecycleTest {
             fail(e.getMessage());
         }
     }
+
+    // ---------------------------------------------------------------
+    // v1.4.11: the ACTUAL runtime logout request shape. The web app's
+    // Inertia core uses XMLHttpRequest (verified in the shipped bundle:
+    // doRequest(){ new XMLHttpRequest; r.open(method, url, true) }).
+    // The XHR takeover must match THAT shape — relative URLs, absolute
+    // URLs, Request-style (not applicable) and method normalization.
+    // ---------------------------------------------------------------
+
+    @Test
+    public void xhrTakeover_patchesXMLHttpRequestNotFetchOnly() {
+        String js = AuthNavRules.buildXhrTakeoverJs();
+        assertTrue(js.contains("XMLHttpRequest"));
+        assertTrue(js.contains("xhr.open"));
+        assertTrue(js.contains("xhr.send"));
+        // Installed once only.
+        assertTrue(js.contains("if (window.__qolabXhrTakeover) return;"));
+        // Logout POST never falls through to the original send (no
+        // double-send: the original XHR is not invoked at all).
+        assertTrue(js.contains("captured = true;"));
+        assertTrue(js.contains("return;"));
+    }
+
+    @Test
+    public void isLogoutXhr_matchesRelativeLogoutUrl() {
+        // Inertia sends relative '/logout' — must match.
+        assertTrue(AuthNavRules.isLogoutXhr("POST", "/logout"));
+    }
+
+    @Test
+    public void isLogoutXhr_matchesAbsoluteDevOriginUrl() {
+        assertTrue(AuthNavRules.isLogoutXhr("post",
+                "https://workpulse-gbpedt.drytis.dev/logout"));
+    }
+
+    @Test
+    public void isLogoutXhr_matchesUrlWithQuery() {
+        assertTrue(AuthNavRules.isLogoutXhr("POST", "/logout?x=1"));
+    }
+
+    @Test
+    public void isLogoutXhr_rejectsOtherMethodsAndUrls() {
+        assertFalse(AuthNavRules.isLogoutXhr("GET", "/logout"));
+        assertFalse(AuthNavRules.isLogoutXhr("POST", "/dashboard"));
+        assertFalse(AuthNavRules.isLogoutXhr("POST", "/logout-items"));
+        assertFalse(AuthNavRules.isLogoutXhr(null, "/logout"));
+        assertFalse(AuthNavRules.isLogoutXhr("POST", null));
+    }
+
+    @Test
+    public void isLogoutXhr_methodIsCaseInsensitive() {
+        assertTrue(AuthNavRules.isLogoutXhr("post", "/logout"));
+        assertTrue(AuthNavRules.isLogoutXhr("Post", "https://workpulse-gbpedt.drytis.dev/logout"));
+    }
+
+    // ---------------------------------------------------------------
+    // LogoutTrace — session-persistent diagnostics, safe fields only.
+    // ---------------------------------------------------------------
+
+    @Test
+    public void logoutTrace_recordsAttemptsAndSurvivesNavigation() {
+        LogoutTrace.Attempt a = LogoutTrace.begin("https://workpulse-gbpedt.drytis.dev/dashboard");
+        a.uiLogoutTapped = true;
+        a.bridgeInvoked = true;
+        a.csrfStatus = 204;
+        a.postStarted = true;
+        a.postStatus = 419;
+        a.had419 = true;
+        LogoutTrace.Attempt b = LogoutTrace.begin("/dashboard");
+        assertEquals(1, a.tapIndex);
+        assertEquals(2, b.tapIndex);
+        String rendered = LogoutTrace.render();
+        // Both attempts visible with the fields the physical test needs.
+        assertTrue(rendered.contains("ATTEMPT 1"));
+        assertTrue(rendered.contains("ATTEMPT 2"));
+        assertTrue(rendered.contains("Bridge invoked: Yes"));
+        assertTrue(rendered.contains("Logout POST: 419"));
+        assertTrue(rendered.contains("419 occurred: Yes"));
+        // Never any sensitive material in the render.
+        assertFalse(rendered.toLowerCase().contains("xsrf-token="));
+        // Path only — origin stripped.
+        assertTrue(rendered.contains("/dashboard"));
+    }
+
+    @Test
+    public void logoutTrace_renderIsEmptyWhenNoAttempts() {
+        LogoutTrace.attempts.clear();
+        LogoutTrace.current = null;
+        assertFalse(LogoutTrace.hasData());
+        assertTrue(LogoutTrace.render().contains("No logout attempts"));
+    }
 }

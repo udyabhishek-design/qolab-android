@@ -327,6 +327,8 @@ public class MainActivity extends BridgeActivity {
         // v1.4.10: JS bridge the fetch wrapper calls. Must be registered
         // BEFORE the page's scripts run — do it once here, ahead of load.
         registerLogoutBridge(webView);
+        // v1.4.11: persistent DEBUG-only diagnostics entry point.
+        installAuthDebugOverlay();
 
         WebSettings s = webView.getSettings();
         // Required for a modern SPA (Inertia/React), consistent with defaults.
@@ -732,7 +734,17 @@ public class MainActivity extends BridgeActivity {
      * bypassed; only the transport of the exact same request moves to Java.
      */
     private void installLogoutTakeover(WebView view) {
+        // v1.4.11: the web app's Inertia core uses XMLHttpRequest (verified
+        // in the shipped bundle) — the XHR takeover is the real interceptor.
+        // The fetch wrapper is kept as belt-and-braces for any fetch users.
+        view.evaluateJavascript(AuthNavRules.buildXhrTakeoverJs(), null);
         view.evaluateJavascript(AuthNavRules.buildLogoutTakeoverJs(), null);
+        if (BuildConfig.DEBUG) {
+            view.evaluateJavascript(
+                "(function(){var ok=!!window.XMLHttpRequest&&!!window.QolabNative;"
+                + "window.QolabNative&&window.QolabNative.takeoverInstalled&&"
+                + "window.QolabNative.takeoverInstalled();})()", null);
+        }
     }
 
     /**
@@ -746,28 +758,56 @@ public class MainActivity extends BridgeActivity {
         view.addJavascriptInterface(new Object() {
             @android.webkit.JavascriptInterface
             public org.json.JSONObject logout() {
+                // Record + run the native logout. A plain JSON object is
+                // returned to JS as a string (not a Promise) — the patched
+                // XHR ignores it; the native side owns the transition.
                 return nativeLogout();
+            }
+
+            @android.webkit.JavascriptInterface
+            public void takeoverInstalled() {
+                LogoutTrace.bridgeAvailable = true;
+                android.util.Log.i("QolabAuth", "logout takeover JS installed"
+                        + (LogoutTrace.bridgeAvailable ? " (bridge reachable)" : ""));
             }
         }, "QolabNative");
     }
 
     /**
-     * Runs the full native logout and returns a JS value shaped like a
-     * fetch 204 Response (Inertia's router completes its visit; the native
-     * side drives the actual transition). Safe diagnostics only — never
-     * cookie/XSRF values or credentials.
+     * v1.4.11: full native logout with runtime trace. The patched XHR is
+     * never completed by JS — native Android owns the ENTIRE success
+     * transition (freeze → server-confirmed → cookie cleanup → native
+     * LoginActivity), so Inertia never gets a response to render /login
+     * from. Safe fields only — never values/tokens/credentials.
      */
     public org.json.JSONObject nativeLogout() {
-        android.util.Log.i("QolabAuth", "logout tap received (native takeover)");
+        final LogoutTrace.Attempt a = LogoutTrace.begin(lastLoadedUrl);
+        a.uiLogoutTapped = true;
+        a.bridgeInvoked = true;
+        android.util.Log.i("QolabAuth", "logout tap #" + a.tapIndex + " → native takeover");
         final String origin = appOriginUrl();
+
         final QolabAuthClient.LogoutResult[] out = new QolabAuthClient.LogoutResult[1];
         Thread t = new Thread(() -> {
             try {
+                a.nativeTransactionStarted = true;
+                a.csrfStarted = true;
                 QolabAuthClient client = new QolabAuthClient(origin);
                 client.setTimeouts(15_000, 30_000);
-                out[0] = client.logout();
+                QolabAuthClient.LogoutResult r = client.logout();
+                out[0] = r;
+                a.csrfStatus = r.csrfStatus;
+                a.csrfMs = r.csrfDurationMs;
+                a.postStatus = r.status;
+                a.postMs = r.durationMs;
+                a.postStarted = true;
+                a.had419 = r.had419;
+                a.httpAttempts = r.attempts;
+                a.serverConfirmed = r.success;
+                a.ioError = r.ioError;
             } catch (Exception e) {
                 out[0] = null;
+                a.ioError = e.getClass().getSimpleName();
             }
         }, "qolab-logout");
         t.start();
@@ -776,22 +816,20 @@ public class MainActivity extends BridgeActivity {
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
         }
+
         QolabAuthClient.LogoutResult r = out[0];
         boolean ok = r != null && r.success;
-        android.util.Log.i("QolabAuth", "logout result: success=" + ok
-                + " http=" + (r != null ? r.status : 0)
-                + " attempts=" + (r != null ? r.attempts : 0)
-                + " freshCsrfRetry=" + (r != null && r.retriedWithFreshCsrf));
+        a.webviewUrlAfter = lastLoadedUrl;
+        android.util.Log.i("QolabAuth", "logout #" + a.tapIndex + ": success=" + ok
+                + " http=" + (r != null ? r.status : 0) + " attempts=" + (r != null ? r.attempts : 0)
+                + " 419seen=" + a.had419);
         final boolean success = ok;
         final QolabAuthClient.LogoutResult result = r;
-        boolean sessionLeft = hasSessionCookie();
-        if (BuildConfig.DEBUG) {
-            android.util.Log.i("QolabAuth", "post-logout session cookie present=" + sessionLeft);
-            mainHandler.post(() -> showLogoutDiagnostics(success, result, sessionLeft));
-        }
         mainHandler.post(() -> {
+            a.transitionRequested = success;
             if (success) {
                 handleLoggedOut();
+                a.nativeLoginLaunched = true;
             } else {
                 android.util.Log.w("QolabAuth", "logout failed; "
                         + (result != null && result.ioError != null
@@ -801,16 +839,57 @@ public class MainActivity extends BridgeActivity {
                         Toast.LENGTH_LONG).show();
             }
         });
-        // fetch-like 204 response object for the Inertia promise.
+        // Plain JSON ack — the patched XHR ignores it; JS does NOT drive
+        // any navigation from this (no Inertia render of /login).
         try {
             org.json.JSONObject resp = new org.json.JSONObject();
             resp.put("status", 204);
-            resp.put("ok", true);
-            resp.put("redirected", false);
             return resp;
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** DEBUG-only persistent overlay button showing the live logout trace. */
+    private void installAuthDebugOverlay() {
+        if (!BuildConfig.DEBUG) return;
+        try {
+            android.widget.Button b = new android.widget.Button(this);
+            b.setText("Auth Debug");
+            b.setTextSize(11);
+            b.setAlpha(0.75f);
+            b.setOnClickListener(v -> showAuthDebug());
+            android.widget.FrameLayout.LayoutParams lp =
+                    new android.widget.FrameLayout.LayoutParams(
+                            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                            android.widget.FrameLayout.LayoutParams.WRAP_CONTENT,
+                            android.view.Gravity.BOTTOM | android.view.Gravity.START);
+            lp.bottomMargin = 24;
+            lp.leftMargin = 8;
+            addContentView(b, lp);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void showAuthDebug() {
+        String text = "Takeover JS installed: "
+                + (LogoutTrace.takeoverInstalled ? "Yes" : "No") + "\n"
+                + "QolabNative reachable from JS: "
+                + (LogoutTrace.bridgeAvailable ? "Yes" : "No") + "\n"
+                + "Native logout invocations: " + LogoutTrace.attempts.size() + "\n"
+                + "Session cookie present now: " + (hasSessionCookie() ? "Yes" : "No")
+                + "\n\n" + LogoutTrace.render();
+        android.widget.ScrollView sv = new android.widget.ScrollView(this);
+        android.widget.TextView tv = new android.widget.TextView(this);
+        tv.setText(text);
+        tv.setPadding(48, 24, 48, 24);
+        tv.setTextIsSelectable(true);
+        sv.addView(tv);
+        new android.app.AlertDialog.Builder(this)
+                .setTitle("Logout trace")
+                .setView(sv)
+                .setPositiveButton("Close", null)
+                .show();
     }
 
     /** DEBUG-only on-screen logout diagnostics (no values ever shown). */
