@@ -295,6 +295,14 @@ public class LoginActivity extends AppCompatActivity {
         // cookies, session rotation and the redirect natively (the exact
         // flow that worked in the browser on this phone). No custom
         // CSRF → XSRF → POST /login handshaking anymore.
+        // v1.5.8: snapshot the session-cookie VALUE BEFORE the login
+        // transaction starts. The seam after a driver-verified redirect
+        // requires this value to CHANGE (or a session to appear when none
+        // existed) — a mere presence check passes on the ANONYMOUS
+        // pre-login session cookie, handing Home an unauthenticated
+        // session → 401 → the device auto-logout. Never logged.
+        preAuthSessionValue = sessionCookieValue(appOrigin);
+
         QolabWebLoginDriver driver = new QolabWebLoginDriver(this, appOrigin, email, password,
                 r -> runOnUiThread(() -> {
                     android.util.Log.i(TAG, "web-login-driver success=" + r.success
@@ -382,6 +390,9 @@ public class LoginActivity extends AppCompatActivity {
     }
 
     private DiagSnapshot lastFailure = null;
+    /** v1.5.8: session-cookie value captured BEFORE the login driver loads
+     * /login — the baseline the post-auth seam compares against. Never logged. */
+    private String preAuthSessionValue = null;
     private Boolean lastXsrfAppearedEncoded = null;
     private Boolean lastXsrfHeaderDecoded = null;
     private boolean diagExpanded = false;
@@ -504,19 +515,22 @@ public class LoginActivity extends AppCompatActivity {
     }
 
     /**
-     * v1.5.7: called after the login DRIVER has already verified the
-     * authenticated redirect (leaving /login). At this point auth is
-     * complete — there is no pre-login snapshot to compare against (the
-     * v1.5.6 seam demanded a value CHANGE here and could never succeed,
-     * rejecting successful logins). Waits for the *-session cookie to be
-     * present in the CookieManager (flush + read), bounded ~4s, then
-     * bridges to Home. Records the outcome in the persistent trace.
+     * v1.5.8: called after the login DRIVER has verified the authenticated
+     * redirect (leaving /login). The seam waits for the *-session cookie
+     * value to DIFFER from the pre-auth snapshot ({@link #preAuthSessionValue},
+     * captured before the driver loaded /login). If no session cookie
+     * existed pre-auth, a fresh one appearing satisfies the check.
+     * Bounded ~5s; flush + deterministic longest-name read each poll.
+     * This is what prevents the anonymous pre-login session (set by the
+     * /login page load itself) from satisfying the seam and sending Home
+     * out with an unauthenticated session (device 401 → auto-logout).
      */
     private void waitForAuthenticatedSessionPresent() {
         final String origin = appOrigin;
+        final String baseline = preAuthSessionValue;
         final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
         final int[] attempts = {0};
-        final int MAX_ATTEMPTS = 13; // 13 × 300ms ≈ 4s bounded wait
+        final int MAX_ATTEMPTS = 17; // 17 × 300ms ≈ 5s bounded wait
         final Runnable poll = new Runnable() {
             @Override
             public void run() {
@@ -526,19 +540,23 @@ public class LoginActivity extends AppCompatActivity {
                 } catch (Exception ignored) {
                 }
                 String current = sessionCookieValue(origin);
-                boolean present = current != null && !current.isEmpty();
-                if (present) {
-                    android.util.Log.i(TAG, "authenticated session cookie present → Home");
+                boolean fresh = current != null && !current.isEmpty()
+                        && (baseline == null || baseline.isEmpty() || !current.equals(baseline));
+                if (fresh) {
+                    android.util.Log.i(TAG, "session cookie changed/appeared post-auth → Home");
                     onLoginSuccess();
                     return;
                 }
                 if (attempts[0]++ >= MAX_ATTEMPTS) {
                     android.util.Log.w(TAG,
-                            "session cookie absent after driver-verified redirect");
-                    QolabWebLoginDriver.LAST.stage = "session-missing";
-                    QolabWebLoginDriver.LAST.note = "driver verified redirect but no session cookie in CookieManager";
-                    lastFailure = traceSnapshot("session-missing",
-                            "no session cookie after authenticated redirect");
+                            "session cookie did not transition post-auth (baseline existed="
+                                    + (baseline != null && !baseline.isEmpty()) + ")");
+                    QolabWebLoginDriver.LAST.stage = "session-stale";
+                    QolabWebLoginDriver.LAST.note =
+                            "driver verified redirect but session cookie value did not transition"
+                            + " (preAuth=" + (baseline != null && !baseline.isEmpty() ? "present" : "absent") + ")";
+                    lastFailure = traceSnapshot("session-stale",
+                            "session cookie did not change after authenticated redirect");
                     onLoginFailure(getString(R.string.login_error_generic));
                     return;
                 }
@@ -559,18 +577,31 @@ public class LoginActivity extends AppCompatActivity {
         return d;
     }
 
-    /** Cookie VALUE for comparison only — never logged, never exposed. */
+    /**
+     * Cookie VALUE for comparison only — never logged, never exposed.
+     * v1.5.8: deterministic selection when multiple *-session candidates
+     * exist (e.g. a legacy name alongside Laravel's qolab_session): the
+     * LONGEST cookie NAME wins, so a stale/short legacy cookie can never
+     * shadow the real session. Value is used in-memory for comparison
+     * only.
+     */
     private String sessionCookieValue(String origin) {
         try {
             String cookies = android.webkit.CookieManager.getInstance().getCookie(origin);
             if (cookies == null) return null;
+            String bestName = null;
+            String bestValue = null;
             for (String part : cookies.split(";")) {
                 String p = part.trim();
                 String name = p.split("=", 2)[0].trim();
                 if (name.toLowerCase().endsWith("session")) {
-                    return p.contains("=") ? p.split("=", 2)[1] : "";
+                    if (bestName == null || name.length() > bestName.length()) {
+                        bestName = name;
+                        bestValue = p.contains("=") ? p.split("=", 2)[1] : "";
+                    }
                 }
             }
+            return bestValue;
         } catch (Exception ignored) {
         }
         return null;
