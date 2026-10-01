@@ -397,13 +397,21 @@ public class LoginActivity extends AppCompatActivity {
                 : r.loginStatus == 419 ? "session/CSRF rejected (419)"
                 : r.loginStatus / 100 == 5 ? "server error (" + r.loginStatus + ")"
                 : r.loginStatus > 0 ? "HTTP error " + r.loginStatus : "unknown";
-        return new DiagSnapshot(stage, r.csrfStatus, r.loginStatus, failureType,
+        DiagSnapshot d = new DiagSnapshot(stage, r.csrfStatus, r.loginStatus, failureType,
                 r.csrfMs, r.loginMs, r.csrfStatus > 0);
+        d.failedStage = r.failedStage;
+        d.errMsg = r.errMsg;
+        d.docUrl = r.docUrl;
+        d.online = r.online;
+        d.fetchOk = r.fetchOk;
+        d.bridgeOk = r.bridgeOk;
+        return d;
     }
 
     // ── DEVELOPMENT-ONLY diagnostics (v1.4.4, temporary) ───────────
     // Safe fields ONLY: origin host, stage, statuses, durations, exception
-    // class name, yes/no flags. Never email/password/token/cookie VALUES.
+    // class name, yes/no flags, sanitized JS exception message. Never
+    // email/password/token/cookie VALUES.
 
     /** Snapshot of the last failed attempt (null until one happened). */
     private static final class DiagSnapshot {
@@ -414,6 +422,13 @@ public class LoginActivity extends AppCompatActivity {
         final long csrfMs;
         final long loginMs;
         final boolean xsrfCookie;
+        // v1.5.3 sanitized WebView diagnostics (null when not fetch-io)
+        String failedStage;
+        String errMsg;
+        String docUrl;
+        String online;
+        String fetchOk;
+        String bridgeOk;
 
         DiagSnapshot(String stage, int csrfStatus, int loginStatus, String failureType,
                      long csrfMs, long loginMs, boolean xsrfCookie) {
@@ -468,6 +483,25 @@ public class LoginActivity extends AppCompatActivity {
             sb.append("CSRF HTTP: ").append(fmtMs(lastFailure.csrfMs, lastFailure.csrfStatus)).append('\n');
             sb.append("Login HTTP: ").append(fmtMs(lastFailure.loginMs, lastFailure.loginStatus)).append('\n');
             sb.append("Failure type: ").append(lastFailure.failureType).append('\n');
+            // v1.5.3: sanitized WebView failure details (fetch-io only)
+            if (lastFailure.failedStage != null) {
+                sb.append("Failed stage: ").append(lastFailure.failedStage).append('\n');
+            }
+            if (lastFailure.errMsg != null && !lastFailure.errMsg.isEmpty()) {
+                sb.append("JS exception: ").append(lastFailure.errMsg).append('\n');
+            }
+            if (lastFailure.docUrl != null) {
+                sb.append("Auth doc URL: ").append(lastFailure.docUrl).append('\n');
+            }
+            if (lastFailure.fetchOk != null) {
+                sb.append("fetch available: ").append(lastFailure.fetchOk).append('\n');
+            }
+            if (lastFailure.bridgeOk != null) {
+                sb.append("Bridge available: ").append(lastFailure.bridgeOk).append('\n');
+            }
+            if (lastFailure.online != null) {
+                sb.append("navigator.onLine: ").append(lastFailure.online).append('\n');
+            }
             sb.append("Network available: ").append(networkAvailable()).append('\n');
             sb.append("XSRF cookie present: ")
                     .append(lastFailure.xsrfCookie ? "Yes" : "No").append('\n');

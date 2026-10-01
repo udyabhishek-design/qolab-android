@@ -56,9 +56,24 @@ public final class QolabWebViewAuth {
         public final String finalUrl;
         public final String errorBody;
         public final String ioError;
+        /** v1.5.3 sanitized fetch-io diagnostics (never secrets). */
+        public final String failedStage;   // "csrf" | "login" | "retry" | "done"
+        public final String errMsg;        // sanitized exception message (≤120 chars)
+        public final String docUrl;        // location.href at failure
+        public final String online;        // navigator.onLine "yes"/"no"
+        public final String fetchOk;       // typeof fetch === 'function'
+        public final String bridgeOk;      // QolabBridge present
 
         Result(boolean success, String stage, int csrfStatus, int loginStatus,
                long csrfMs, long loginMs, String finalUrl, String errorBody, String ioError) {
+            this(success, stage, csrfStatus, loginStatus, csrfMs, loginMs,
+                    finalUrl, errorBody, ioError, null, null, null, null, null, null);
+        }
+
+        Result(boolean success, String stage, int csrfStatus, int loginStatus,
+               long csrfMs, long loginMs, String finalUrl, String errorBody, String ioError,
+               String failedStage, String errMsg, String docUrl, String online,
+               String fetchOk, String bridgeOk) {
             this.success = success;
             this.stage = stage;
             this.csrfStatus = csrfStatus;
@@ -68,6 +83,12 @@ public final class QolabWebViewAuth {
             this.finalUrl = finalUrl;
             this.errorBody = errorBody;
             this.ioError = ioError;
+            this.failedStage = failedStage;
+            this.errMsg = errMsg;
+            this.docUrl = docUrl;
+            this.online = online;
+            this.fetchOk = fetchOk;
+            this.bridgeOk = bridgeOk;
         }
     }
 
@@ -86,16 +107,29 @@ public final class QolabWebViewAuth {
             long loginMs = o.optLong("loginMs", -1);
             String url = o.has("finalUrl") ? o.optString("finalUrl") : null;
             String body = o.has("body422") ? o.optString("body422") : null;
+            String failedStage = o.has("failedStage") ? o.optString("failedStage") : null;
+            String errMsg = o.has("errMsg") ? sanitize(o.optString("errMsg")) : null;
+            String docUrl = o.has("docUrl") ? sanitize(o.optString("docUrl")) : null;
+            String online = o.has("online") ? o.optString("online") : null;
+            String fetchOk = o.has("fetchOk") ? o.optString("fetchOk") : null;
+            String bridgeOk = o.has("bridgeOk") ? o.optString("bridgeOk") : null;
             boolean ok = "done".equals(stage) && (status / 100 == 2 || status / 100 == 3);
-            return new Result(ok, stage, csrf, status, csrfMs, loginMs, url, body, io);
+            return new Result(ok, stage, csrf, status, csrfMs, loginMs, url, body, io,
+                    failedStage, errMsg, docUrl, online, fetchOk, bridgeOk);
         } catch (Exception e) {
             return null;
         }
     }
 
-    /** evaluateJavascript returns the value as a quoted JSON string. */
-    static String stripJsonWrapper(String s) {
+    /** Sanitize a diagnostic string: cap length, strip control chars. Never secrets. */
+    static String sanitize(String s) {
         if (s == null) return null;
+        String t = s.replaceAll("[\\x00-\\x1f]", " ").trim();
+        return t.length() > 120 ? t.substring(0, 120) : t;
+    }
+
+    /** evaluateJavascript returns the value as a quoted JSON string. */
+    static String stripJsonWrapper(String s) {        if (s == null) return null;
         s = s.trim();
         if (s.length() >= 2 && s.charAt(0) == '"' && s.charAt(s.length() - 1) == '"') {
             s = s.substring(1, s.length() - 1)
@@ -140,7 +174,6 @@ public final class QolabWebViewAuth {
     private volatile boolean finished = false;
     private volatile String lastStage = "start";
     private String rawXsrf = null;
-    private volatile String xsrfSnapshot = null;
 
     public QolabWebViewAuth(Context context, String origin, String email,
                             String password, Listener listener) {
@@ -313,49 +346,14 @@ public final class QolabWebViewAuth {
         }
 
         /**
-         * v1.5.2: SNAPSHOT the current raw XSRF-TOKEN BEFORE the csrf GET.
-         * getFreshXsrf() only accepts a value that has CHANGED since this
-         * snapshot (bounded wait) — reading CookieManager the instant the
-         * fetch resolves can return the STALE value from a previous run
-         * while the fetch carries the freshly rotated session →
-         * token/session mismatch → Laravel 419 (proven on the device).
+         * v1.5.3: REMOVED the v1.5.2 XSRF-freshness bridge methods
+         * (beginXsrf / getFreshXsrf / getFreshXsrfRaw). The Java-side
+         * wait-for-change blocked the WebView JavaBridge thread up to 2s
+         * INSIDE the browser transaction — that is the fetch-io/TypeError
+         * regression path on the device. The physically proven v1.4.8
+         * approach is restored in AUTH_JS: XSRF read from document.cookie
+         * in the browser context, raw representation on the 419 retry.
          */
-        @JavascriptInterface
-        public void beginXsrf() {
-            rawXsrf = readRawXsrfFromCookieManager(0);
-            xsrfSnapshot = rawXsrf;
-        }
-
-        /** Fresh decoded token: waits (≤2s) until the value differs from the snapshot. */
-        @JavascriptInterface
-        public String getFreshXsrf() {
-            try {
-                String raw = XsrfFreshness.awaitChanged(xsrfSnapshot,
-                        () -> readRawXsrfFromCookieManager(0), 2000, 50);
-                if (raw == null) {
-                    // No change within the bound — fall back to the best
-                    // available value rather than failing the whole login.
-                    raw = readRawXsrfFromCookieManager(0);
-                }
-                if (raw == null) return "";
-                rawXsrf = raw;
-                return QolabAuthClient.urlDecode(raw);
-            } catch (Exception e) {
-                return "";
-            }
-        }
-
-        /** Fresh RAW token for the 419 retry (short re-read wait). */
-        @JavascriptInterface
-        public String getFreshXsrfRaw() {
-            String raw = XsrfFreshness.awaitChanged(xsrfSnapshot,
-                    () -> readRawXsrfFromCookieManager(0), 300, 50);
-            if (raw == null) {
-                raw = rawXsrf;
-            }
-            rawXsrf = raw;
-            return raw == null ? "" : raw;
-        }
 
         private String readRawXsrfFromCookieManager(int maxWaitMs) {
             if (maxWaitMs <= 0) {
@@ -403,33 +401,57 @@ public final class QolabWebViewAuth {
     }
 
     /**
-     * Browser-equivalent login: csrf-cookie GET → X-XSRF-TOKEN (decoded,
-     * supplied from Java's CookieManager) → POST /login with the platform
-     * attaching cookies natively. 419 → single retry with the raw value.
-     * AbortController + the Java watchdog guarantee termination.
+     * v1.5.3: restored the PHYSICALLY PROVEN v1.4.8 browser transaction —
+     * XSRF-TOKEN is read from document.cookie INSIDE the browser context
+     * (committed by the network stack when the csrf response is processed),
+     * decoded for the header; the 419 retry re-reads the RAW representation.
+     * No Java-side cookie polling in the middle of the transaction (the
+     * v1.5.2 getFreshXsrf() bridge wait blocked the JavaBridge thread and
+     * JS for up to 2s mid-flow — removed).
+     *
+     * Diagnostics (v1.5.3): the catch reports the FAILED STAGE, the
+     * sanitized JS exception name + message, the csrf status when known,
+     * the document URL, and fetch/bridge/online availability — no
+     * credentials, cookies or token values ever.
+     * Idempotence guard prevents the 1500ms re-inject from starting a
+     * second concurrent chain.
      */
     private static final String AUTH_JS =
-            "(function(){try{var b=window.QolabBridge;if(!b){return;}" +
+            "(function(){try{" +
+            "if(window.__qolabAuthRan){return;}window.__qolabAuthRan=1;" +
+            "var b=window.QolabBridge;if(!b){return;}" +
             "var ctl=new AbortController();setTimeout(function(){try{ctl.abort();}catch(e){}},30000);" +
             "function done(o){try{b.onDone(JSON.stringify(o));}catch(e){}}" +
-            "var t0=performance.now();b.onStage('csrf');b.beginXsrf();" +
+            "var t0=performance.now();var st='csrf';var csrfStatus=0;" +
+            "b.onStage('csrf');" +
             "fetch('/sanctum/csrf-cookie',{credentials:'same-origin',signal:ctl.signal})" +
             ".then(function(r1){" +
-            " var csrfStatus=r1.status,csrfMs=Math.round(performance.now()-t0);" +
-            " b.onStage('login');var t1=performance.now();var tok=b.getFreshXsrf();" +
+            " csrfStatus=r1.status;var csrfMs=Math.round(performance.now()-t0);" +
+            " b.onStage('login');st='login';var t1=performance.now();" +
+            " var m=document.cookie.match(/(?:^|;\\\\s*)XSRF-TOKEN=([^;]+)/);" +
+            " var tok=m?decodeURIComponent(m[1]):b.getXsrfToken();" +
             " function post(token){return fetch('/login',{method:'POST',credentials:'same-origin',signal:ctl.signal," +
             "  headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded','X-XSRF-TOKEN':token}," +
             "  body:'email='+encodeURIComponent(b.getEmail())+'&password='+encodeURIComponent(b.getPassword())+'&remember='});}" +
             " return post(tok).then(function(r2){" +
-            "  var attempt=function(r){if(r.status===419){b.onStage('login-retry-fresh-raw');return post(b.getFreshXsrfRaw());}return Promise.resolve(r);};" +
+            "  var attempt=function(r){if(r.status===419){b.onStage('login-retry-raw');st='retry';" +
+            "   var m2=document.cookie.match(/(?:^|;\\\\s*)XSRF-TOKEN=([^;]+)/);" +
+            "   return post(m2?m2[1]:b.getXsrfTokenRaw());}return Promise.resolve(r);};" +
             "  return attempt(r2).then(function(r3){" +
             "   var loginMs=Math.round(performance.now()-t1);" +
             "   var p=(r3.status===422)?r3.text():Promise.resolve('');" +
-            "   return p.then(function(body){b.onStage('done');" +
+            "   return p.then(function(body){b.onStage('done');st='done';" +
             "    done({stage:'done',status:r3.status,csrfStatus:csrfStatus,csrfMs:csrfMs,loginMs:loginMs,finalUrl:(r3.url||''),body422:body});});" +
             "  });" +
             " });" +
             "})" +
-            ".catch(function(e){done({stage:'fetch-io',err:((e&&e.name)||'FetchError')});});" +
+            ".catch(function(e){" +
+            " var msg=''+((e&&e.message)||'');if(msg.length>120){msg=msg.substring(0,120);}" +
+            " var online=(typeof navigator!=='undefined'&&navigator.onLine)?'yes':'no';" +
+            " var fetchOk=(typeof fetch==='function')?'yes':'no';" +
+            " var bridgeOk=(typeof window.QolabBridge!=='undefined')?'yes':'no';" +
+            " done({stage:'fetch-io',failedStage:st,err:((e&&e.name)||'FetchError'),errMsg:msg," +
+            "  csrfStatus:csrfStatus,docUrl:(location.href||''),online:online,fetchOk:fetchOk,bridgeOk:bridgeOk});" +
+            "})" +
             "}catch(ex){try{window.QolabBridge.onDone(JSON.stringify({stage:'bridge',err:'JsError'}));}catch(e2){}}})()";
 }
