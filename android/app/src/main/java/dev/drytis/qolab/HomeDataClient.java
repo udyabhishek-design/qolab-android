@@ -200,12 +200,15 @@ public final class HomeDataClient {
         this.readTimeoutMs = readMs;
     }
 
-    /** Blocking — background thread. cookieHeader may be null (401 expected). */
-    public Result fetchHome(String cookieHeader) {
+    /** Blocking — background thread. Cookies come from (and Set-Cookie
+     *  responses are synchronized back to) the AUTHORITATIVE cookie store
+     *  at request time — never a stale one-shot snapshot. */
+    public Result fetchHome(QolabCookieSession.CookieStore store, String url) {
         HttpURLConnection c = null;
         try {
-            URL url = new URL(baseUrl + "/mobile/home");
-            c = (HttpURLConnection) url.openConnection();
+            URL u = new URL(url);
+            String cookieHeader = store.cookieHeaderFor(url);
+            c = (HttpURLConnection) u.openConnection();
             if (c instanceof HttpsURLConnection) { /* system trust store */ }
             c.setRequestMethod("GET");
             c.setRequestProperty("Accept", "application/json");
@@ -216,8 +219,13 @@ public final class HomeDataClient {
             c.setReadTimeout(readTimeoutMs);
             c.setInstanceFollowRedirects(false);
             int code = c.getResponseCode();
+            QolabCookieSession.synchronize(c.getHeaderFields(), url, store);
+            boolean hadSession = QolabCookieSession.containsSessionCookie(cookieHeader);
             if (code == 401) {
-                return new Result(code, null, null, true);
+                // A 401 is only a real session loss if we actually SENT a
+                // session cookie. Without one this is a transport/seam
+                // problem — surfacing it as "logged out" would be the bug.
+                return new Result(code, null, null, hadSession);
             }
             if (code / 100 != 2) {
                 return new Result(code, null, null, false);
@@ -232,11 +240,12 @@ public final class HomeDataClient {
     }
 
     /** Blocking — unread notification count for the header badge. */
-    public int fetchUnreadCount(String cookieHeader) {
+    public int fetchUnreadCount(QolabCookieSession.CookieStore store, String url) {
         HttpURLConnection c = null;
         try {
-            URL url = new URL(baseUrl + "/notifications/unread-count");
-            c = (HttpURLConnection) url.openConnection();
+            URL u = new URL(url);
+            String cookieHeader = store.cookieHeaderFor(url);
+            c = (HttpURLConnection) u.openConnection();
             c.setRequestMethod("GET");
             c.setRequestProperty("Accept", "application/json");
             if (cookieHeader != null && !cookieHeader.isEmpty()) {
@@ -246,6 +255,7 @@ public final class HomeDataClient {
             c.setReadTimeout(readTimeoutMs);
             c.setInstanceFollowRedirects(false);
             int code = c.getResponseCode();
+            QolabCookieSession.synchronize(c.getHeaderFields(), url, store);
             if (code / 100 != 2) return -1;
             JSONObject root = new JSONObject(readAll(c));
             return root.optInt("unread_count", 0);

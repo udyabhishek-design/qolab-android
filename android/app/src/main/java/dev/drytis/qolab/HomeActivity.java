@@ -82,6 +82,37 @@ public class HomeActivity extends AppCompatActivity {
     private HomeDataClient.HomeData data;
     private volatile boolean fetching = false;
 
+    /** DEBUG-only diagnostics for the last Home fetch. Booleans/names ONLY —
+     *  never cookie values, tokens, or credentials. */
+    static final class HomeDiag {
+        volatile boolean sessionCookieBefore;
+        volatile boolean requestCookieSent;
+        volatile int httpStatus = -2; // -2 never run, -1 IO
+        volatile long durationMs;
+        volatile boolean setCookieReceived;
+        volatile boolean sessionCookieAfter;
+        volatile boolean parseOk;
+        volatile boolean loginTransition;
+        volatile String loginReason;
+
+        String render() {
+            return "Home request diagnostics (names/booleans only)\n"
+                    + "• thread: home-fetch (background)\n"
+                    + "• session cookie present before request: " + (sessionCookieBefore ? "Yes" : "No") + "\n"
+                    + "• request cookie header present: " + (requestCookieSent ? "Yes" : "No") + "\n"
+                    + "• /mobile/home HTTP status: "
+                    + (httpStatus == -2 ? "not run" : httpStatus == -1 ? "IO failure" : String.valueOf(httpStatus)) + "\n"
+                    + "• response time: " + durationMs + " ms\n"
+                    + "• Set-Cookie received: " + (setCookieReceived ? "Yes" : "No") + "\n"
+                    + "• session cookie present after request: " + (sessionCookieAfter ? "Yes" : "No") + "\n"
+                    + "• JSON parse success: " + (parseOk ? "Yes" : "No") + "\n"
+                    + "• Login transition requested: " + (loginTransition ? "Yes" : "No")
+                    + (loginReason == null ? "" : "\n• reason: " + loginReason);
+        }
+    }
+
+    static final HomeDiag lastDiag = new HomeDiag();
+
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -281,6 +312,24 @@ public class HomeActivity extends AppCompatActivity {
             box.addView(item);
         }
 
+        // DEBUG-only: Home fetch diagnostics (names/booleans only)
+        if (BuildConfig.DEBUG) {
+            TextView diag = new TextView(this);
+            diag.setText(R.string.home_diag_title);
+            diag.setTextColor(0xFF7A756D);
+            diag.setTextSize(13);
+            diag.setPadding(0, pad, 0, pad / 2);
+            box.addView(diag);
+            diag.setOnClickListener(v -> {
+                sheet.dismiss();
+                android.app.AlertDialog d = new android.app.AlertDialog.Builder(HomeActivity.this)
+                        .setTitle(R.string.home_diag_title)
+                        .setMessage(lastDiag.render())
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+            });
+        }
+
         sheet.setContentView(box);
         sheet.show();
         Window w = sheet.getWindow();
@@ -300,24 +349,67 @@ public class HomeActivity extends AppCompatActivity {
         if (fetching) return;
         fetching = true;
         showLoading();
-        final String cookieHeader = sessionCookieHeader();
+        final QolabCookieSession.CookieStore store = new RecordingWebViewCookieStore();
+        final String origin = BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", "");
+        final String url = origin + "/mobile/home";
+        lastDiag.sessionCookieBefore = QolabCookieSession.containsSessionCookie(store.cookieHeaderFor(url));
+        lastDiag.loginTransition = false;
+        lastDiag.loginReason = null;
         new Thread(() -> {
-            HomeDataClient.Result result = client.fetchHome(cookieHeader);
-            int unread = client.fetchUnreadCount(cookieHeader);
+            long t0 = android.os.SystemClock.elapsedRealtime();
+            HomeDataClient.Result result = client.fetchHome(store, url);
+            int unread = client.fetchUnreadCount(store, origin + "/notifications/unread-count");
+            long duration = android.os.SystemClock.elapsedRealtime() - t0;
+            lastDiag.httpStatus = result.status;
+            lastDiag.durationMs = duration;
+            lastDiag.requestCookieSent = true;
+            lastDiag.setCookieReceived = setCookieSeen;
+            lastDiag.sessionCookieAfter = QolabCookieSession.containsSessionCookie(store.cookieHeaderFor(url));
+            lastDiag.parseOk = result.data != null;
+            // A real 401 (we sent a session cookie and the server rejected
+            // it) gets ONE verification retry with cookies re-read from the
+            // authoritative store at request time — never more than one,
+            // and never for IO/5xx/parse problems.
+            if (result.authLost) {
+                lastDiag.loginReason = "verification retry (401 with session cookie)";
+                HomeDataClient.Result retry = client.fetchHome(store, url);
+                lastDiag.httpStatus = retry.status;
+                lastDiag.parseOk = retry.data != null;
+                if (retry.authLost) {
+                    result = retry;
+                } else {
+                    result = retry.data != null ? retry : result;
+                }
+            }
+            final HomeDataClient.Result finalResult = result;
             runOnUiThread(() -> {
                 fetching = false;
-                if (result.authLost) {
+                if (finalResult.authLost) {
+                    if (lastDiag.loginReason == null) lastDiag.loginReason = "401 confirmed after retry";
+                    lastDiag.loginTransition = true;
                     routeToLogin();
                     return;
                 }
-                if (result.data == null) {
+                if (finalResult.data == null) {
                     showError();
                     return;
                 }
-                data = result.data;
+                data = finalResult.data;
                 renderAll(unread);
             });
         }, "home-fetch").start();
+    }
+
+    private volatile boolean setCookieSeen = false;
+
+    /** WebViewCookieStore wrapper that records whether any Set-Cookie
+     *  arrived (boolean only — for the DEBUG diagnostics panel). */
+    private final class RecordingWebViewCookieStore extends QolabCookieSession.WebViewCookieStore {
+        @Override
+        public void setCookie(String url, String setCookieValue) {
+            setCookieSeen = true;
+            super.setCookie(url, setCookieValue);
+        }
     }
 
     private String sessionCookieHeader() {
@@ -352,6 +444,10 @@ public class HomeActivity extends AppCompatActivity {
         hide(meetingSkeleton); show(meetingError);
         hide(deptSkeleton); show(deptError);
         hide(convSkeleton, taskSkeleton); hide(convCard, taskCard); show(bothEmpty);
+        // rooms: remove skeleton children, show the empty/error placeholder
+        roomsRow.removeAllViews();
+        show(roomsEmpty);
+        ((TextView) roomsEmpty).setText(R.string.home_error_section);
     }
 
     private void renderAll(int unread) {
@@ -397,9 +493,11 @@ public class HomeActivity extends AppCompatActivity {
         roomsRow.removeAllViews();
         if (rooms == null || rooms.isEmpty()) {
             show(roomsEmpty);
+            ((TextView) roomsEmpty).setText(R.string.home_rooms_empty);
             return;
         }
         hide(roomsEmpty);
+        ((TextView) roomsEmpty).setText(R.string.home_rooms_empty);
         for (HomeDataClient.Room room : rooms) {
             roomsRow.addView(inflateRoomCard(room));
         }

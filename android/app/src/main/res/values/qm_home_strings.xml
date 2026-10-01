@@ -68,4 +68,6 @@
     <string name="home_time_hours_ago">%dh ago</string>
     <string name="home_time_days_ago">%dd ago</string>
     <string name="home_coming_soon">Coming soon</string>
+    <!-- DEBUG-only diagnostics -->
+    <string name="home_diag_title">Home request diagnostics (dev)</string>
 </resources>

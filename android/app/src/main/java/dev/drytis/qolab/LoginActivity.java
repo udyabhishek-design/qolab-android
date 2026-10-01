@@ -301,13 +301,14 @@ public class LoginActivity extends AppCompatActivity {
                     if (r.success) {
                         // The authenticated session now lives in the SHARED
                         // CookieManager — same context MainActivity/WebView use.
-                        boolean bridged = cookieManagerHasSession();
-                        android.util.Log.i(TAG, "cookieManagerHasSession=" + bridged);
-                        if (bridged) {
-                            onLoginSuccess();
-                            return;
-                        }
-                        bridgeBroke = true; // fetch said OK but no session — bridge is untrustworthy
+                        // Home V1.5.1 fix: a name-only check can see the
+                        // ANONYMOUS pre-login session (from /sanctum/csrf-cookie)
+                        // if the WebView cookie pipeline hasn't committed the
+                        // POST /login Set-Cookie yet — that raced Home into a
+                        // 401 + auto-logout on physical devices. Wait for the
+                        // cookie VALUE to CHANGE (or appear) before bridging.
+                        waitForAuthenticatedCookieThen(new boolean[]{bridgeBroke}, r, email, password);
+                        return;
                     }
                     if (bridgeBroke) {
                         android.util.Log.w(TAG, "webview-auth unusable (" + r.stage
@@ -542,6 +543,68 @@ public class LoginActivity extends AppCompatActivity {
         } catch (Exception ignored) {
         }
         return false;
+    }
+
+    /**
+     * Home V1.5.1: after a successful WebView /login POST, poll the
+     * CookieManager (flush + read) until the *-session cookie VALUE changes
+     * from the pre-login snapshot — the anonymous csrf-cookie session
+     * shares the cookie NAME, so a name-only check can bridge too early
+     * and hand HomeActivity an unauthenticated session (device 401 +
+     * automatic logout loop). Bounded: ~3s, then the documented fallback
+     * (Java client) runs. Cookie VALUES are compared in-memory only and
+     * never logged.
+     */
+    private void waitForAuthenticatedCookieThen(boolean[] bridgeBrokeRef,
+            QolabWebViewAuth.Result r, String email, String password) {
+        final String origin = appOrigin;
+        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final String preLoginSessionValue = sessionCookieValue(origin);
+        final int[] attempts = {0};
+        final int MAX_ATTEMPTS = 10; // 10 × 300ms = 3s bounded wait
+        final Runnable poll = new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+                    cm.flush();
+                } catch (Exception ignored) {
+                }
+                String current = sessionCookieValue(origin);
+                boolean changed = current != null
+                        && (preLoginSessionValue == null || !current.equals(preLoginSessionValue));
+                if (changed) {
+                    android.util.Log.i(TAG, "authenticated session cookie committed → Home");
+                    onLoginSuccess();
+                    return;
+                }
+                if (attempts[0]++ >= MAX_ATTEMPTS) {
+                    android.util.Log.w(TAG,
+                            "session cookie never changed after login → Java-client fallback");
+                    loginWithJavaClient(email, password);
+                    return;
+                }
+                h.postDelayed(this, 300);
+            }
+        };
+        h.postDelayed(poll, 100);
+    }
+
+    /** Cookie VALUE for comparison only — never logged, never exposed. */
+    private String sessionCookieValue(String origin) {
+        try {
+            String cookies = android.webkit.CookieManager.getInstance().getCookie(origin);
+            if (cookies == null) return null;
+            for (String part : cookies.split(";")) {
+                String p = part.trim();
+                String name = p.split("=", 2)[0].trim();
+                if (name.toLowerCase().endsWith("session")) {
+                    return p.contains("=") ? p.split("=", 2)[1] : "";
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     private void onLoginSuccess() {
