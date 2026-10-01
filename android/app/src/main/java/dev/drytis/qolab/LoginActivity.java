@@ -335,7 +335,8 @@ public class LoginActivity extends AppCompatActivity {
         String failureType = r.stage;
         DiagSnapshot d = new DiagSnapshot("driver", 0, 0, failureType,
                 r.totalMs, -1, false);
-        d.errMsg = r.note;
+        d.errMsg = r.note + (r.domDiag == null || r.domDiag.isEmpty()
+                ? "" : " [" + r.domDiag + "]");
         d.docUrl = r.finalUrl;
         d.failedStage = r.stage;
         return d;

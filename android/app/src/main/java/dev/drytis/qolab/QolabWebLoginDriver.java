@@ -16,29 +16,28 @@ import android.widget.FrameLayout;
 import org.json.JSONObject;
 
 /**
- * v1.5.4: WebView login driver that authenticates through the REAL web
- * implementation — the exact flow that worked on this phone in the browser.
+ * v1.5.5: WebView login driver that authenticates through the REAL web
+ * implementation. The Development /login page is a Vite SPA shell — the
+ * server HTML contains only <div id="app"></div>; the React/Inertia login
+ * form (input[type=email], input[type=password], form) is mounted
+ * client-side by /build/assets/app-*.js. v1.5.4 failed on the device
+ * because its 10s in-JS wait for #email/#password was not enough for the
+ * device to download, parse and hydrate the SPA. v1.5.5 changes:
  *
- * The hidden WebView loads the Development `/login` page (the actual React/
- * Inertia/Fortify implementation), waits for the form to be present, fills
- * #email / #password through native value setters + input events (so React
- * state updates), triggers the form's own submit handler via
- * requestSubmit(), and lets the browser/Inertia/Fortify pipeline handle
- * CSRF, cookies, session rotation and redirects.
+ *  - Java-side retry loop (not one-shot): onPageFinished on /login
+ *    re-runs the probe up to 60 times over ~30s, each probe reports
+ *    diagnostics (readyState, form count, email/password/submit found)
+ *    so a "form never appeared" failure is now self-describing.
+ *  - SEMANTIC selectors (input[type=email] / [type=password], form,
+ *    button[type=submit]) with id fallbacks — resilient to redesign.
+ *  - Fill uses native value setters + input events (React controlled
+ *    inputs), submit via form.requestSubmit() so the page's own
+ *    Inertia/Fortify handler runs CSRF/cookies/rotation/redirects.
+ *  - Failure classification from the page's own error elements.
  *
- * Success is detected by navigation AWAY from /login (Fortify redirects to
- * the authenticated area) combined with an authenticated session cookie
- * (checked by name + value transition by the caller's seam poll, which
- * runs AFTER the transaction completes).
- *
- * Failure classification comes from the page itself:
- *  - visible field error / error banner  → invalid credentials (422)
- *  - still on /login after redirect settles → credentials rejected
- *  - timeout / load failure → network/timeout native error
- *
- * Credentials reach the page ONLY through @JavascriptInterface getters
- * (same boundary as the previous bridge); they are never logged, never
- * persisted, and the bridge is removed + WebView destroyed when done.
+ * Credentials reach the page ONLY via @JavascriptInterface getters;
+ * never logged, never persisted; bridge removed + WebView destroyed
+ * when done.
  */
 public final class QolabWebLoginDriver {
 
@@ -50,25 +49,27 @@ public final class QolabWebLoginDriver {
     public static final class Result {
         /** "done" | "invalid-credentials" | "page-error" | "timeout" | "load" | "bridge" */
         public final String stage;
-        /** True when navigation left /login (authenticated redirect). */
         public final boolean success;
-        /** Sanitized message for diagnostics (no secrets). */
         public final String note;
         public final long totalMs;
-        /** Final URL (host+path only — no query, no fragments). */
         public final String finalUrl;
+        /** v1.5.5 DEBUG-only DOM diagnostics (booleans/counts only). */
+        public final String domDiag;
 
-        Result(boolean success, String stage, String note, long totalMs, String finalUrl) {
+        Result(boolean success, String stage, String note, long totalMs, String finalUrl, String domDiag) {
             this.success = success;
             this.stage = stage;
             this.note = note;
             this.totalMs = totalMs;
             this.finalUrl = finalUrl;
+            this.domDiag = domDiag;
         }
     }
 
-    private static final long LOAD_TIMEOUT_MS = 25_000;
-    private static final long SUBMIT_TIMEOUT_MS = 30_000;
+    private static final long LOAD_TIMEOUT_MS = 30_000;
+    private static final long SUBMIT_TIMEOUT_MS = 25_000;
+    private static final int PROBE_MAX = 60;          // 60 × 500ms ≈ 30s hydration budget
+    private static final long PROBE_INTERVAL_MS = 500;
 
     private final Context context;
     private final String origin;
@@ -78,8 +79,8 @@ public final class QolabWebLoginDriver {
     private final Handler main = new Handler(Looper.getMainLooper());
     private WebView webView;
     private volatile boolean finished = false;
-    private volatile boolean formFilled = false;
     private volatile boolean submitted = false;
+    private volatile String lastDomDiag = "";
     private String lastUrl = "";
     private long t0;
 
@@ -99,20 +100,35 @@ public final class QolabWebLoginDriver {
     }
 
     private final Runnable loadWatchdog = () -> {
-        if (!finished && !formFilled) {
-            finish(new Result(false, "timeout", "login page did not finish loading", elapsed(), lastUrl));
+        if (!finished && !submitted) {
+            finish(new Result(false, "timeout",
+                    "login page/form did not appear in " + LOAD_TIMEOUT_MS + "ms", elapsed(), lastUrl, lastDomDiag));
         }
     };
 
     private final Runnable submitWatchdog = () -> {
         if (!finished) {
-            finish(new Result(false, submitted ? "timeout" : "page-error",
-                    submitted ? "no navigation after submit" : "form never appeared", elapsed(), lastUrl));
+            finish(new Result(false, "timeout",
+                    "no navigation after submit", elapsed(), lastUrl, lastDomDiag));
         }
     };
 
-    /** Safe page-level outcome beacon from the MutationObserver. */
-    private final Runnable outcomeCheck = this::evaluateOutcome;
+    /** Java-side probe scheduler — re-tries until the form is ready. */
+    private final Runnable probe = new Runnable() {
+        private int count = 0;
+
+        @Override
+        public void run() {
+            if (finished || submitted || webView == null) return;
+            if (count++ >= PROBE_MAX) {
+                finish(new Result(false, "page-error",
+                        "login form never appeared (SPA hydration incomplete)", elapsed(), lastUrl, lastDomDiag));
+                return;
+            }
+            webView.evaluateJavascript(PROBE_JS, null);
+            main.postDelayed(this, PROBE_INTERVAL_MS);
+        }
+    };
 
     @SuppressLint("SetJavaScriptEnabled")
     public void start() {
@@ -150,18 +166,13 @@ public final class QolabWebLoginDriver {
                     lastUrl = sanitizeUrl(url);
                     if (finished) return;
                     if (isLoginFormUrl(url)) {
-                        // The real login page is up — fill + submit (idempotent guard).
-                        main.postDelayed(() -> {
-                            if (!finished && !formFilled) {
-                                formFilled = true;
-                                main.removeCallbacks(loadWatchdog);
-                                main.postDelayed(submitWatchdog, SUBMIT_TIMEOUT_MS);
-                                webView.evaluateJavascript(FILL_SUBMIT_JS, null);
-                            }
-                        }, 400); // let React finish hydrating
+                        // Start (or continue) probing until the SPA form mounts.
+                        main.removeCallbacks(probe);
+                        main.postDelayed(probe, PROBE_INTERVAL_MS);
                     } else {
                         // Navigated away from /login → authenticated redirect.
-                        main.postDelayed(outcomeCheck, 600);
+                        main.removeCallbacks(probe);
+                        main.postDelayed(() -> evaluateOutcome(), 600);
                     }
                 }
             });
@@ -175,17 +186,48 @@ public final class QolabWebLoginDriver {
         return url != null && (url.endsWith("/login") || url.contains("/login?"));
     }
 
+    /** Probe result beacon: fills the form the first time it is ready. */
+    private void onProbeJson(String json) {
+        if (finished || submitted) return;
+        try {
+            JSONObject o = new JSONObject(json);
+            boolean formReady = o.optBoolean("formReady", false);
+            lastDomDiag = buildDomDiag(o);
+            if (formReady) {
+                main.removeCallbacks(probe);
+                submitted = true;
+                main.removeCallbacks(loadWatchdog);
+                main.postDelayed(submitWatchdog, SUBMIT_TIMEOUT_MS);
+                // Fill + submit now that the form is confirmed present.
+                webView.evaluateJavascript(FILL_SUBMIT_JS, null);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static String buildDomDiag(JSONObject o) {
+        // Booleans/counts only — never input values.
+        return "readyState=" + o.optString("readyState", "?")
+                + " title=" + sanitizeNote(o.optString("title", ""))
+                + " forms=" + o.optInt("forms", 0)
+                + " email=" + yn(o.optBoolean("email", false))
+                + " password=" + yn(o.optBoolean("password", false))
+                + " submit=" + yn(o.optBoolean("submit", false));
+    }
+
+    private static String yn(boolean b) {
+        return b ? "Y" : "N";
+    }
+
     /** Outcome decision — navigation URL plus the page's own error state. */
     private void evaluateOutcome() {
         if (finished) return;
         main.removeCallbacks(submitWatchdog);
         boolean leftLogin = !isLoginFormUrl(lastUrl);
         if (leftLogin) {
-            finish(new Result(true, "done", "authenticated redirect", elapsed(), lastUrl));
+            finish(new Result(true, "done", "authenticated redirect", elapsed(), lastUrl, lastDomDiag));
             return;
         }
-        // Still on /login — check whether the page rendered a field error
-        // (invalid credentials) or just idles (page-error).
         if (webView != null) {
             webView.evaluateJavascript(OUTCOME_JS, null);
         }
@@ -201,14 +243,14 @@ public final class QolabWebLoginDriver {
             if (hasError) {
                 finish(new Result(false, "invalid-credentials",
                         note.isEmpty() ? "credentials rejected by the login form" : note,
-                        elapsed(), lastUrl));
+                        elapsed(), lastUrl, lastDomDiag));
             } else {
                 finish(new Result(false, "page-error",
                         note.isEmpty() ? "no navigation away from login" : note,
-                        elapsed(), lastUrl));
+                        elapsed(), lastUrl, lastDomDiag));
             }
         } catch (Exception e) {
-            finish(new Result(false, "bridge", "outcome beacon unreadable", elapsed(), lastUrl));
+            finish(new Result(false, "bridge", "outcome beacon unreadable", elapsed(), lastUrl, lastDomDiag));
         }
     }
 
@@ -217,7 +259,7 @@ public final class QolabWebLoginDriver {
         finished = true;
         main.removeCallbacks(loadWatchdog);
         main.removeCallbacks(submitWatchdog);
-        main.removeCallbacks(outcomeCheck);
+        main.removeCallbacks(probe);
         final WebView wv = webView;
         main.post(() -> {
             if (wv != null) {
@@ -258,7 +300,7 @@ public final class QolabWebLoginDriver {
         return t.length() > 100 ? t.substring(0, 100) : t;
     }
 
-    /** JS→Java beacon. Credentials leave ONLY through getEmail/getPassword. */
+    /** JS→Java beacons. Credentials leave ONLY through getEmail/getPassword. */
     private final class Bridge {
         @JavascriptInterface
         public String getEmail() {
@@ -268,6 +310,11 @@ public final class QolabWebLoginDriver {
         @JavascriptInterface
         public String getPassword() {
             return password;
+        }
+
+        @JavascriptInterface
+        public void onProbe(String json) {
+            main.post(() -> onProbeJson(json));
         }
 
         /** Outcome beacon from the page (invalid-credentials vs idle). */
@@ -284,38 +331,49 @@ public final class QolabWebLoginDriver {
     }
 
     /**
-     * Fill the REAL login form (#email, #password) using native value
-     * setters + input events so React's controlled inputs pick them up,
-     * then trigger the form's own submit handler (requestSubmit) —
-     * Inertia/Fortify then handles CSRF, cookies, rotation and the
-     * redirect natively. A MutationObserver reports back whether the
-     * page shows a visible error (credentials rejected) after submit.
+     * Java-scheduled probe: is the login DOM ready? Reports diagnostics
+     * (readyState, title, form count, email/password/submit found) every
+     * probe so failures are self-describing. Fires the moment the form is
+     * ready — the Java side then runs FILL_SUBMIT_JS.
+     */
+    private static final String PROBE_JS =
+            "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
+            "var em=document.querySelector('input[type=email],#email');" +
+            "var pw=document.querySelector('input[type=password],#password');" +
+            "var f=document.querySelector('form');" +
+            "var sb=f?f.querySelector('button[type=submit],input[type=submit]'):null;" +
+            "var ready=!!(em&&pw&&f&&document.readyState!=='loading');" +
+            "d.onProbe(JSON.stringify({formReady:ready," +
+            " readyState:document.readyState||'?',title:(document.title||'').substring(0,40)," +
+            " forms:document.forms?document.forms.length:0," +
+            " email:!!em,password:!!pw,submit:!!sb}));" +
+            "}catch(e){}})()";
+
+    /**
+     * Fill the REAL login form using native value setters + input events
+     * so React's controlled inputs pick them up, then trigger the form's
+     * own submit handler (requestSubmit) — Inertia/Fortify handles CSRF,
+     * cookies, rotation and the redirect natively. A MutationObserver
+     * reports whether the page shows a visible error after submit.
      */
     private static final String FILL_SUBMIT_JS =
             "(function(){try{" +
             "var d=window.QolabLoginDriver;if(!d){return;}" +
-            "function setVal(sel,v){var el=document.querySelector(sel);" +
-            " if(!el){return false;}" +
-            " var proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;" +
+            "function setVal(el,v){var proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;" +
             " var setter=Object.getOwnPropertyDescriptor(proto,'value').set;" +
-            " setter.call(el,v);" +
-            " el.dispatchEvent(new Event('input',{bubbles:true}));" +
-            " return true;}" +
-            // Wait for React hydration to finish — the form must exist.
-            "var tries=0;" +
-            "function fill(){" +
-            " if(document.querySelector('#email')&&document.querySelector('#password')){" +
-            "  setVal('#email',d.getEmail());setVal('#password',d.getPassword());" +
-            "  d.onStage('form-filled');" +
-            "  setTimeout(function(){" +
-            "   var f=document.querySelector('form');" +
-            "   if(f){d.onStage('submitted');f.requestSubmit();}" +
-            "  },250);" +
-            " } else if(tries++<50){setTimeout(fill,200);} else {d.onStage('form-missing');}" +
-            "}" +
-            "fill();" +
-            // After submit, if we are still on /login, the page either shows
-            // field errors (invalid credentials) or an error banner. Watch DOM.
+            " setter.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));" +
+            " el.dispatchEvent(new Event('change',{bubbles:true}));}" +
+            "var em=document.querySelector('input[type=email],#email');" +
+            "var pw=document.querySelector('input[type=password],#password');" +
+            "if(!em||!pw){d.onStage('form-missing-at-fill');return;}" +
+            "setVal(em,d.getEmail());setVal(pw,d.getPassword());" +
+            "d.onStage('form-filled');" +
+            "setTimeout(function(){" +
+            " var f=document.querySelector('form');" +
+            " if(f){d.onStage('submitted');f.requestSubmit();}" +
+            "},250);" +
+            // After submit, if still on /login: field errors (invalid
+            // credentials) or an error banner. Watch the DOM.
             "var ob=new MutationObserver(function(){" +
             " if(window.__qolabOutcomeSent){return;}" +
             " var bad=document.querySelector('.text-red-600,p[class*=red-600],div[class*=bg-red-100]');" +
