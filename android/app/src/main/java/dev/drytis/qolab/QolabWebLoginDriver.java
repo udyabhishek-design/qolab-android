@@ -45,6 +45,46 @@ public final class QolabWebLoginDriver {
         void onLoginResult(Result r);
     }
 
+    /**
+     * v1.5.7: PERSISTENT auth-driver trace (static — survives the hidden
+     * WebView's destruction and LoginActivity recreation). Safe fields
+     * ONLY: stages, booleans, sanitized href/title/note. Never
+     * credentials, cookie or token values.
+     */
+    public static final class Trace {
+        public volatile String stage = "start";
+        public volatile String note = "";
+        public volatile String href = "";
+        public volatile String title = "";
+        public volatile boolean formFound = false;
+        public volatile boolean emailVal = false;
+        public volatile boolean pwVal = false;
+        public volatile boolean submitFired = false;
+        public volatile boolean errorVisible = false;
+        public volatile long totalMs = -1;
+
+        /** One-line, panel-safe rendering (booleans only). */
+        public String render() {
+            return "stage=" + stage
+                    + " submitFired=" + yn2(submitFired)
+                    + " form=" + yn2(formFound)
+                    + " emailVal=" + yn2(emailVal)
+                    + " pwVal=" + yn2(pwVal)
+                    + " errorVisible=" + yn2(errorVisible)
+                    + " title=" + QolabWebLoginDriver.sanitizeNote(title)
+                    + " href=" + href
+                    + (note.isEmpty() ? "" : " note=" + note)
+                    + (totalMs >= 0 ? " ms=" + totalMs : "");
+        }
+
+        private static String yn2(boolean b) {
+            return b ? "Y" : "N";
+        }
+    }
+
+    /** Latest driver trace — read by the Login diagnostics panel. */
+    public static final Trace LAST = new Trace();
+
     /** Safe result — statuses, timings, sanitized messages. Never values. */
     public static final class Result {
         /** "done" | "invalid-credentials" | "page-error" | "timeout" | "load" | "bridge" */
@@ -219,7 +259,11 @@ public final class QolabWebLoginDriver {
             JSONObject o = new JSONObject(json);
             boolean formReady = o.optBoolean("formReady", false);
             lastDomDiag = buildDomDiag(o);
+            LAST.formFound = formReady;
+            LAST.href = lastUrl;
+            LAST.title = o.optString("title", "");
             if (formReady) {
+                LAST.stage = "form-ready";
                 main.removeCallbacks(probe);
                 submitted = true;
                 main.removeCallbacks(loadWatchdog);
@@ -255,6 +299,12 @@ public final class QolabWebLoginDriver {
             String href = sanitizeUrl(o.optString("href", ""));
             if (!href.isEmpty()) lastUrl = href;
             boolean hasError = o.optBoolean("hasVisibleError", false);
+            LAST.href = lastUrl;
+            LAST.title = o.optString("title", "");
+            LAST.errorVisible = hasError;
+            LAST.emailVal = o.optBoolean("emailFilled", false);
+            LAST.pwVal = o.optBoolean("passwordFilled", false);
+            LAST.submitFired = true; // poll only runs after submit fired
             // Persist the richest diag we have (booleans only, never values).
             lastDomDiag = "readyState=" + o.optString("readyState", "?")
                     + " title=" + sanitizeNote(o.optString("title", ""))
@@ -326,6 +376,10 @@ public final class QolabWebLoginDriver {
     private void finish(Result r) {
         if (finished) return;
         finished = true;
+        LAST.stage = r.stage;
+        LAST.note = sanitizeNote(r.note == null ? "" : r.note);
+        LAST.href = r.finalUrl == null ? "" : r.finalUrl;
+        LAST.totalMs = r.totalMs;
         main.removeCallbacks(loadWatchdog);
         main.removeCallbacks(submitWatchdog);
         main.removeCallbacks(probe);
@@ -448,6 +502,7 @@ public final class QolabWebLoginDriver {
             "var emOk=!!em.value&&em.value.length>0;" +
             "var pwOk=!!pw.value&&pw.value.length>0;" +
             "d.onStage('form-filled emailLanded='+(emOk?'Y':'N')+' pwLanded='+(pwOk?'Y':'N'));" +
+            "window.__qolabEmailLanded=emOk;window.__qolabPwLanded=pwOk;" +
             "setTimeout(function(){" +
             " var f=document.querySelector('form');if(!f){d.onStage('no-form');return;}" +
             " var sb=f.querySelector('button[type=submit],input[type=submit]');" +

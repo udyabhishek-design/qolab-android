@@ -302,10 +302,12 @@ public class LoginActivity extends AppCompatActivity {
                             + (r.note == null || r.note.isEmpty() ? "" : " note=" + r.note));
 
                     if (r.success) {
-                        // Authenticated redirect completed. Session cookie
-                        // VALUE transition check (post-transaction, main
-                        // thread — safe) before bridging to Home.
-                        waitForAuthenticatedCookieThen(new boolean[]{false}, email, password);
+                        // Authenticated redirect completed (driver-verified).
+                        // v1.5.7: the redirect was detected AFTER auth
+                        // completed, so there is no pre-login value to
+                        // compare against — wait for session cookie
+                        // PRESENCE (with flush), not a value change.
+                        waitForAuthenticatedSessionPresent();
                         return;
                     }
                     String message;
@@ -325,6 +327,9 @@ public class LoginActivity extends AppCompatActivity {
                             break;
                     }
                     lastFailure = snapshotOf(r);
+                    // v1.5.7: auto-expand so the panel is ALWAYS visible
+                    // after a failure — no tap required.
+                    diagExpanded = true;
                     onLoginFailure(message);
                 }));
         driver.start();
@@ -449,6 +454,8 @@ public class LoginActivity extends AppCompatActivity {
                     .append(lastFailure.loginStatus == 0
                             ? "Not reached" : "Yes").append('\n');
             sb.append("Cookie bridge: ").append("n/a (WebView session context)").append('\n');
+            sb.append("Authenticated session present: ")
+                    .append(sessionCookieValue(appOrigin) != null ? "Yes" : "No").append('\n');
             sb.append("MainActivity launched: No");
         }
         diagBody.setText(sb.toString());
@@ -497,29 +504,19 @@ public class LoginActivity extends AppCompatActivity {
     }
 
     /**
-    /**
-     * v1.4.6: the manual Java→CookieManager cookie bridge is OBSOLETE —
-     * authentication now happens inside the WebView session context, so
-     * Laravel establishes cookies natively in the shared CookieManager.
+     * v1.5.7: called after the login DRIVER has already verified the
+     * authenticated redirect (leaving /login). At this point auth is
+     * complete — there is no pre-login snapshot to compare against (the
+     * v1.5.6 seam demanded a value CHANGE here and could never succeed,
+     * rejecting successful logins). Waits for the *-session cookie to be
+     * present in the CookieManager (flush + read), bounded ~4s, then
+     * bridges to Home. Records the outcome in the persistent trace.
      */
-
-    /**
-     * Home V1.5.1: after a successful WebView /login POST, poll the
-     * CookieManager (flush + read) until the *-session cookie VALUE changes
-     * from the pre-login snapshot — the anonymous csrf-cookie session
-     * shares the cookie NAME, so a name-only check can bridge too early
-     * and hand HomeActivity an unauthenticated session (device 401 +
-     * automatic logout loop). Bounded: ~3s, then the documented fallback
-     * (Java client) runs. Cookie VALUES are compared in-memory only and
-     * never logged.
-     */
-    private void waitForAuthenticatedCookieThen(boolean[] bridgeBrokeRef,
-            String email, String password) {
+    private void waitForAuthenticatedSessionPresent() {
         final String origin = appOrigin;
         final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-        final String preLoginSessionValue = sessionCookieValue(origin);
         final int[] attempts = {0};
-        final int MAX_ATTEMPTS = 10; // 10 × 300ms = 3s bounded wait
+        final int MAX_ATTEMPTS = 13; // 13 × 300ms ≈ 4s bounded wait
         final Runnable poll = new Runnable() {
             @Override
             public void run() {
@@ -529,16 +526,19 @@ public class LoginActivity extends AppCompatActivity {
                 } catch (Exception ignored) {
                 }
                 String current = sessionCookieValue(origin);
-                boolean changed = current != null
-                        && (preLoginSessionValue == null || !current.equals(preLoginSessionValue));
-                if (changed) {
-                    android.util.Log.i(TAG, "authenticated session cookie committed → Home");
+                boolean present = current != null && !current.isEmpty();
+                if (present) {
+                    android.util.Log.i(TAG, "authenticated session cookie present → Home");
                     onLoginSuccess();
                     return;
                 }
                 if (attempts[0]++ >= MAX_ATTEMPTS) {
                     android.util.Log.w(TAG,
-                            "session cookie never changed after login → no bridge (report as failure)");
+                            "session cookie absent after driver-verified redirect");
+                    QolabWebLoginDriver.LAST.stage = "session-missing";
+                    QolabWebLoginDriver.LAST.note = "driver verified redirect but no session cookie in CookieManager";
+                    lastFailure = traceSnapshot("session-missing",
+                            "no session cookie after authenticated redirect");
                     onLoginFailure(getString(R.string.login_error_generic));
                     return;
                 }
@@ -546,6 +546,17 @@ public class LoginActivity extends AppCompatActivity {
             }
         };
         h.postDelayed(poll, 100);
+    }
+
+    /** v1.5.7: snapshot from the persistent driver trace (safe fields). */
+    private DiagSnapshot traceSnapshot(String stage, String note) {
+        QolabWebLoginDriver.Trace t = QolabWebLoginDriver.LAST;
+        DiagSnapshot d = new DiagSnapshot(stage, 0, 0, stage,
+                t.totalMs, -1, false);
+        d.failedStage = stage;
+        d.errMsg = (note == null ? "" : note) + " [" + t.render() + "]";
+        d.docUrl = t.href;
+        return d;
     }
 
     /** Cookie VALUE for comparison only — never logged, never exposed. */
@@ -582,10 +593,19 @@ public class LoginActivity extends AppCompatActivity {
             showFieldError(formError, getString(R.string.login_error_generic));
         }
         // DEVELOPMENT-ONLY: surface the safe diagnostics panel after failure.
-        // (In release builds bindDiagnosticsViews() has already removed it.)
-        if (BuildConfig.DEBUG && diagPanel != null && lastFailure != null) {
+        // v1.5.7: ALWAYS record + show — if no driver snapshot exists, fall
+        // back to the persistent trace (survives WebView destruction).
+        if (BuildConfig.DEBUG && diagPanel != null) {
+            if (lastFailure == null) {
+                lastFailure = traceSnapshot(QolabWebLoginDriver.LAST.stage,
+                        QolabWebLoginDriver.LAST.note);
+            }
             diagPanel.setVisibility(View.VISIBLE);
-            if (diagExpanded) renderDiagnostics();
+            if (diagBody != null) diagBody.setVisibility(
+                    diagExpanded ? View.VISIBLE : View.GONE);
+            if (diagProbe != null) diagProbe.setVisibility(
+                    diagExpanded ? View.VISIBLE : View.GONE);
+            renderDiagnostics();
         }
         // Bring the error into view on small screens
         scroll.post(() -> formError.requestRectangleOnScreen(
