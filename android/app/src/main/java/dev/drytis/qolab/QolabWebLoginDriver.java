@@ -70,6 +70,9 @@ public final class QolabWebLoginDriver {
     private static final long SUBMIT_TIMEOUT_MS = 25_000;
     private static final int PROBE_MAX = 60;          // 60 × 500ms ≈ 30s hydration budget
     private static final long PROBE_INTERVAL_MS = 500;
+    /** v1.5.6: post-submit poll cadence/budget (must fit inside SUBMIT_TIMEOUT_MS). */
+    private static final long POST_SUBMIT_INTERVAL_MS = 1000;
+    private static final int POST_SUBMIT_MAX = 24;
 
     private final Context context;
     private final String origin;
@@ -130,6 +133,26 @@ public final class QolabWebLoginDriver {
         }
     };
 
+    /**
+     * v1.5.6: post-submit poll — evaluates the page state every second
+     * after submit. Success is leaving /login in location.href (works for
+     * Inertia client-side redirects that never trigger onPageFinished).
+     */
+    private final Runnable postSubmitPoll = new Runnable() {
+        private int count = 0;
+
+        @Override
+        public void run() {
+            if (finished || webView == null) return;
+            if (count++ > POST_SUBMIT_MAX) {
+                evaluateOutcome(); // deadline — classify from page state
+                return;
+            }
+            webView.evaluateJavascript(POLL_JS, null);
+            main.postDelayed(this, POST_SUBMIT_INTERVAL_MS);
+        }
+    };
+
     @SuppressLint("SetJavaScriptEnabled")
     public void start() {
         main.post(() -> {
@@ -170,8 +193,11 @@ public final class QolabWebLoginDriver {
                         main.removeCallbacks(probe);
                         main.postDelayed(probe, PROBE_INTERVAL_MS);
                     } else {
-                        // Navigated away from /login → authenticated redirect.
+                        // Navigated away from /login → authenticated redirect
+                        // (real navigation path; the client-side path is
+                        // detected by the post-submit poll).
                         main.removeCallbacks(probe);
+                        main.removeCallbacks(postSubmitPoll);
                         main.postDelayed(() -> evaluateOutcome(), 600);
                     }
                 }
@@ -198,6 +224,12 @@ public final class QolabWebLoginDriver {
                 submitted = true;
                 main.removeCallbacks(loadWatchdog);
                 main.postDelayed(submitWatchdog, SUBMIT_TIMEOUT_MS);
+                // v1.5.6: poll post-submit state — Inertia logins redirect
+                // client-side (XHR + history API) WITHOUT a full page load,
+                // so onPageFinished never fires on success. The poll reads
+                // location.href (history changes ARE visible), title, error
+                // elements and form state each second.
+                main.postDelayed(postSubmitPoll, 800);
                 // Fill + submit now that the form is confirmed present.
                 webView.evaluateJavascript(FILL_SUBMIT_JS, null);
             }
@@ -213,6 +245,43 @@ public final class QolabWebLoginDriver {
                 + " email=" + yn(o.optBoolean("email", false))
                 + " password=" + yn(o.optBoolean("password", false))
                 + " submit=" + yn(o.optBoolean("submit", false));
+    }
+
+    /** v1.5.6: post-submit poll beacon — success/error/idle detection. */
+    private void onPollJson(String json) {
+        if (finished) return;
+        try {
+            JSONObject o = new JSONObject(json);
+            String href = sanitizeUrl(o.optString("href", ""));
+            if (!href.isEmpty()) lastUrl = href;
+            boolean hasError = o.optBoolean("hasVisibleError", false);
+            // Persist the richest diag we have (booleans only, never values).
+            lastDomDiag = "readyState=" + o.optString("readyState", "?")
+                    + " title=" + sanitizeNote(o.optString("title", ""))
+                    + " emailVal=" + yn(o.optBoolean("emailFilled", false))
+                    + " pwVal=" + yn(o.optBoolean("passwordFilled", false))
+                    + " formValid=" + yn(o.optBoolean("formValid", true))
+                    + " errorVisible=" + yn(hasError)
+                    + " href=" + lastUrl;
+            if (!isLoginFormUrl(lastUrl)) {
+                // Left /login (history API or real navigation) → success.
+                main.removeCallbacks(submitWatchdog);
+                main.removeCallbacks(postSubmitPoll);
+                finish(new Result(true, "done", "authenticated redirect (client-side)",
+                        elapsed(), lastUrl, lastDomDiag));
+                return;
+            }
+            if (hasError) {
+                main.removeCallbacks(submitWatchdog);
+                main.removeCallbacks(postSubmitPoll);
+                finish(new Result(false, "invalid-credentials",
+                        o.optString("note", "").isEmpty()
+                                ? "field error visible on login page"
+                                : sanitizeNote(o.optString("note", "")),
+                        elapsed(), lastUrl, lastDomDiag));
+            }
+        } catch (Exception ignored) {
+        }
     }
 
     private static String yn(boolean b) {
@@ -260,6 +329,7 @@ public final class QolabWebLoginDriver {
         main.removeCallbacks(loadWatchdog);
         main.removeCallbacks(submitWatchdog);
         main.removeCallbacks(probe);
+        main.removeCallbacks(postSubmitPoll);
         final WebView wv = webView;
         main.post(() -> {
             if (wv != null) {
@@ -317,6 +387,12 @@ public final class QolabWebLoginDriver {
             main.post(() -> onProbeJson(json));
         }
 
+        /** v1.5.6: post-submit poll beacon (no secrets — booleans/hrefs). */
+        @JavascriptInterface
+        public void onPoll(String json) {
+            main.post(() -> onPollJson(json));
+        }
+
         /** Outcome beacon from the page (invalid-credentials vs idle). */
         @JavascriptInterface
         public void onOutcome(String json) {
@@ -351,10 +427,11 @@ public final class QolabWebLoginDriver {
 
     /**
      * Fill the REAL login form using native value setters + input events
-     * so React's controlled inputs pick them up, then trigger the form's
-     * own submit handler (requestSubmit) — Inertia/Fortify handles CSRF,
-     * cookies, rotation and the redirect natively. A MutationObserver
-     * reports whether the page shows a visible error after submit.
+     * so React's controlled inputs pick them up, verify the values landed
+     * (booleans only — never the values themselves), then trigger the
+     * form's own submit handler (requestSubmit, submit-button click
+     * fallback) — Inertia/Fortify handles CSRF, cookies, rotation and the
+     * redirect natively.
      */
     private static final String FILL_SUBMIT_JS =
             "(function(){try{" +
@@ -367,27 +444,50 @@ public final class QolabWebLoginDriver {
             "var pw=document.querySelector('input[type=password],#password');" +
             "if(!em||!pw){d.onStage('form-missing-at-fill');return;}" +
             "setVal(em,d.getEmail());setVal(pw,d.getPassword());" +
-            "d.onStage('form-filled');" +
+            // Verify the values actually landed in the DOM (booleans only).
+            "var emOk=!!em.value&&em.value.length>0;" +
+            "var pwOk=!!pw.value&&pw.value.length>0;" +
+            "d.onStage('form-filled emailLanded='+(emOk?'Y':'N')+' pwLanded='+(pwOk?'Y':'N'));" +
             "setTimeout(function(){" +
-            " var f=document.querySelector('form');" +
-            " if(f){d.onStage('submitted');f.requestSubmit();}" +
+            " var f=document.querySelector('form');if(!f){d.onStage('no-form');return;}" +
+            " var sb=f.querySelector('button[type=submit],input[type=submit]');" +
+            " d.onStage('submitted');" +
+            " try{f.requestSubmit(sb);}catch(e1){" +
+            "  try{f.requestSubmit();}catch(e2){" +
+            "   try{if(sb){sb.click();}else{f.submit();}}catch(e3){d.onStage('submit-blocked');}" +
+            "  }" +
+            " }" +
             "},250);" +
-            // After submit, if still on /login: field errors (invalid
-            // credentials) or an error banner. Watch the DOM.
-            "var ob=new MutationObserver(function(){" +
-            " if(window.__qolabOutcomeSent){return;}" +
-            " var bad=document.querySelector('.text-red-600,p[class*=red-600],div[class*=bg-red-100]');" +
-            " if(bad&&bad.offsetParent!==null){window.__qolabOutcomeSent=1;" +
-            "  try{d.onOutcome(JSON.stringify({hasVisibleError:true,note:'field error visible on login page'}));}catch(e){}" +
-            "  ob.disconnect();}" +
-            "});" +
-            "ob.observe(document.body,{childList:true,subtree:true,attributes:true});" +
             "}catch(ex){try{window.QolabLoginDriver.onOutcome(JSON.stringify({hasVisibleError:false,note:'driver js error'}));}catch(e){}}})()";
+
+    /**
+     * v1.5.6: post-submit state poll. Inertia performs successful logins as
+     * a client-side redirect (XHR + history.pushState) with NO full page
+     * load — onPageFinished never fires — so success is detected here from
+     * location.href. Also reports error elements (invalid credentials) and
+     * form/value state. Booleans + sanitized href/title only — never values.
+     */
+    private static final String POLL_JS =
+            "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
+            "var em=document.querySelector('input[type=email],#email');" +
+            "var pw=document.querySelector('input[type=password],#password');" +
+            "var f=document.querySelector('form');" +
+            "var bad=document.querySelector('p[class*=red-600],[role=alert],div[class*=bg-red-100],.text-red-600');" +
+            "var errVis=!!(bad&&bad.offsetParent!==null&&bad.textContent&&bad.textContent.trim().length>0);" +
+            "d.onPoll(JSON.stringify({href:(location.href||'')," +
+            " readyState:document.readyState||'?',title:(document.title||'').substring(0,40)," +
+            " emailFilled:!!(em&&em.value&&em.value.length>0)," +
+            " passwordFilled:!!(pw&&pw.value&&pw.value.length>0)," +
+            " formValid:(f?true:true)," +
+            " hasVisibleError:errVis," +
+            " note:errVis?'field error visible on login page':''}));" +
+            "}catch(e){}})()";
 
     /** Read the page state directly when evaluateOutcome runs on /login. */
     private static final String OUTCOME_JS =
             "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
-            "var bad=document.querySelector('.text-red-600,p[class*=red-600],div[class*=bg-red-100]');" +
-            "d.onOutcome(JSON.stringify({hasVisibleError:(bad&&bad.offsetParent!==null)," +
+            "var bad=document.querySelector('p[class*=red-600],[role=alert],div[class*=bg-red-100],.text-red-600');" +
+            "var errVis=!!(bad&&bad.offsetParent!==null&&bad.textContent&&bad.textContent.trim().length>0);" +
+            "d.onOutcome(JSON.stringify({hasVisibleError:errVis," +
             " note:'on login page after submit'}));}catch(e){}})()";
 }
