@@ -140,6 +140,7 @@ public final class QolabWebViewAuth {
     private volatile boolean finished = false;
     private volatile String lastStage = "start";
     private String rawXsrf = null;
+    private volatile String xsrfSnapshot = null;
 
     public QolabWebViewAuth(Context context, String origin, String email,
                             String password, Listener listener) {
@@ -296,17 +297,7 @@ public final class QolabWebViewAuth {
         @JavascriptInterface
         public String getXsrfToken() {
             try {
-                String header = CookieManager.getInstance().getCookie(origin);
-                String raw = null;
-                if (header != null) {
-                    for (String part : header.split(";")) {
-                        String p = part.trim();
-                        if (p.startsWith("XSRF-TOKEN=")) {
-                            raw = p.substring("XSRF-TOKEN=".length());
-                            break;
-                        }
-                    }
-                }
+                String raw = readRawXsrfFromCookieManager(50);
                 if (raw == null) return "";
                 rawXsrf = raw;
                 return QolabAuthClient.urlDecode(raw);
@@ -319,6 +310,79 @@ public final class QolabWebViewAuth {
         @JavascriptInterface
         public String getXsrfTokenRaw() {
             return rawXsrf == null ? "" : rawXsrf;
+        }
+
+        /**
+         * v1.5.2: SNAPSHOT the current raw XSRF-TOKEN BEFORE the csrf GET.
+         * getFreshXsrf() only accepts a value that has CHANGED since this
+         * snapshot (bounded wait) — reading CookieManager the instant the
+         * fetch resolves can return the STALE value from a previous run
+         * while the fetch carries the freshly rotated session →
+         * token/session mismatch → Laravel 419 (proven on the device).
+         */
+        @JavascriptInterface
+        public void beginXsrf() {
+            rawXsrf = readRawXsrfFromCookieManager(0);
+            xsrfSnapshot = rawXsrf;
+        }
+
+        /** Fresh decoded token: waits (≤2s) until the value differs from the snapshot. */
+        @JavascriptInterface
+        public String getFreshXsrf() {
+            try {
+                String raw = XsrfFreshness.awaitChanged(xsrfSnapshot,
+                        () -> readRawXsrfFromCookieManager(0), 2000, 50);
+                if (raw == null) {
+                    // No change within the bound — fall back to the best
+                    // available value rather than failing the whole login.
+                    raw = readRawXsrfFromCookieManager(0);
+                }
+                if (raw == null) return "";
+                rawXsrf = raw;
+                return QolabAuthClient.urlDecode(raw);
+            } catch (Exception e) {
+                return "";
+            }
+        }
+
+        /** Fresh RAW token for the 419 retry (short re-read wait). */
+        @JavascriptInterface
+        public String getFreshXsrfRaw() {
+            String raw = XsrfFreshness.awaitChanged(xsrfSnapshot,
+                    () -> readRawXsrfFromCookieManager(0), 300, 50);
+            if (raw == null) {
+                raw = rawXsrf;
+            }
+            rawXsrf = raw;
+            return raw == null ? "" : raw;
+        }
+
+        private String readRawXsrfFromCookieManager(int maxWaitMs) {
+            if (maxWaitMs <= 0) {
+                return extractRawXsrf(readCookieHeader());
+            }
+            return XsrfFreshness.awaitPresent(() -> extractRawXsrf(readCookieHeader()),
+                    maxWaitMs, 25);
+        }
+
+        private String readCookieHeader() {
+            try {
+                return CookieManager.getInstance().getCookie(origin);
+            } catch (Exception e) {
+                return null;
+            }
+        }
+
+        /** Raw XSRF-TOKEN value from a CookieManager header string, or null. */
+        private static String extractRawXsrf(String header) {
+            if (header == null) return null;
+            for (String part : header.split(";")) {
+                String p = part.trim();
+                if (p.startsWith("XSRF-TOKEN=")) {
+                    return p.substring("XSRF-TOKEN=".length());
+                }
+            }
+            return null;
         }
 
         /** Progress beacon for diagnostics (stage names only). */
@@ -348,16 +412,16 @@ public final class QolabWebViewAuth {
             "(function(){try{var b=window.QolabBridge;if(!b){return;}" +
             "var ctl=new AbortController();setTimeout(function(){try{ctl.abort();}catch(e){}},30000);" +
             "function done(o){try{b.onDone(JSON.stringify(o));}catch(e){}}" +
-            "var t0=performance.now();b.onStage('csrf');" +
+            "var t0=performance.now();b.onStage('csrf');b.beginXsrf();" +
             "fetch('/sanctum/csrf-cookie',{credentials:'same-origin',signal:ctl.signal})" +
             ".then(function(r1){" +
             " var csrfStatus=r1.status,csrfMs=Math.round(performance.now()-t0);" +
-            " b.onStage('login');var t1=performance.now();var tok=b.getXsrfToken();" +
+            " b.onStage('login');var t1=performance.now();var tok=b.getFreshXsrf();" +
             " function post(token){return fetch('/login',{method:'POST',credentials:'same-origin',signal:ctl.signal," +
             "  headers:{'Accept':'application/json','Content-Type':'application/x-www-form-urlencoded','X-XSRF-TOKEN':token}," +
             "  body:'email='+encodeURIComponent(b.getEmail())+'&password='+encodeURIComponent(b.getPassword())+'&remember='});}" +
             " return post(tok).then(function(r2){" +
-            "  var attempt=function(r){if(r.status===419){b.onStage('login-retry-raw');return post(b.getXsrfTokenRaw());}return Promise.resolve(r);};" +
+            "  var attempt=function(r){if(r.status===419){b.onStage('login-retry-fresh-raw');return post(b.getFreshXsrfRaw());}return Promise.resolve(r);};" +
             "  return attempt(r2).then(function(r3){" +
             "   var loginMs=Math.round(performance.now()-t1);" +
             "   var p=(r3.status===422)?r3.text():Promise.resolve('');" +

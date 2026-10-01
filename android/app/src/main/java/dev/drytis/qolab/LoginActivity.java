@@ -77,7 +77,10 @@ public class LoginActivity extends AppCompatActivity {
 
         // Clean stale session state so the MainActivity gate can't bounce
         // back mid-expiry: if we're showing native Login, any *-session
-        // cookie present is expired/invalid. Cookie NAMES only logged.
+        // cookie present is expired/invalid. v1.5.2: ALSO expire XSRF-TOKEN
+        // — a cross-run STALE XSRF value is exactly what paired with a fresh
+        // session to produce the device 419 (see XsrfFreshness javadoc).
+        // Cookie NAMES only logged.
         try {
             android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
             String existing = cm.getCookie(appOrigin);
@@ -85,8 +88,9 @@ public class LoginActivity extends AppCompatActivity {
                 boolean hadSession = false;
                 for (String part : existing.split(";")) {
                     String name = part.split("=", 2)[0].trim();
-                    if (name.toLowerCase().endsWith("session")) {
-                        cm.setCookie(appOrigin + "/", name + "=; Path=/; Max-Age=0");
+                    if (name.toLowerCase().endsWith("session")
+                            || name.equals("XSRF-TOKEN")) {
+                        cm.setCookie(appOrigin + "/", AuthNavRules.expireCookieValue(name));
                         hadSession = true;
                     }
                 }
