@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home V1 — top header: wordmark + red dot (left), search/notifications/menu (right) -->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical">
+
+    <TextView
+        android:id="@+id/home_wordmark"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="@string/home_wordmark"
+        android:textColor="@color/qm_ink"
+        android:textSize="21sp"
+        android:textStyle="bold"
+        android:contentDescription="@string/home_cd_wordmark_red_dot" />
+
+    <View
+        android:id="@+id/home_wordmark_dot"
+        android:layout_width="7dp"
+        android:layout_height="7dp"
+        android:layout_marginStart="4dp"
+        android:layout_marginEnd="12dp"
+        android:background="@drawable/qm_bg_red_dot" />
+
+    <ImageButton
+        android:id="@+id/home_btn_search"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@drawable/qm_ic_search"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/home_cd_search" />
+
+    <FrameLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content">
+
+        <ImageButton
+            android:id="@+id/home_btn_notifications"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
+            android:src="@drawable/qm_ic_notifications"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/home_cd_notifications" />
+
+        <View
+            android:id="@+id/home_notification_badge"
+            android:layout_width="9dp"
+            android:layout_height="9dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="6dp"
+            android:layout_marginEnd="7dp"
+            android:background="@drawable/qm_bg_red_dot"
+            android:visibility="gone"
+            android:contentDescription="@string/home_cd_notification_badge" />
+    </FrameLayout>
+
+    <ImageButton
+        android:id="@+id/home_btn_menu"
+        android:layout_width="40dp"
+        android:layout_height="40dp"
+        android:src="@drawable/qm_ic_menu"
+        android:background="?attr/selectableItemBackgroundBorderless"
+        android:contentDescription="@string/home_cd_menu" />
+</LinearLayout>

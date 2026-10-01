@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ═══ Qolab Mobile — Home V1 (native) ═══
+     Fixed section order per approved reference:
+     header → greeting → next meeting → social rooms → department →
+     continue working → today strip. Bottom nav is a sibling below. -->
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/qm_canvas">
+
+    <ScrollView
+        android:id="@+id/home_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:fillViewport="true"
+        android:scrollbars="none"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="@dimen/qm_home_page_pad"
+            android:paddingEnd="@dimen/qm_home_page_pad"
+            android:paddingTop="10dp"
+            android:paddingBottom="@dimen/qm_home_content_bottom_pad">
+
+            <include layout="@layout/home_section_header" />
+            <include layout="@layout/home_section_greeting" />
+            <include layout="@layout/home_section_meeting" />
+            <include layout="@layout/home_section_rooms" />
+            <include layout="@layout/home_section_department" />
+            <include layout="@layout/home_section_continue" />
+            <include layout="@layout/home_section_today" />
+        </LinearLayout>
+    </ScrollView>
+
+    <include layout="@layout/view_home_bottom_nav" />
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

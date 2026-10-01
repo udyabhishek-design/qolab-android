@@ -206,6 +206,17 @@ public class MainActivity extends BridgeActivity {
                 finish();
                 return;
             }
+            // Home V1: with a valid session and no explicit deep-link path,
+            // the app lands on the NATIVE Home screen. The WebView shell is
+            // only entered through explicit start paths from Home surfaces.
+            if (startPath == null || startPath.isEmpty()) {
+                Log.i("QolabAuth", "gate: session cookie present → native HomeActivity");
+                Intent home = new Intent(this, HomeActivity.class);
+                home.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                startActivity(home);
+                finish();
+                return;
+            }
             Log.i("QolabAuth", "gate: session cookie present → WebView start");
             if (startPath != null && !startPath.isEmpty()) {
                 String url = appOriginUrl() + startPath;

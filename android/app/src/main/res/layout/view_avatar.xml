@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Initials avatar — colored circle created in code (background set at runtime) -->
+<TextView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/avatar_initials"
+    android:layout_width="@dimen/qm_home_avatar_size"
+    android:layout_height="@dimen/qm_home_avatar_size"
+    android:gravity="center"
+    android:textSize="11sp"
+    android:textStyle="bold"
+    android:textColor="#FFFFFF"
+    android:contentDescription="@string/home_cd_avatar" />

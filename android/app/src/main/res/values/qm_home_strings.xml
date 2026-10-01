@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ═══ Qolab Mobile — Home V1 ═══ -->
+    <!-- Header -->
+    <string name="home_wordmark">Qolab</string>
+    <string name="home_cd_wordmark_red_dot">Qolab wordmark</string>
+    <string name="home_cd_search">Search</string>
+    <string name="home_cd_notifications">Notifications</string>
+    <string name="home_cd_notification_badge">Unread notifications</string>
+    <string name="home_cd_menu">Menu</string>
+    <!-- Greeting -->
+    <string name="home_greeting_support_line">Let\u2019s make it a productive day.</string>
+    <!-- Next meeting -->
+    <string name="home_section_next_meeting">Next Meeting</string>
+    <string name="home_meeting_empty_title">No upcoming meetings</string>
+    <string name="home_meeting_empty_support">You\u2019re all clear \u2014 enjoy the focus time.</string>
+    <!-- Social rooms -->
+    <string name="home_section_social_rooms">Social Rooms</string>
+    <string name="home_rooms_see_all">See all</string>
+    <string name="home_room_enter">Enter</string>
+    <string name="home_room_open">Open</string>
+    <string name="home_rooms_empty">No social rooms yet</string>
+    <!-- Department -->
+    <string name="home_section_department">Your Department</string>
+    <string name="home_dept_empty_title">No department room</string>
+    <string name="home_dept_empty_support">You\u2019re not part of a department yet.</string>
+    <!-- Continue working -->
+    <string name="home_section_continue">Continue Working</string>
+    <string name="home_continue_conversation_label">Recent conversation</string>
+    <string name="home_continue_task_label">Task</string>
+    <string name="home_task_due_today">Due today</string>
+    <string name="home_task_overdue">Overdue</string>
+    <string name="home_continue_conversation_empty">No recent conversations</string>
+    <string name="home_continue_task_empty">No tasks due</string>
+    <!-- Today strip -->
+    <string name="home_today_tasks">Tasks</string>
+    <string name="home_today_meetings">Meetings</string>
+    <string name="home_today_updates">Updates</string>
+    <!-- Errors / retry -->
+    <string name="home_error_section">Couldn\u2019t load</string>
+    <string name="home_retry">Retry</string>
+    <!-- Bottom navigation -->
+    <string name="home_nav_home">Home</string>
+    <string name="home_nav_office">Office</string>
+    <string name="home_nav_ask_drytis">Ask Drytis</string>
+    <string name="home_nav_chat">Chat</string>
+    <string name="home_nav_cd_ask_drytis">Ask Drytis</string>
+    <!-- Menu sheet -->
+    <string name="home_menu_sheet_title">Menu</string>
+    <string name="home_menu_meetings">Meetings</string>
+    <string name="home_menu_tasks">Tasks</string>
+    <string name="home_menu_tickets">Tickets</string>
+    <string name="home_menu_directory">Directory</string>
+    <string name="home_menu_settings">Settings</string>
+    <string name="home_menu_profile">Profile</string>
+    <!-- Avatars -->
+    <string name="home_cd_avatar">Participant avatar</string>
+    <string name="home_overflow_more">+%d more</string>
+    <string name="home_room_online">%d online</string>
+    <string name="home_room_default_description">Join your team in this room</string>
+    <string name="home_greeting_line">%1$s, %2$s</string>
+    <string name="home_greeting_line_no_name">%1$s</string>
+    <string name="home_continue_unread">%d unread</string>
+    <string name="home_task_no_due_date">No due date</string>
+    <string name="home_task_due_date">Due %1$s</string>
+    <string name="home_time_just_now">Just now</string>
+    <string name="home_time_minutes_ago">%dm ago</string>
+    <string name="home_time_hours_ago">%dh ago</string>
+    <string name="home_time_days_ago">%dd ago</string>
+    <string name="home_coming_soon">Coming soon</string>
+</resources>

@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Home V1 — Your Department: large orange card / empty / skeleton / error -->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/qm_home_section_gap"
+        android:text="@string/home_section_department"
+        android:textColor="@color/qm_ink"
+        android:textSize="@dimen/qm_home_section_title"
+        android:textStyle="bold" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp">
+
+        <LinearLayout
+            android:id="@+id/home_dept_card"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/qm_home_dept_height"
+            android:orientation="vertical"
+            android:background="@drawable/qm_bg_card_orange"
+            android:padding="@dimen/qm_home_card_pad"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/home_dept_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/qm_orange_text"
+                android:textSize="20sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/home_dept_online"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:textColor="@color/qm_orange_text"
+                android:alpha="0.8"
+                android:textSize="13sp" />
+
+            <Space
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
+
+                <LinearLayout
+                    android:id="@+id/home_dept_avatars"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal" />
+
+                <TextView
+                    android:id="@+id/home_dept_overflow"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:maxLines="1"
+                    android:textColor="@color/qm_orange_text"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/home_dept_enter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingHorizontal="18dp"
+                    android:paddingVertical="8dp"
+                    android:background="@drawable/qm_bg_btn_enter_dark"
+                    android:text="@string/home_room_enter"
+                    android:textColor="@color/qm_orange_text"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <View
+            android:id="@+id/home_dept_skeleton"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/qm_home_dept_height"
+            android:background="@drawable/qm_bg_skeleton" />
+
+        <LinearLayout
+            android:id="@+id/home_dept_empty"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/qm_home_dept_height"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/qm_bg_card_white"
+            android:padding="@dimen/qm_home_card_pad"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/home_dept_empty_title"
+                android:textColor="@color/qm_ink"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/home_dept_empty_support"
+                android:textColor="@color/qm_muted"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/home_dept_error"
+            android:layout_width="match_parent"
+            android:layout_height="@dimen/qm_home_dept_height"
+            android:orientation="vertical"
+            android:gravity="center"
+            android:background="@drawable/qm_bg_card_white"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/home_error_section"
+                android:textColor="@color/qm_ink"
+                android:textSize="15sp" />
+
+            <TextView
+                android:id="@+id/home_dept_retry"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="8dp"
+                android:paddingHorizontal="14dp"
+                android:paddingVertical="6dp"
+                android:text="@string/home_retry"
+                android:textColor="@color/qm_wine"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </FrameLayout>
+</LinearLayout>

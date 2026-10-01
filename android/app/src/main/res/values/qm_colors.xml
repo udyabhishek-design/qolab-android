@@ -30,4 +30,31 @@
     <!-- Error -->
     <color name="qm_error">#B3261E</color>
     <color name="qm_error_surface">#FCEDEB</color>
+
+    <!-- ═══ Home V1 room-card palette (additions) ═══ -->
+    <!-- Saturated purple — Music Lounge card -->
+    <color name="qm_purple">#6B21A8</color>
+    <color name="qm_purple_text">#FFFFFF</color>
+    <color name="qm_purple_title_accent">#F4FF6B</color>
+    <!-- Vivid orange — Department card -->
+    <color name="qm_orange">#F97316</color>
+    <color name="qm_orange_text">#1A1A1A</color>
+    <!-- Soft mint — Continue Working / conversation -->
+    <color name="qm_mint">#BFE8D7</color>
+    <color name="qm_mint_text">#14532D</color>
+    <!-- Soft lavender — Continue Working / task -->
+    <color name="qm_lavender">#D9D6F1</color>
+    <color name="qm_lavender_text">#3B3486</color>
+    <!-- Card surfaces on canvas -->
+    <color name="qm_card">#FFFFFF</color>
+    <color name="qm_card_border">#EAE4D6</color>
+    <color name="qm_skeleton">#ECE7DA</color>
+    <color name="qm_white_text">#FFFFFF</color>
+    <!-- Yellow-card ink is regular ink; yellow itself comes from qm_yellow -->
+    <color name="qm_yellow_text">#1A1A1A</color>
+    <!-- Quiet Today-strip surface -->
+    <color name="qm_today_strip">#EFEAE0</color>
+    <!-- Bottom nav label states -->
+    <color name="qm_nav_selected">#1A1A1A</color>
+    <color name="qm_nav_unselected">#7A756D</color>
 </resources>

@@ -36,6 +36,16 @@
             android:theme="@style/AppTheme.QolabLogin"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Native Home (V1) — post-login landing screen. Loads its data
+             from the dev-only /mobile/home aggregate with the existing
+             WebView session; WebView shell reached via qolab_start_path. -->
+        <activity
+            android:name=".HomeActivity"
+            android:exported="false"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

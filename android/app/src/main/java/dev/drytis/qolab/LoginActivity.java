@@ -545,9 +545,9 @@ public class LoginActivity extends AppCompatActivity {
     }
 
     private void onLoginSuccess() {
-        android.util.Log.i(TAG, "login success → MainActivity");
+        android.util.Log.i(TAG, "login success → HomeActivity");
         setSubmitting(false);
-        Intent i = new Intent(this, MainActivity.class);
+        Intent i = new Intent(this, HomeActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
         startActivity(i);
         finish();
