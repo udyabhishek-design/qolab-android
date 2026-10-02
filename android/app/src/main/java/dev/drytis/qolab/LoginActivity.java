@@ -467,6 +467,9 @@ public class LoginActivity extends AppCompatActivity {
             sb.append("Cookie bridge: ").append("n/a (WebView session context)").append('\n');
             sb.append("Authenticated session present: ")
                     .append(sessionCookieValue(appOrigin) != null ? "Yes" : "No").append('\n');
+            // v1.5.9: persistent handoff probe diagnostics (static, survives
+            // routeToLogin/activity recreation). Names/flags only, no values.
+            sb.append("Home probe: ").append(HomeHandoffTrace.get().render()).append('\n');
             sb.append("MainActivity launched: No");
         }
         diagBody.setText(sb.toString());
@@ -515,55 +518,120 @@ public class LoginActivity extends AppCompatActivity {
     }
 
     /**
-     * v1.5.8: called after the login DRIVER has verified the authenticated
-     * redirect (leaving /login). The seam waits for the *-session cookie
-     * value to DIFFER from the pre-auth snapshot ({@link #preAuthSessionValue},
-     * captured before the driver loaded /login). If no session cookie
-     * existed pre-auth, a fresh one appearing satisfies the check.
-     * Bounded ~5s; flush + deterministic longest-name read each poll.
-     * This is what prevents the anonymous pre-login session (set by the
-     * /login page load itself) from satisfying the seam and sending Home
-     * out with an unauthenticated session (device 401 → auto-logout).
+     * v1.5.9: SERVER-VERIFIED auth handoff. Cookie heuristics (presence /
+     * value-change) are abandoned — the preAuth baseline was always null
+     * (onCreate's stale cleanup expires *-session before attemptLogin), so
+     * the ANONYMOUS session from the /login page load satisfied every
+     * heuristic and Home launched unauthenticated → 401 → auto-logout.
+     *
+     * Now: after the driver verifies the Inertia redirect, we probe
+     * GET /mobile/home with the SAME cookie path HomeDataClient uses
+     * (request-time reads, Set-Cookie sync). Home launches ONLY on 200.
+     * 401 → bounded retry (CookieManager may still be receiving the
+     * authenticated session). Network/5xx/parse → NOT auth loss, retry too.
+     * Never routes to login from the probe — the user just authenticated.
+     * No cookies are cleared at any point here.
      */
     private void waitForAuthenticatedSessionPresent() {
         final String origin = appOrigin;
-        final String baseline = preAuthSessionValue;
         final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
+        final int MAX_ATTEMPTS = 8;
         final int[] attempts = {0};
-        final int MAX_ATTEMPTS = 17; // 17 × 300ms ≈ 5s bounded wait
-        final Runnable poll = new Runnable() {
+        final QolabDataClientHolder holder = new QolabDataClientHolder();
+        final Runnable probe = new Runnable() {
             @Override
             public void run() {
-                try {
-                    android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
-                    cm.flush();
-                } catch (Exception ignored) {
-                }
-                String current = sessionCookieValue(origin);
-                boolean fresh = current != null && !current.isEmpty()
-                        && (baseline == null || baseline.isEmpty() || !current.equals(baseline));
-                if (fresh) {
-                    android.util.Log.i(TAG, "session cookie changed/appeared post-auth → Home");
-                    onLoginSuccess();
-                    return;
-                }
-                if (attempts[0]++ >= MAX_ATTEMPTS) {
-                    android.util.Log.w(TAG,
-                            "session cookie did not transition post-auth (baseline existed="
-                                    + (baseline != null && !baseline.isEmpty()) + ")");
-                    QolabWebLoginDriver.LAST.stage = "session-stale";
-                    QolabWebLoginDriver.LAST.note =
-                            "driver verified redirect but session cookie value did not transition"
-                            + " (preAuth=" + (baseline != null && !baseline.isEmpty() ? "present" : "absent") + ")";
-                    lastFailure = traceSnapshot("session-stale",
-                            "session cookie did not change after authenticated redirect");
-                    onLoginFailure(getString(R.string.login_error_generic));
-                    return;
-                }
-                h.postDelayed(this, 300);
+                HomeHandoffTrace.get().retryCount = attempts[0];
+                final QolabCookieSession.CookieStore store = new QolabCookieSession.WebViewCookieStore();
+                final String url = origin + "/mobile/home";
+                // Read the cookie header exactly as HomeDataClient will.
+                final String cookieHeader = store.cookieHeaderFor(url);
+                HomeHandoffTrace.get().sessionCookieSent =
+                        QolabCookieSession.containsSessionCookie(cookieHeader);
+                HomeHandoffTrace.get().sessionCookieName =
+                        sessionCookieName(cookieHeader);
+                holder.client = new HomeDataClient(origin);
+                final android.os.Handler ui = h;
+                new Thread(() -> {
+                    final HomeDataClient.Result r = holder.client.fetchHome(store, url);
+                    ui.post(() -> {
+                        HomeHandoffTrace.get().httpStatus = r.status;
+                        HomeHandoffTrace.get().setCookieReceived = holder.client.lastSetCookieSeen;
+                        HomeHandoffTrace.get().authLostReason =
+                                r.authLost ? "401 with session cookie" : null;
+                        boolean ok = r.data != null && r.status / 100 == 2;
+                        if (ok) {
+                            android.util.Log.i(TAG, "auth probe 200 → Home");
+                            onLoginSuccess();
+                            return;
+                        }
+                        boolean authLoss = r.authLost;             // 401 with session sent
+                        boolean transientFailure = !ok && !authLoss; // network/5xx/parse/401-no-session
+                        if (attempts[0]++ >= MAX_ATTEMPTS) {
+                            android.util.Log.w(TAG, "auth probe exhausted (status="
+                                    + r.status + " authLoss=" + authLoss + ")");
+                            QolabWebLoginDriver.LAST.stage = "probe-exhausted";
+                            QolabWebLoginDriver.LAST.note = "GET /mobile/home never returned 200"
+                                    + " (last status=" + r.status + ", authLoss=" + authLoss + ")";
+                            lastFailure = traceSnapshot("probe-exhausted",
+                                    "authenticated probe failed after " + MAX_ATTEMPTS + " attempts");
+                            onLoginFailure(getString(R.string.login_error_generic));
+                            return;
+                        }
+                        // Either a 401 (session not committed yet) or a
+                        // transient failure — wait and re-probe. NEVER
+                        // routeToLogin from here.
+                        ui.postDelayed(this, 1200);
+                    });
+                }, "auth-handoff-probe").start();
             }
         };
-        h.postDelayed(poll, 100);
+        h.postDelayed(probe, 150);
+    }
+
+    /** Cookie NAME (never value) for diagnostics, longest-name rule. */
+    private static String sessionCookieName(String cookieHeader) {
+        if (cookieHeader == null) return null;
+        String best = null;
+        for (String part : cookieHeader.split(";")) {
+            String name = part.split("=", 2)[0].trim();
+            if (name.toLowerCase().endsWith("session")
+                    && (best == null || name.length() > best.length())) {
+                best = name;
+            }
+        }
+        return best;
+    }
+
+    /** Small holder so the probe runnable can reach its client instance. */
+    private static final class QolabDataClientHolder {
+        HomeDataClient client;
+    }
+
+    /**
+     * v1.5.9: STATIC handoff diagnostics — survive routeToLogin() and
+     * activity recreation so the failed-login diag panel can always show
+     * WHY Home never launched (or why it did, then died). Booleans,
+     * status codes and cookie NAMEs only — never values/tokens/creds.
+     */
+    static final class HomeHandoffTrace {
+        static final HomeHandoffTrace I = new HomeHandoffTrace();
+        volatile int httpStatus = -1;
+        volatile boolean sessionCookieSent = false;
+        volatile boolean setCookieReceived = false;
+        volatile int retryCount = 0;
+        volatile String authLostReason = null;
+        volatile String sessionCookieName = null; // NAME only, never value
+
+        static HomeHandoffTrace get() { return I; }
+        String render() {
+            return "probe status=" + httpStatus
+                    + ", session sent=" + (sessionCookieSent ? "Y" : "N")
+                    + ", set-cookie=" + (setCookieReceived ? "Y" : "N")
+                    + ", retries=" + retryCount
+                    + (authLostReason != null ? ", reason=" + authLostReason : "")
+                    + (sessionCookieName != null ? ", cookie=" + sessionCookieName : "");
+        }
     }
 
     /** v1.5.7: snapshot from the persistent driver trace (safe fields). */

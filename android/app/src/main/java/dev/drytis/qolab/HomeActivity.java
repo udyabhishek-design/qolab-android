@@ -94,6 +94,8 @@ public class HomeActivity extends AppCompatActivity {
         volatile boolean parseOk;
         volatile boolean loginTransition;
         volatile String loginReason;
+        volatile int retryCount = 0;
+        volatile String sessionCookieName; // NAME only, never value
 
         String render() {
             return "Home request diagnostics (names/booleans only)\n"
@@ -105,6 +107,8 @@ public class HomeActivity extends AppCompatActivity {
                     + "• response time: " + durationMs + " ms\n"
                     + "• Set-Cookie received: " + (setCookieReceived ? "Yes" : "No") + "\n"
                     + "• session cookie present after request: " + (sessionCookieAfter ? "Yes" : "No") + "\n"
+                    + "• selected session cookie: " + (sessionCookieName == null ? "n/a" : sessionCookieName) + "\n"
+                    + "• verification retries: " + retryCount + "\n"
                     + "• JSON parse success: " + (parseOk ? "Yes" : "No") + "\n"
                     + "• Login transition requested: " + (loginTransition ? "Yes" : "No")
                     + (loginReason == null ? "" : "\n• reason: " + loginReason);
@@ -353,6 +357,7 @@ public class HomeActivity extends AppCompatActivity {
         final String origin = BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", "");
         final String url = origin + "/mobile/home";
         lastDiag.sessionCookieBefore = QolabCookieSession.containsSessionCookie(store.cookieHeaderFor(url));
+        lastDiag.sessionCookieName = sessionCookieName(store.cookieHeaderFor(url));
         lastDiag.loginTransition = false;
         lastDiag.loginReason = null;
         new Thread(() -> {
@@ -372,6 +377,7 @@ public class HomeActivity extends AppCompatActivity {
             // and never for IO/5xx/parse problems.
             if (result.authLost) {
                 lastDiag.loginReason = "verification retry (401 with session cookie)";
+                lastDiag.retryCount++;
                 HomeDataClient.Result retry = client.fetchHome(store, url);
                 lastDiag.httpStatus = retry.status;
                 lastDiag.parseOk = retry.data != null;
@@ -420,6 +426,20 @@ public class HomeActivity extends AppCompatActivity {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    /** Cookie NAME (never value) for diagnostics — longest *-session name. */
+    private static String sessionCookieName(String cookieHeader) {
+        if (cookieHeader == null) return null;
+        String best = null;
+        for (String part : cookieHeader.split(";")) {
+            String name = part.split("=", 2)[0].trim();
+            if (name.toLowerCase().endsWith("session")
+                    && (best == null || name.length() > best.length())) {
+                best = name;
+            }
+        }
+        return best;
     }
 
     private void routeToLogin() {

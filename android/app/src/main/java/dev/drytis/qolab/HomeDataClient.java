@@ -191,6 +191,10 @@ public final class HomeDataClient {
     private int connectTimeoutMs = 10_000;
     private int readTimeoutMs = 20_000;
 
+    /** v1.5.9 diagnostics: Y/N only — a Set-Cookie header was seen on the
+     *  most recent response (name(s) only are ever surfaced, never values). */
+    public volatile boolean lastSetCookieSeen = false;
+
     public HomeDataClient(String baseUrl) {
         this.baseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
     }
@@ -219,6 +223,8 @@ public final class HomeDataClient {
             c.setReadTimeout(readTimeoutMs);
             c.setInstanceFollowRedirects(false);
             int code = c.getResponseCode();
+            lastSetCookieSeen = c.getHeaderFields() != null
+                    && c.getHeaderFields().containsKey("Set-Cookie");
             QolabCookieSession.synchronize(c.getHeaderFields(), url, store);
             boolean hadSession = QolabCookieSession.containsSessionCookie(cookieHeader);
             if (code == 401) {
