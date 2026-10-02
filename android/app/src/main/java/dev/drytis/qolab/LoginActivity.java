@@ -327,6 +327,16 @@ public class LoginActivity extends AppCompatActivity {
                             message = getString(R.string.login_error_generic);
                             break;
                         case "timeout":
+                            // v1.5.10: a driver timeout means only that
+                            // location.href never left /login — an Inertia
+                            // login may STILL have succeeded. Decide from
+                            // the server: run ONE /mobile/home probe with
+                            // the exact cookie path HomeDataClient uses.
+                            // 200 → authenticated → Home. 401 → genuine
+                            // failure → diagnostics. network/5xx → reported
+                            // separately, never classified as auth loss.
+                            runTimeoutProbe();
+                            return;
                         case "load":
                         case "page-error":
                         case "bridge":
@@ -465,11 +475,22 @@ public class LoginActivity extends AppCompatActivity {
                     .append(lastFailure.loginStatus == 0
                             ? "Not reached" : "Yes").append('\n');
             sb.append("Cookie bridge: ").append("n/a (WebView session context)").append('\n');
-            sb.append("Authenticated session present: ")
+            sb.append("Session cookie present (may be anonymous): ")
                     .append(sessionCookieValue(appOrigin) != null ? "Yes" : "No").append('\n');
-            // v1.5.9: persistent handoff probe diagnostics (static, survives
-            // routeToLogin/activity recreation). Names/flags only, no values.
-            sb.append("Home probe: ").append(HomeHandoffTrace.get().render()).append('\n');
+            // v1.5.10: POST /login observability + probe result.
+            QolabWebLoginDriver.Trace dt = QolabWebLoginDriver.LAST;
+            sb.append("POST /login initiated: ")
+                    .append(dt.postLoginInitiated ? "Yes" : "No").append('\n');
+            if (dt.postLoginInitiated) {
+                sb.append("POST /login status: ")
+                        .append(dt.postLoginStatus == -2 ? "not observable"
+                                : dt.postLoginStatus == -1 ? "network error"
+                                : String.valueOf(dt.postLoginStatus))
+                        .append(dt.postLoginFailed ? " (failed)" : "").append('\n');
+            }
+            sb.append("Home probe: ")
+                    .append(HomeHandoffTrace.get().httpStatus == -1
+                            ? "not run" : HomeHandoffTrace.get().render()).append('\n');
             sb.append("MainActivity launched: No");
         }
         diagBody.setText(sb.toString());
@@ -589,9 +610,69 @@ public class LoginActivity extends AppCompatActivity {
         h.postDelayed(probe, 150);
     }
 
+    /**
+     * v1.5.10: driver timed out (href still /login) — but the Inertia
+     * POST /login may still have succeeded without a client-side
+     * navigation. Decide from the SERVER: one authenticated
+     * GET /mobile/home probe on the exact cookie path HomeDataClient
+     * uses. 200 → authentication succeeded → Home. 401 → genuine
+     * unauthenticated → diagnostics panel. network/5xx → reported as
+     * 'server unreachable', never auth loss. Never clears cookies.
+     */
+    private void runTimeoutProbe() {
+        final String origin = appOrigin;
+        new Thread(() -> {
+            final QolabCookieSession.CookieStore store =
+                    new QolabCookieSession.WebViewCookieStore();
+            // Flush CookieManager so the probe reads the committed state.
+            try {
+                android.webkit.CookieManager.getInstance().flush();
+            } catch (Exception ignored) {
+            }
+            HomeDataClient client = new HomeDataClient(origin);
+            HomeDataClient.Result r = client.fetchHome(store, origin + "/mobile/home");
+            HomeHandoffTrace t = HomeHandoffTrace.get();
+            t.httpStatus = r.status;
+            t.sessionCookieSent = QolabCookieSession.containsSessionCookie(
+                    store.cookieHeaderFor(origin + "/mobile/home"));
+            t.setCookieReceived = client.lastSetCookieSeen;
+            runOnUiThread(() -> {
+                if (r.data != null && r.status / 100 == 2) {
+                    android.util.Log.i(TAG, "timeout probe 200 → authenticated → Home");
+                    onLoginSuccess();
+                    return;
+                }
+                String message;
+                String stage;
+                if (r.authLost) {                    // 401 with session cookie sent
+                    message = getString(R.string.login_error_generic);
+                    stage = "timeout-401";
+                } else if (r.status == HomeDataClient.Result.STATUS_IO) {
+                    // network/timeout — NOT an authentication failure.
+                    message = getString(R.string.login_error_generic);
+                    stage = "timeout-server-unreachable";
+                } else {                             // 5xx etc.
+                    message = getString(R.string.login_error_generic);
+                    stage = "timeout-server-error-" + r.status;
+                }
+                lastFailure = traceSnapshot(stage,
+                        "driver timed out on /login; server probe: "
+                                + (r.authLost ? "401 unauthenticated"
+                                : r.status == HomeDataClient.Result.STATUS_IO
+                                ? "network failure (" + safeIo(r.ioError) + ")"
+                                : "HTTP " + r.status));
+                diagExpanded = true;
+                onLoginFailure(message);
+            });
+        }, "timeout-probe").start();
+    }
+
+    private static String safeIo(String io) {
+        return io == null ? "io" : io;
+    }
+
     /** Cookie NAME (never value) for diagnostics, longest-name rule. */
-    private static String sessionCookieName(String cookieHeader) {
-        if (cookieHeader == null) return null;
+    private static String sessionCookieName(String cookieHeader) {        if (cookieHeader == null) return null;
         String best = null;
         for (String part : cookieHeader.split(";")) {
             String name = part.split("=", 2)[0].trim();
@@ -616,7 +697,7 @@ public class LoginActivity extends AppCompatActivity {
      */
     static final class HomeHandoffTrace {
         static final HomeHandoffTrace I = new HomeHandoffTrace();
-        volatile int httpStatus = -1;
+        volatile int httpStatus = -2; // -2 never run, -1 IO failure
         volatile boolean sessionCookieSent = false;
         volatile boolean setCookieReceived = false;
         volatile int retryCount = 0;
@@ -625,7 +706,8 @@ public class LoginActivity extends AppCompatActivity {
 
         static HomeHandoffTrace get() { return I; }
         String render() {
-            return "probe status=" + httpStatus
+            return "probe status=" + (httpStatus == -2 ? "not run"
+                            : httpStatus == -1 ? "IO failure" : String.valueOf(httpStatus))
                     + ", session sent=" + (sessionCookieSent ? "Y" : "N")
                     + ", set-cookie=" + (setCookieReceived ? "Y" : "N")
                     + ", retries=" + retryCount

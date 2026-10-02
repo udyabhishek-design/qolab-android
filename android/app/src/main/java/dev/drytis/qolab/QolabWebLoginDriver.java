@@ -62,6 +62,11 @@ public final class QolabWebLoginDriver {
         public volatile boolean submitFired = false;
         public volatile boolean errorVisible = false;
         public volatile long totalMs = -1;
+        // v1.5.10: POST /login observability (safe fields only — never
+        // request/response bodies, cookies, tokens or credentials).
+        public volatile boolean postLoginInitiated = false;
+        public volatile int postLoginStatus = -2;   // -2 not observable, -1 network error
+        public volatile boolean postLoginFailed = false;
 
         /** One-line, panel-safe rendering (booleans only). */
         public String render() {
@@ -71,6 +76,13 @@ public final class QolabWebLoginDriver {
                     + " emailVal=" + yn2(emailVal)
                     + " pwVal=" + yn2(pwVal)
                     + " errorVisible=" + yn2(errorVisible)
+                    + " POST/login=" + (postLoginInitiated ? "Y" : "N")
+                    + (postLoginInitiated
+                        ? " status=" + (postLoginStatus == -2 ? "not observable"
+                                        : postLoginStatus == -1 ? "network-error"
+                                        : String.valueOf(postLoginStatus))
+                          + (postLoginFailed ? " (failed)" : "")
+                        : "")
                     + " title=" + QolabWebLoginDriver.sanitizeNote(title)
                     + " href=" + href
                     + (note.isEmpty() ? "" : " note=" + note)
@@ -222,6 +234,13 @@ public final class QolabWebLoginDriver {
                 @Override
                 public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                     return false; // real navigations — Fortify redirect must run
+                }
+
+                @Override
+                public void onPageStarted(WebView view, String url, android.graphics.Bitmap favicon) {
+                    // v1.5.10: install the POST /login observer BEFORE the
+                    // SPA hydrates, so the Inertia POST is captured.
+                    view.evaluateJavascript(XHR_OBSERVER_JS, null);
                 }
 
                 @Override
@@ -455,8 +474,27 @@ public final class QolabWebLoginDriver {
 
         /** Progress beacon for logs (stage names only). */
         @JavascriptInterface
-        public void onStage(String stage) {
-            android.util.Log.i("QolabAuth", "web-login-driver stage: " + stage);
+        public void onStage(String stage) {            android.util.Log.i("QolabAuth", "web-login-driver stage: " + stage);
+        }
+
+        /** v1.5.10: XHR/fetch observer beacon — safe fields only
+         *  (method, URL path, status code). Never bodies/headers/values. */
+        @JavascriptInterface
+        public void onXhr(String json) {
+            try {
+                JSONObject o = new JSONObject(json);
+                String method = o.optString("m", "");
+                String u = o.optString("u", "");
+                String path = u.startsWith("http")
+                        ? android.net.Uri.parse(u).getPath() : u;
+                boolean isLoginPost = "POST".equalsIgnoreCase(method)
+                        && path != null && path.endsWith("/login");
+                if (!isLoginPost) return;
+                LAST.postLoginInitiated = true;
+                LAST.postLoginStatus = o.optInt("s", -2);
+                LAST.postLoginFailed = o.optBoolean("f", false);
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -533,14 +571,32 @@ public final class QolabWebLoginDriver {
             " readyState:document.readyState||'?',title:(document.title||'').substring(0,40)," +
             " emailFilled:!!(em&&em.value&&em.value.length>0)," +
             " passwordFilled:!!(pw&&pw.value&&pw.value.length>0)," +
-            " formValid:(f?true:true)," +
+            " formValid:!!(f&&f.checkValidity&&f.checkValidity())," +
             " hasVisibleError:errVis," +
             " note:errVis?'field error visible on login page':''}));" +
             "}catch(e){}})()";
 
+    /**
+     * v1.5.10: injected at page start (before hydration). Wraps
+     * XMLHttpRequest and fetch so POST /login initiation, HTTP status and
+     * network failure are recorded via the onXhr beacon. Only method,
+     * URL and status code travel out — never bodies, headers, cookies,
+     * tokens or response payloads. Idempotent via the window guard.
+     */
+    private static final String XHR_OBSERVER_JS =
+            "(function(){if(window.__qolabXhrHooked)return;window.__qolabXhrHooked=true;try{" +
+            "var d=window.QolabLoginDriver;var rep=function(m,u,s,f){try{d.onXhr(JSON.stringify({m:m,u:u,s:s,f:f}));}catch(e){}};" +
+            "var xo=XMLHttpRequest.prototype.open, xs=XMLHttpRequest.prototype.send;" +
+            "XMLHttpRequest.prototype.open=function(m,u){this.__qm={m:m,u:String(u)};return xo.apply(this,arguments);};" +
+            "XMLHttpRequest.prototype.send=function(){var x=this;if(x.__qm){" +
+            " x.addEventListener('loadend',function(){rep(x.__qm.m,x.__qm.u,x.status||(-1),false);});}};" +
+            "if(window.fetch){var of=window.fetch;" +
+            " window.fetch=function(input,init){var m=((init&&init.method)||'GET'),u=(typeof input==='string')?input:(input&&input.url)||'';" +
+            "  return of.apply(this,arguments).then(function(r){rep(m,u,r.status,false);return r;},function(e){rep(m,u,-1,true);throw e;});};" +
+            "}}catch(e){}})()";
+
     /** Read the page state directly when evaluateOutcome runs on /login. */
-    private static final String OUTCOME_JS =
-            "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
+    private static final String OUTCOME_JS =            "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
             "var bad=document.querySelector('p[class*=red-600],[role=alert],div[class*=bg-red-100],.text-red-600');" +
             "var errVis=!!(bad&&bad.offsetParent!==null&&bad.textContent&&bad.textContent.trim().length>0);" +
             "d.onOutcome(JSON.stringify({hasVisibleError:errVis," +
