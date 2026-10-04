@@ -64,7 +64,6 @@ public final class QolabWebViewTransport {
     private final Handler main = new Handler(Looper.getMainLooper());
     private final String origin;
     private WebView webView;                 // touched on main thread only
-    private Bridge bridge;                   // one bridge, reused
 
     /** v1.5.15: adopted the login WebView as the session owner. */
     public static synchronized QolabWebViewTransport adopt(WebView authenticatedWebView,
@@ -75,14 +74,16 @@ public final class QolabWebViewTransport {
         }
         QolabWebViewTransport t = new QolabWebViewTransport(origin);
         t.webView = authenticatedWebView; // adopt() runs on the main thread
-        // The login driver's bridge object is owned by that driver;
-        // install OUR transport bridge (page JS object name is unique).
+        // v1.5.17: no addJavascriptInterface on the already-loaded page —
+        // Android only exposes JS interfaces at PAGE-LOAD time, so an
+        // interface added now is invisible to the current page (that was
+        // the v1.5.16 Home data blackout). Requests now return through
+        // evaluateJavascript's promise ValueCallback instead; the old
+        // driver's interface is simply removed.
         try {
             authenticatedWebView.removeJavascriptInterface("QolabLoginDriver");
         } catch (Exception ignored) {
         }
-        t.bridge = t.new Bridge();
-        authenticatedWebView.addJavascriptInterface(t.bridge, "QolabTransport");
         instance = t;
         return t;
     }
@@ -102,6 +103,14 @@ public final class QolabWebViewTransport {
      * thread. {@code path} must begin with '/' and the resolved URL must
      * stay inside the configured origin — otherwise the request is
      * rejected before any JavaScript runs.
+     *
+     * v1.5.17 FIX: the fetch result is returned through
+     * evaluateJavascript's OWN ValueCallback (a promise return value)
+     * instead of an addJavascriptInterface bridge. Physical v1.5.16
+     * evidence: the bridge object injected AFTER the page already loaded
+     * is never present in that page's JS context, so every beacon was
+     * silently swallowed and Home never received data. The promise-return
+     * channel needs no page-level injection at all.
      */
     public void getJson(String path, final Callback cb) {
         final String url = resolveInsideOrigin(path);
@@ -115,36 +124,31 @@ public final class QolabWebViewTransport {
                 cb.onResult(new Result(Result.STATUS_TRANSPORT_DEAD, null, "transport-dead"));
                 return;
             }
-            final AtomicLong reqId = new AtomicLong(-1);
+            final AtomicLong reqId = new AtomicLong();
             try {
-                // Request id guards against stale/late beacons from a
-                // previous call; only the CURRENT one is delivered.
-                long id = SEQ.incrementAndGet();
+                final long id = SEQ.incrementAndGet();
                 reqId.set(id);
-                activeCallback = new Callback() {
-                    @Override
-                    public void onResult(Result r) {
-                        if (reqId.get() == id) {
-                            main.post(() -> cb.onResult(r));
-                        }
-                    }
-                };
+                final java.util.concurrent.atomic.AtomicBoolean delivered =
+                        new java.util.concurrent.atomic.AtomicBoolean(false);
                 String js =
-                        "(function(){try{var d=window.QolabTransport;if(!d){d={report:function(o){}};}}" +
-                        "fetch(" + jsonString(url) + "," +
+                        "(function(){try{"
+                        + "return fetch(" + jsonString(url) + "," +
                         "{credentials:'same-origin',headers:{'Accept':'application/json'}})" +
-                        ".then(function(r){r.text().then(function(t){d.report(" +
-                        "JSON.stringify({status:r.status,body:t}));}," +
-                        "function(){d.report(JSON.stringify({status:r.status,body:''}));});})" +
-                        ".catch(function(e){d.report(JSON.stringify({status:-1,body:''}));});" +
-                        "}catch(e){try{d.report(JSON.stringify({status:-1,body:''}));}catch(e2){}}})()";
-                wv.evaluateJavascript(js, null);
+                        ".then(function(r){return r.text().then(function(t){" +
+                        "return JSON.stringify({s:r.status,b:t});}," +
+                        "function(){return JSON.stringify({s:r.status,b:''});});})" +
+                        ".catch(function(e){return JSON.stringify({s:-1,b:''});});"
+                        + "}catch(e){return JSON.stringify({s:-1,b:''});}})()";
+                wv.evaluateJavascript(js, value -> {
+                    if (reqId.get() != id) return;          // stale delivery
+                    if (!delivered.compareAndSet(false, true)) return;
+                    Result r = resultFromEvaluateJavascript(value);
+                    main.post(() -> cb.onResult(r));
+                });
                 // Bounded watchdog — never an infinite callback.
                 main.postDelayed(() -> {
-                    if (activeCallback != null) {
-                        Callback stale = activeCallback;
-                        activeCallback = null;
-                        stale.onResult(new Result(Result.STATUS_IO, null, "timeout"));
+                    if (delivered.compareAndSet(false, true)) {
+                        cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
                     }
                 }, REQUEST_TIMEOUT_MS);
             } catch (Exception e) {
@@ -153,27 +157,28 @@ public final class QolabWebViewTransport {
         });
     }
 
-    private volatile Callback activeCallback;
     private static final AtomicLong SEQ = new AtomicLong();
     private static final long REQUEST_TIMEOUT_MS = 25_000;
 
-    /** Bridge receiving ONLY {status, body}. No cookies/tokens ever cross. */
-    /* synthetic */ final class Bridge {
-        @JavascriptInterface
-        public void report(String json) {
-            main.post(() -> {
-                Callback cb = activeCallback;
-                activeCallback = null;
-                if (cb == null) return;
-                try {
-                    JSONObject o = new JSONObject(json);
-                    cb.onResult(new Result(o.optInt("status", -1),
-                            o.optString("body", ""), null));
-                } catch (Exception e) {
-                    cb.onResult(new Result(Result.STATUS_IO, null, "bad-beacon"));
-                }
-            });
+    /**
+     * v1.5.17: decode the evaluateJavascript promise-return value. The
+     * callback receives the JS expression's result as a JSON-encoded
+     * string — either a quoted string or the literal 'null'. Static and
+     * JVM-testable.
+     */
+    public static Result resultFromEvaluateJavascript(String value) {
+        if (value == null || "null".equals(value.trim())) {
+            return new Result(Result.STATUS_IO, null, "no-value");
         }
+        String decoded;
+        try {
+            // Unwrap the outer JSON string literal WebView hands us.
+            decoded = new org.json.JSONTokener(value).nextValue().toString();
+        } catch (Exception e) {
+            return new Result(Result.STATUS_IO, null, "bad-return");
+        }
+        // decoded is now our {s:..,b:..} JSON text — reuse the beacon validator.
+        return resultFromBeacon(decoded);
     }
 
     /**
@@ -203,7 +208,7 @@ public final class QolabWebViewTransport {
     private void releaseQuietly() {
         try {
             if (webView != null) {
-                webView.removeJavascriptInterface("QolabTransport");
+                try { webView.removeJavascriptInterface("QolabLoginDriver"); } catch (Exception ignored) { }
                 webView.stopLoading();
                 ViewGroup parent = (ViewGroup) webView.getParent();
                 if (parent != null) {
@@ -282,6 +287,22 @@ public final class QolabWebViewTransport {
             return new Result(s, b, null);
         } catch (Exception e) {
             return new Result(Result.STATUS_IO, null, "bad-beacon");
+        }
+    }
+
+    /** Legacy-shaped beacon ({"status":N,"body":".."}) for the bridge. */
+    static Result resultFromBeaconJson(String json) {
+        try {
+            JSONObject o = new JSONObject(json == null ? "" : json);
+            int s = o.optInt("status", -1);
+            String b = o.optString("body", null);
+            if (s < 100 || s > 599) return resultFromBeacon(json);
+            if (b != null && b.length() > 500_000) {
+                return new Result(Result.STATUS_IO, null, "bad-beacon");
+            }
+            return new Result(s, b, null);
+        } catch (Exception e) {
+            return resultFromBeacon(json);
         }
     }
 

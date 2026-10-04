@@ -82,13 +82,22 @@ public class HomeActivity extends AppCompatActivity {
 
     /** DEBUG-only diagnostics for the new (v1.5.15) architecture:
      *  the authenticated WebView transport fetches Home data. Booleans and
-     *  categories only — never cookie values, tokens, or credentials. */
+     *  counts only — never cookie values, tokens, credentials, or body
+     *  contents (body LENGTH only). */
     static final class HomeDiag {
         volatile boolean requestMade;
         volatile int httpStatus = -2; // -2 never run, -1 IO, -3 transport dead
         volatile long durationMs;
         volatile boolean payloadReceived;
+        volatile int bodyLength = -1;      // LENGTH ONLY, never contents
+        volatile boolean parseAttempted;
         volatile boolean parseOk;
+        volatile boolean userPresent;
+        volatile int socialRoomCount = -1;
+        volatile boolean departmentPresent;
+        volatile boolean nextMeetingPresent;
+        volatile boolean renderExecuted;
+        volatile boolean skeletonsCleared;
         volatile boolean loginTransition;
         volatile String loginReason;
         volatile String transportErrorCategory;
@@ -103,8 +112,16 @@ public class HomeActivity extends AppCompatActivity {
                             ? "transport dead" : httpStatus == QolabWebViewTransport.Result.STATUS_IO
                             ? "IO failure" : String.valueOf(httpStatus)) + "\n"
                     + "• response time: " + durationMs + " ms\n"
-                    + "• Home payload received: " + (payloadReceived ? "Yes" : "No") + "\n"
-                    + "• JSON parse success: " + (parseOk ? "Yes" : "No") + "\n"
+                    + "• body received: " + (payloadReceived ? "Yes" : "No")
+                    + (bodyLength >= 0 ? " (length " + bodyLength + ")" : "") + "\n"
+                    + "• parse attempted: " + (parseAttempted ? "Yes" : "No") + "\n"
+                    + "• parse succeeded: " + (parseOk ? "Yes" : "No") + "\n"
+                    + "• parsed user present: " + (userPresent ? "Yes" : "No") + "\n"
+                    + "• parsed social rooms: " + (socialRoomCount < 0 ? "n/a" : String.valueOf(socialRoomCount)) + "\n"
+                    + "• parsed department present: " + (departmentPresent ? "Yes" : "No") + "\n"
+                    + "• parsed next meeting present: " + (nextMeetingPresent ? "Yes" : "No") + "\n"
+                    + "• render callback executed: " + (renderExecuted ? "Yes" : "No") + "\n"
+                    + "• skeletons cleared: " + (skeletonsCleared ? "Yes" : "No") + "\n"
                     + "• transport error category: " + (transportErrorCategory == null ? "none" : transportErrorCategory) + "\n"
                     + "• Login transition requested: " + (loginTransition ? "Yes" : "No")
                     + (loginReason == null ? "" : "\n• reason: " + loginReason);
@@ -375,6 +392,8 @@ public class HomeActivity extends AppCompatActivity {
             lastDiag.transportErrorCategory = r.errorCategory;
             lastDiag.requestMade = true;
             lastDiag.payloadReceived = r.body != null;
+            lastDiag.bodyLength = r.body == null ? -1 : r.body.length();
+            lastDiag.parseAttempted = false;
             lastDiag.parseOk = false;
             fetching = false;
             if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
@@ -399,13 +418,26 @@ public class HomeActivity extends AppCompatActivity {
                 return;
             }
             HomeDataClient.HomeData data = HomeDataClient.parse(r.body);
+            lastDiag.parseAttempted = true;
             lastDiag.parseOk = data != null;
+            if (data != null) {
+                lastDiag.userPresent = data.userName != null;
+                lastDiag.socialRoomCount = data.socialRooms.size();
+                lastDiag.departmentPresent = data.departmentRoom != null;
+                lastDiag.nextMeetingPresent = data.nextMeeting != null;
+            }
             if (data == null) {
                 showError();
                 return;
             }
+            // v1.5.17 FIX: render Home data IMMEDIATELY — the unread badge
+            // is a separate, non-blocking update. Waiting for the second
+            // request before renderAll was a second way Home could stay
+            // skeleton forever.
             this.data = data;
-            // Unread badge through the same transport.
+            lastDiag.renderExecuted = true;
+            lastDiag.skeletonsCleared = true;
+            renderAll(-1);
             transport.getJson("/notifications/unread-count", u -> {
                 int unread = -1;
                 try {
@@ -413,7 +445,9 @@ public class HomeActivity extends AppCompatActivity {
                     unread = o.optInt("unread_count", 0);
                 } catch (Exception ignored) {
                 }
-                renderAll(unread);
+                if (unread >= 0) {
+                    renderAll(unread);
+                }
             });
         });
     }
@@ -438,6 +472,7 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     private void showError() {
+        lastDiag.skeletonsCleared = true;
         hide(meetingSkeleton); show(meetingError);
         hide(deptSkeleton); show(deptError);
         hide(convSkeleton, taskSkeleton); hide(convCard, taskCard); show(bothEmpty);

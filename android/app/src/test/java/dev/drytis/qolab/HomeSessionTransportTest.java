@@ -105,6 +105,49 @@ public class HomeSessionTransportTest {
     }
 
     // ------------------------------------------------------------------
+    // v1.5.17: promise-return channel decode (evaluateJavascript callback)
+    // ------------------------------------------------------------------
+
+    @Test
+    public void evaluateJavascriptReturnDecodesStatusAndBody() {
+        // WebView delivers the promise result as a JSON string literal
+        String raw = "\"{\\\"s\\\":200,\\\"b\\\":\\\"{\\\\\\\"user\\\\\\\":{}}\\\"}\"";
+        QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript(raw);
+        assertEquals(200, r.status);
+        assertNotNull(r.body);
+    }
+
+    @Test
+    public void evaluateJavascriptNullReturnIsSafeIO() {
+        QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript("null");
+        assertEquals(QolabWebViewTransport.Result.STATUS_IO, r.status);
+        assertEquals("no-value", r.errorCategory);
+    }
+
+    @Test
+    public void evaluateJavascriptGarbageIsSafeIO() {
+        QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript("<not json");
+        assertEquals(QolabWebViewTransport.Result.STATUS_IO, r.status);
+    }
+
+    @Test
+    public void evaluateJavascriptNetworkFailureMapsToIO() {
+        // fetch catch → JSON.stringify({s:-1,b:''}) → delivered as literal
+        String raw = "\"{\\\"s\\\":-1,\\\"b\\\":\\\"\\\"}\"";
+        QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript(raw);
+        assertEquals(QolabWebViewTransport.Result.STATUS_IO, r.status);
+        assertNull(r.errorCategory);
+    }
+
+    @Test
+    public void evaluateJavascriptRejectsFakeStatusCodes() {
+        String raw = "\"{\\\"s\\\":99999,\\\"b\\\":\\\"\\\"}\"";
+        QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript(raw);
+        assertEquals(QolabWebViewTransport.Result.STATUS_IO, r.status);
+        assertEquals("bad-beacon", r.errorCategory);
+    }
+
+    // ------------------------------------------------------------------
     // Preserved parse layer (Architecture B keeps all Home JSON mapping)
     // ------------------------------------------------------------------
 
