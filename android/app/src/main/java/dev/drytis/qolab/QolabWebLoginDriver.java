@@ -29,11 +29,11 @@ import org.json.JSONObject;
  *    diagnostics (readyState, form count, email/password/submit found)
  *    so a "form never appeared" failure is now self-describing.
  *  - SEMANTIC selectors (input[type=email] / [type=password], form,
- *    button[type=submit]) with id fallbacks — resilient to redesign.
- *  - Fill uses native value setters + input events (React controlled
- *    inputs), submit via form.requestSubmit() so the page's own
- *    Inertia/Fortify handler runs CSRF/cookies/rotation/redirects.
- *  - Failure classification from the page's own error elements.
+ *    v1.5.11: the DOM-driven fill/submit path was REMOVED (physically
+ *    proven never to initiate POST /login). The auth transaction is now
+ *    a direct same-origin fetch POST /login from inside the WebView,
+ *    with X-XSRF-TOKEN read from document.cookie at transaction time.
+ *  - Failure classification from HTTP status (419/422/network) + page state.
  *
  * Credentials reach the page ONLY via @JavascriptInterface getters;
  * never logged, never persisted; bridge removed + WebView destroyed
@@ -271,7 +271,13 @@ public final class QolabWebLoginDriver {
         return url != null && (url.endsWith("/login") || url.contains("/login?"));
     }
 
-    /** Probe result beacon: fills the form the first time it is ready. */
+    /**
+     * Probe result beacon: v1.5.11 — the first probe confirming the page
+     * document exists (readyState past 'loading') triggers the DIRECT
+     * auth transaction (LOGIN_TX_JS). We no longer wait for the React
+     * form to mount, fill it, or submit it — those dependencies are gone.
+     * formReady/form elements are reported for diagnostics only.
+     */
     private void onProbeJson(String json) {
         if (finished || submitted) return;
         try {
@@ -281,27 +287,83 @@ public final class QolabWebLoginDriver {
             LAST.formFound = formReady;
             LAST.href = lastUrl;
             LAST.title = o.optString("title", "");
-            if (formReady) {
-                LAST.stage = "form-ready";
-                main.removeCallbacks(probe);
+            String rs = o.optString("readyState", "?");
+            boolean docReady = "interactive".equals(rs) || "complete".equals(rs);
+            if (docReady) {
+                LAST.stage = "tx-starting";
                 submitted = true;
+                main.removeCallbacks(probe);
                 main.removeCallbacks(loadWatchdog);
                 main.postDelayed(submitWatchdog, SUBMIT_TIMEOUT_MS);
-                // v1.5.6: poll post-submit state — Inertia logins redirect
-                // client-side (XHR + history API) WITHOUT a full page load,
-                // so onPageFinished never fires on success. The poll reads
-                // location.href (history changes ARE visible), title, error
-                // elements and form state each second.
+                // v1.5.6: poll post-submit state — a successful direct
+                // transaction navigates to /dashboard (real page load);
+                // this poll additionally covers any client-side redirect.
                 main.postDelayed(postSubmitPoll, 800);
-                // Fill + submit now that the form is confirmed present.
-                webView.evaluateJavascript(FILL_SUBMIT_JS, null);
+                // Direct in-context POST /login — no DOM driving.
+                webView.evaluateJavascript(LOGIN_TX_JS, null);
             }
         } catch (Exception ignored) {
         }
     }
 
-    private static String buildDomDiag(JSONObject o) {
-        // Booleans/counts only — never input values.
+    /**
+     * v1.5.11: direct-transaction outcome classification — by HTTP status,
+     * from the beacon. 2xx → the JS side navigates to /dashboard; success
+     * is then confirmed by the navigation/poll path (and, at the LoginActivity
+     * seam, by the /mobile/home probe). 419 → CSRF rejection. 422 →
+     * validation/invalid credentials. -1 → network failure. Nothing here
+     * treats a non-2xx as success.
+     */
+    private void onTxJson(String json) {
+        if (finished) return;
+        try {
+            JSONObject o = new JSONObject(json);
+            int status = o.optInt("status", -2);
+            boolean sess = o.optBoolean("sessionCookie", false);
+            boolean started = o.optBoolean("started", false);
+            String netErr = sanitizeNote(o.optString("networkError", ""));
+            LAST.postLoginInitiated = started;
+            LAST.postLoginStatus = status;
+            LAST.postLoginFailed = status == -1 || status >= 400;
+            if (status == -2 && !started) {
+                finish(new Result(false, "tx-error",
+                        "transaction JS failed before starting", elapsed(), lastUrl, lastDomDiag));
+                return;
+            }
+            if (status == -1) {
+                finish(new Result(false, "tx-network",
+                        "network failure" + (netErr.isEmpty() ? "" : ": " + netErr),
+                        elapsed(), lastUrl, lastDomDiag));
+                return;
+            }
+            if (status == 419) {
+                finish(new Result(false, "tx-csrf-419",
+                        "CSRF rejected (419)" + (sess ? "" : " [no session cookie in page]"),
+                        elapsed(), lastUrl, lastDomDiag));
+                return;
+            }
+            if (status == 422) {
+                finish(new Result(false, "invalid-credentials",
+                        "credentials rejected (422)", elapsed(), lastUrl, lastDomDiag));
+                return;
+            }
+            if (status >= 200 && status < 300) {
+                LAST.stage = "tx-2xx-awaiting-redirect";
+                // The JS side navigates to /dashboard; success is finalized
+                // by onPageFinished/poll detecting the navigation (and the
+                // server-truth probe at the LoginActivity seam). Do not
+                // finish() here — wait for navigation evidence.
+                return;
+            }
+            // Other statuses (429, 500, ...) — report, don't guess.
+            finish(new Result(false, "tx-http-" + status,
+                    "login HTTP " + status, elapsed(), lastUrl, lastDomDiag));
+        } catch (Exception e) {
+            finish(new Result(false, "bridge", "tx beacon unreadable", elapsed(), lastUrl, lastDomDiag));
+        }
+    }
+
+    private static String buildDomDiag(JSONObject o) {        // Booleans/counts only — never input values.
         return "readyState=" + o.optString("readyState", "?")
                 + " title=" + sanitizeNote(o.optString("title", ""))
                 + " forms=" + o.optInt("forms", 0)
@@ -472,6 +534,16 @@ public final class QolabWebLoginDriver {
             main.post(() -> onOutcomeJson(json));
         }
 
+        /**
+         * v1.5.11: DIRECT-transaction outcome beacon. Safe fields only:
+         * status code, sessionCookie boolean, networkError name. Never
+         * bodies, cookies or tokens.
+         */
+        @JavascriptInterface
+        public void onTx(String json) {
+            main.post(() -> onTxJson(json));
+        }
+
         /** Progress beacon for logs (stage names only). */
         @JavascriptInterface
         public void onStage(String stage) {            android.util.Log.i("QolabAuth", "web-login-driver stage: " + stage);
@@ -518,40 +590,47 @@ public final class QolabWebLoginDriver {
             "}catch(e){}})()";
 
     /**
-     * Fill the REAL login form using native value setters + input events
-     * so React's controlled inputs pick them up, verify the values landed
-     * (booleans only — never the values themselves), then trigger the
-     * form's own submit handler (requestSubmit, submit-button click
-     * fallback) — Inertia/Fortify handles CSRF, cookies, rotation and the
-     * redirect natively.
+     * v1.5.11: DIRECT AUTH TRANSACTION — the DOM-driving path (fill React
+     * controlled inputs → requestSubmit()/click()/form.submit()) is
+     * REMOVED. v1.5.10 proved on device that the synthetic submit never
+     * reached React's handler and produced a native GET fallback (no POST
+     * /login at all). We now perform the SAME transaction the browser
+     * performs, from inside the same WebView context:
+     *   fetch(origin + '/login', {method:'POST', credentials:'same-origin'})
+     * with X-XSRF-TOKEN read from document.cookie AT TRANSACTION TIME
+     * (fresh — never the Java-side stale read that caused the v1.5.2 419)
+     * and the credentials ONLY in the POST body (URLSearchParams — never
+     * in the URL/query, logs or diagnostics). No React hydration, form or
+     * submit timing is involved. On 2xx we navigate to /dashboard (a real
+     * page load, handing the authenticated session to CookieManager);
+     * outcomes are reported via the onTx beacon: initiated Y/N, HTTP
+     * status (2xx/419/422/network), session cookie present Y/N. Values
+     * never leave through this path except via the bridge getters below.
      */
-    private static final String FILL_SUBMIT_JS =
+    private static final String LOGIN_TX_JS =
             "(function(){try{" +
             "var d=window.QolabLoginDriver;if(!d){return;}" +
-            "function setVal(el,v){var proto=el instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:HTMLInputElement.prototype;" +
-            " var setter=Object.getOwnPropertyDescriptor(proto,'value').set;" +
-            " setter.call(el,v);el.dispatchEvent(new Event('input',{bubbles:true}));" +
-            " el.dispatchEvent(new Event('change',{bubbles:true}));}" +
-            "var em=document.querySelector('input[type=email],#email');" +
-            "var pw=document.querySelector('input[type=password],#password');" +
-            "if(!em||!pw){d.onStage('form-missing-at-fill');return;}" +
-            "setVal(em,d.getEmail());setVal(pw,d.getPassword());" +
-            // Verify the values actually landed in the DOM (booleans only).
-            "var emOk=!!em.value&&em.value.length>0;" +
-            "var pwOk=!!pw.value&&pw.value.length>0;" +
-            "d.onStage('form-filled emailLanded='+(emOk?'Y':'N')+' pwLanded='+(pwOk?'Y':'N'));" +
-            "window.__qolabEmailLanded=emOk;window.__qolabPwLanded=pwOk;" +
-            "setTimeout(function(){" +
-            " var f=document.querySelector('form');if(!f){d.onStage('no-form');return;}" +
-            " var sb=f.querySelector('button[type=submit],input[type=submit]');" +
-            " d.onStage('submitted');" +
-            " try{f.requestSubmit(sb);}catch(e1){" +
-            "  try{f.requestSubmit();}catch(e2){" +
-            "   try{if(sb){sb.click();}else{f.submit();}}catch(e3){d.onStage('submit-blocked');}" +
-            "  }" +
+            "var xsrf='';" +
+            "document.cookie.split(';').forEach(function(row){" +
+            " if(row.trim().indexOf('XSRF-TOKEN=')===0){" +
+            "  try{xsrf=decodeURIComponent(row.split('=').slice(1).join('='));}catch(e){xsrf=row.split('=').slice(1).join('=');}" +
             " }" +
-            "},250);" +
-            "}catch(ex){try{window.QolabLoginDriver.onOutcome(JSON.stringify({hasVisibleError:false,note:'driver js error'}));}catch(e){}}})()";
+            "});" +
+            "var sess=false;" +
+            "document.cookie.split(';').forEach(function(row){" +
+            " var n=row.trim().split('=')[0];if(/session$/i.test(n))sess=true;" +
+            "});" +
+            "var rep=function(s,extra){try{d.onTx(JSON.stringify(Object.assign({status:s,sessionCookie:sess},extra||{})));}catch(e){}};" +
+            "var body=new URLSearchParams();" +
+            "body.append('email',d.getEmail());body.append('password',d.getPassword());" +
+            "fetch(location.origin+'/login',{method:'POST',credentials:'same-origin',headers:" +
+            "{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'," +
+            "'X-Requested-With':'XMLHttpRequest','X-XSRF-TOKEN':xsrf},body:body})" +
+            ".then(function(r){rep(r.status,{started:true});" +
+            " if(r.status>=200&&r.status<300){setTimeout(function(){location.href=location.origin+'/dashboard';},150);}" +
+            "})" +
+            ".catch(function(e){rep(-1,{started:true,networkError:(e&&e.name)?String(e.name).substring(0,40):'network'});});" +
+            "}catch(e){try{d.onTx(JSON.stringify({status:-2,sessionCookie:false,started:false}));}catch(e2){}}})()";
 
     /**
      * v1.5.6: post-submit state poll. Inertia performs successful logins as
