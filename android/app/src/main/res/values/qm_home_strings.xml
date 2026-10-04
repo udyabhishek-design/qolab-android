@@ -53,6 +53,9 @@
     <string name="home_menu_directory">Directory</string>
     <string name="home_menu_settings">Settings</string>
     <string name="home_menu_profile">Profile</string>
+    <string name="home_menu_notifications">Notifications</string>
+    <string name="home_menu_search">Search</string>
+    <string name="home_menu_rooms">Rooms</string>
     <!-- Avatars -->
     <string name="home_cd_avatar">Participant avatar</string>
     <string name="home_overflow_more">+%d more</string>
@@ -68,6 +71,13 @@
     <string name="home_time_hours_ago">%dh ago</string>
     <string name="home_time_days_ago">%dd ago</string>
     <string name="home_coming_soon">Coming soon</string>
+    <string name="home_coming_soon_msg">%1$s is coming soon to the Android app.</string>
+    <string name="home_meeting_label">Next Meeting</string>
+    <string name="home_room_desc_lobby">Drop in and say hello to the team</string>
+    <string name="home_room_desc_music">Spin tracks and hang out together</string>
+    <string name="home_room_desc_coffee">Casual coffee-break conversations</string>
+    <string name="home_room_desc_department">Your department\u2019s own room \u2014 sync, plan and chat</string>
+    <string name="home_dept_no_description">Your department\u2019s space for team sync and chat</string>
     <!-- DEBUG-only diagnostics -->
     <string name="home_diag_title">Home request diagnostics (dev)</string>
 </resources>

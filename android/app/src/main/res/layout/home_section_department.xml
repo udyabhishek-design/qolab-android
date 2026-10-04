@@ -48,6 +48,17 @@
                 android:alpha="0.8"
                 android:textSize="13sp" />
 
+            <TextView
+                android:id="@+id/home_dept_description"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:maxLines="2"
+                android:ellipsize="end"
+                android:textColor="@color/qm_orange_text"
+                android:alpha="0.85"
+                android:textSize="13sp" />
+
             <Space
                 android:layout_width="match_parent"
                 android:layout_height="0dp"

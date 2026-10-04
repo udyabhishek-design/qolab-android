@@ -63,7 +63,7 @@ public class HomeActivity extends AppCompatActivity {
 
     // department
     private View deptCard, deptSkeleton, deptEmpty, deptError;
-    private TextView deptName, deptOnline, deptOverflow, deptEnter;
+    private TextView deptName, deptOnline, deptOverflow, deptEnter, deptDescription;
     private LinearLayout deptAvatars;
 
     // continue working
@@ -173,6 +173,7 @@ public class HomeActivity extends AppCompatActivity {
         deptError = findViewById(R.id.home_dept_error);
         deptName = findViewById(R.id.home_dept_name);
         deptOnline = findViewById(R.id.home_dept_online);
+        deptDescription = findViewById(R.id.home_dept_description);
         deptOverflow = findViewById(R.id.home_dept_overflow);
         deptEnter = findViewById(R.id.home_dept_enter);
         deptAvatars = findViewById(R.id.home_dept_avatars);
@@ -233,36 +234,36 @@ public class HomeActivity extends AppCompatActivity {
         menu.setOnClickListener(v -> showMenuSheet());
 
         ImageButton notifications = findViewById(R.id.home_btn_notifications);
-        notifications.setOnClickListener(v -> openShell("/notifications"));
+        notifications.setOnClickListener(v -> showComingSoon(getString(R.string.home_menu_notifications)));
 
         ImageButton search = findViewById(R.id.home_btn_search);
         search.setOnClickListener(v ->
-                Toast.makeText(this, R.string.home_coming_soon, Toast.LENGTH_SHORT).show());
+                showComingSoon(getString(R.string.home_menu_search)));
 
-        roomsSeeAll.setOnClickListener(v -> openShell("/rooms"));
+        roomsSeeAll.setOnClickListener(v ->
+                showComingSoon(getString(R.string.home_menu_rooms)));
 
         deptEnter.setOnClickListener(v -> {
             if (data != null && data.departmentRoom != null) {
-                openRoom(data.departmentRoom.roomSlug);
+                showComingSoon(getString(R.string.home_menu_rooms));
             }
         });
 
         navHome.setOnClickListener(v -> smoothScrollToTop());
-        navOffice.setOnClickListener(v -> openShell("/rooms"));
-        navChat.setOnClickListener(v -> openShell("/chat"));
+        navOffice.setOnClickListener(v -> showComingSoon(getString(R.string.home_nav_office)));
+        navChat.setOnClickListener(v -> showComingSoon(getString(R.string.home_nav_chat)));
         navAskDrytis.setOnClickListener(v ->
-                Toast.makeText(this, R.string.home_coming_soon, Toast.LENGTH_SHORT).show());
+                showComingSoon(getString(R.string.home_nav_ask_drytis)));
     }
 
-    private void openShell(String path) {
-        Intent i = new Intent(this, MainActivity.class);
-        i.putExtra("qolab_start_path", path);
-        startActivity(i);
-    }
-
-    private void openRoom(String roomSlug) {
-        if (roomSlug == null || roomSlug.isEmpty()) return;
-        openShell("/office/rooms/" + roomSlug);
+    /**
+     * v1.5.16: native destinations only — while a destination's native
+     * screen is not implemented, we NEVER fall back to the web app.
+     * A small native "Coming soon" response keeps the user in Home.
+     */
+    private void showComingSoon(String what) {
+        Toast.makeText(this, getString(R.string.home_coming_soon_msg, what),
+                Toast.LENGTH_SHORT).show();
     }
 
     private void smoothScrollToTop() {
@@ -291,24 +292,25 @@ public class HomeActivity extends AppCompatActivity {
         title.setPadding(0, 0, 0, pad);
         box.addView(title);
 
-        String[][] destinations = {
-                {getString(R.string.home_menu_meetings), "/meetings"},
-                {getString(R.string.home_menu_tasks), "/tasks"},
-                {getString(R.string.home_menu_tickets), "/tickets"},
-                {getString(R.string.home_menu_directory), "/directory"},
-                {getString(R.string.home_menu_settings), "/settings"},
-                {getString(R.string.home_menu_profile), "/profile"},
+        String[] destinations = {
+                getString(R.string.home_menu_meetings),
+                getString(R.string.home_menu_tasks),
+                getString(R.string.home_menu_tickets),
+                getString(R.string.home_menu_directory),
+                getString(R.string.home_menu_settings),
+                getString(R.string.home_menu_profile),
         };
-        for (String[] dest : destinations) {
+        for (String dest : destinations) {
             TextView item = new TextView(this);
-            item.setText(dest[0]);
+            item.setText(dest);
             item.setTextColor(0xFF1A1A1A);
             item.setTextSize(16);
             int itemPad = pad / 2;
             item.setPadding(0, itemPad, 0, itemPad);
             item.setOnClickListener(v -> {
                 sheet.dismiss();
-                openShell(dest[1]);
+                // v1.5.16: native Coming Soon — never route to web pages
+                showComingSoon(dest);
             });
             box.addView(item);
         }
@@ -506,38 +508,38 @@ public class HomeActivity extends AppCompatActivity {
         TextView overflow = card.findViewById(R.id.room_card_overflow);
         TextView enter = card.findViewById(R.id.room_card_enter);
         LinearLayout avatars = card.findViewById(R.id.room_card_avatars);
+        ImageView arrow = card.findViewById(R.id.room_card_arrow);
 
-        // Approved popping palette by room theme — colors ARE the identity.
-        int bg; int title; int text; int enterBg; int enterText;
-        String theme = room.roomTheme != null ? room.roomTheme : "";
-        String slug = room.roomSlug != null ? room.roomSlug : "";
-        if (theme.contains("music") || slug.contains("music")) {
-            bg = 0xFF6B21A8; title = 0xFFF4FF6B; text = 0xFFFFFFFF;
-            enterBg = 0xFFF4FF6B; enterText = 0xFF6B21A8;
-        } else if (theme.contains("coffee") || slug.contains("coffee")) {
-            bg = 0xFF14532D; title = 0xFFF4FF6B; text = 0xFFF4FF6B;
-            enterBg = 0xFFF4FF6B; enterText = 0xFF14532D;
-        } else { // lobby and everything else: cobalt
-            bg = 0xFF2148C0; title = 0xFFFFFFFF; text = 0xFFF5F0E4;
-            enterBg = 0xFFF5F0E4; enterText = 0xFF2148C0;
+        // Approved popping palette by room theme — colors ARE the identity
+        // (pure mapping lives in RoomThemeStyle; unit-tested).
+        RoomThemeStyle.Style style = RoomThemeStyle.styleFor(room.roomTheme, room.roomSlug);
+        card.setBackgroundColor(style.bg);
+        name.setTextColor(style.title);
+        online.setTextColor(style.text);
+        description.setTextColor(style.text);
+        overflow.setTextColor(style.text);
+        enter.setBackgroundColor(style.enterBg);
+        enter.setTextColor(style.enterText);
+        if (arrow != null) {
+            arrow.setImageTintList(ColorStateList.valueOf(style.enterBg));
         }
-        card.setBackgroundColor(bg);
-        name.setTextColor(title);
-        online.setTextColor(text);
-        description.setTextColor(text);
-        overflow.setTextColor(text);
-        enter.setBackgroundColor(enterBg);
-        enter.setTextColor(enterText);
 
         online.setText(getString(R.string.home_room_online, room.membersCount));
         name.setText(room.name);
         description.setText(room.description != null ? room.description
-                : getString(R.string.home_room_default_description));
+                : defaultRoomDescription(style.descriptionKey));
         avatars.removeAllViews();
         renderAvatarRow(avatars, room.participants, room.membersCount, false);
         overflow.setText(overflowText(room.participants.size(), room.membersCount));
-        enter.setOnClickListener(v -> openRoom(room.roomSlug));
+        enter.setOnClickListener(v ->
+                showComingSoon(room.name != null ? room.name : getString(R.string.home_menu_rooms)));
         return card;
+    }
+
+    /** Resolve the per-theme default description key to its string resource. */
+    private String defaultRoomDescription(String key) {
+        int resId = getResources().getIdentifier(key, "string", getPackageName());
+        return resId != 0 ? getString(resId) : getString(R.string.home_room_default_description);
     }
 
     private void renderDepartment() {
@@ -551,6 +553,8 @@ public class HomeActivity extends AppCompatActivity {
         show(deptCard);
         deptName.setText(dept.name);
         deptOnline.setText(getString(R.string.home_room_online, dept.membersCount));
+        deptDescription.setText(dept.description != null ? dept.description
+                : getString(R.string.home_dept_no_description));
         deptAvatars.removeAllViews();
         renderAvatarRow(deptAvatars, dept.participants, dept.membersCount, false);
         deptOverflow.setText(overflowText(dept.participants.size(), dept.membersCount));
@@ -570,7 +574,8 @@ public class HomeActivity extends AppCompatActivity {
                 meta = getString(R.string.home_continue_unread, conv.unreadCount) + " · " + meta;
             }
             convMeta.setText(meta);
-            convCard.setOnClickListener(v -> openShell("/chat"));
+            convCard.setOnClickListener(v ->
+                    showComingSoon(getString(R.string.home_nav_chat)));
         } else {
             hide(convCard);
         }
@@ -579,7 +584,8 @@ public class HomeActivity extends AppCompatActivity {
             show(taskCard);
             taskTitle.setText(task.title);
             taskDue.setText(dueLabel(task.dueDate));
-            taskCard.setOnClickListener(v -> openShell("/tasks"));
+            taskCard.setOnClickListener(v ->
+                    showComingSoon(getString(R.string.home_menu_tasks)));
         } else {
             hide(taskCard);
         }
