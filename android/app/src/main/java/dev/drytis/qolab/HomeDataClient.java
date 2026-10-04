@@ -208,10 +208,27 @@ public final class HomeDataClient {
      *  responses are synchronized back to) the AUTHORITATIVE cookie store
      *  at request time — never a stale one-shot snapshot. */
     public Result fetchHome(QolabCookieSession.CookieStore store, String url) {
+        return fetchHome(store, url, null);
+    }
+
+    /**
+     * v1.5.14: fetchHome with a PINNED first-attempt cookie header. The
+     * caller captured it on the main thread at the exact moment the
+     * WebView proved the session (see QolabWebLoginDriver.LAST
+     * .verifiedCookieHeader). The FIRST request uses the pinned header —
+     * the same session the WebView sent. Subsequent behavior is
+     * unchanged: 2xx Set-Cookie still syncs into the store; non-2xx
+     * never mutates the store (401s regenerate an ANONYMOUS session
+     * cookie that must not clobber the authenticated one).
+     */
+    public Result fetchHome(QolabCookieSession.CookieStore store, String url,
+                            String pinnedCookieHeader) {
         HttpURLConnection c = null;
         try {
             URL u = new URL(url);
-            String cookieHeader = store.cookieHeaderFor(url);
+            String cookieHeader = (pinnedCookieHeader != null && !pinnedCookieHeader.isEmpty())
+                    ? pinnedCookieHeader
+                    : store.cookieHeaderFor(url);
             c = (HttpURLConnection) u.openConnection();
             if (c instanceof HttpsURLConnection) { /* system trust store */ }
             c.setRequestMethod("GET");
@@ -225,7 +242,15 @@ public final class HomeDataClient {
             int code = c.getResponseCode();
             lastSetCookieSeen = c.getHeaderFields() != null
                     && c.getHeaderFields().containsKey("Set-Cookie");
-            QolabCookieSession.synchronize(c.getHeaderFields(), url, store);
+            // v1.5.14: synchronize Set-Cookie ONLY on 2xx responses.
+            // PROVEN defect (device + dev-backend evidence): Laravel's 401
+            // REGENERATES the session cookie (a fresh ANONYMOUS session in
+            // Set-Cookie). Syncing that back overwrites the authoritative
+            // store — destroying a just-authenticated session and freezing
+            // every retry on the anonymous cookie (web 200 / java 401×8).
+            if (code / 100 == 2) {
+                QolabCookieSession.synchronize(c.getHeaderFields(), url, store);
+            }
             boolean hadSession = QolabCookieSession.containsSessionCookie(cookieHeader);
             if (code == 401) {
                 // A 401 is only a real session loss if we actually SENT a
@@ -261,7 +286,10 @@ public final class HomeDataClient {
             c.setReadTimeout(readTimeoutMs);
             c.setInstanceFollowRedirects(false);
             int code = c.getResponseCode();
-            QolabCookieSession.synchronize(c.getHeaderFields(), url, store);
+            // v1.5.14: 2xx-only Set-Cookie sync here too (see fetchHome).
+            if (code / 100 == 2) {
+                QolabCookieSession.synchronize(c.getHeaderFields(), url, store);
+            }
             if (code / 100 != 2) return -1;
             JSONObject root = new JSONObject(readAll(c));
             return root.optInt("unread_count", 0);

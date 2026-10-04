@@ -78,6 +78,10 @@ public final class QolabWebLoginDriver {
         // v1.5.13: three-stage verification flags (the diag panel's core).
         public volatile boolean loginPostAuthenticated = false; // 2xx from POST /login
         public volatile boolean webSessionVerified = false;     // WebView /mobile/home 200
+        // v1.5.14: cookie header captured on the MAIN thread at the
+        // web-verified moment (request-time authoritative read). Used for
+        // the Java probe's first attempt ONLY; never logged.
+        public volatile String verifiedCookieHeader = null;
         public volatile boolean javaSessionVerified = false;    // Java /mobile/home 200
 
         /** One-line, panel-safe rendering (booleans only). */
@@ -402,6 +406,14 @@ public final class QolabWebLoginDriver {
                         if (finished) return;
                         if (LAST.webProbeOk) {
                             LAST.webSessionVerified = true;
+                            // v1.5.14: capture the authoritative cookie
+                            // header ON THE MAIN THREAD at the exact moment
+                            // the WebView proved the session — the Java
+                            // probe's first attempt uses THIS header so it
+                            // provably carries the SAME authenticated
+                            // session. (Read AFTER the second flush below.)
+                            LAST.verifiedCookieHeader =
+                                    safeCookieHeader(originForCookies());
                             // Second flush AFTER the web probe returned 200
                             // (spec: flush/sync again before the Java probe).
                             try {
@@ -571,6 +583,24 @@ public final class QolabWebLoginDriver {
             if (webView == wv) webView = null;
             listener.onLoginResult(r);
         });
+    }
+
+    /** Cookie URL for the app origin (matches the login WebView's). */
+    private String originForCookies() {
+        try {
+            return origin == null ? lastUrl : origin;
+        } catch (Exception e) {
+            return lastUrl;
+        }
+    }
+
+    /** Safe cookie header read (names+values stay in memory only). */
+    private static String safeCookieHeader(String url) {
+        try {
+            return CookieManager.getInstance().getCookie(url);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /** v1.5.13: the ONLY teardown path for the kept-alive WebView. */

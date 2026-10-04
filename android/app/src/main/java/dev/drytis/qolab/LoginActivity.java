@@ -595,9 +595,11 @@ public class LoginActivity extends AppCompatActivity {
                         sessionCookieName(cookieHeader);
                 recordSessionCookieComposition(cookieHeader);
                 holder.client = new HomeDataClient(origin);
+                final String pinned = attempts[0] == 0
+                        ? QolabWebLoginDriver.LAST.verifiedCookieHeader : null;
                 final android.os.Handler ui = h;
                 new Thread(() -> {
-                    final HomeDataClient.Result r = holder.client.fetchHome(store, url);
+                    final HomeDataClient.Result r = holder.client.fetchHome(store, url, pinned);
                     ui.post(() -> {
                         HomeHandoffTrace.get().httpStatus = r.status;
                         HomeHandoffTrace.get().setCookieReceived = holder.client.lastSetCookieSeen;

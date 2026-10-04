@@ -230,6 +230,67 @@ public class HomeSessionTransportTest {
     }
 
     // ------------------------------------------------------------------
+    // v1.5.14: 401 Set-Cookie must NEVER clobber the store
+    // ------------------------------------------------------------------
+
+    @Test
+    public void unauthorized401SetCookieIsNotSynchronizedIntoStore() {
+        // Laravel's 401 regenerates the session (fresh ANONYMOUS cookie in
+        // Set-Cookie). Syncing it would destroy the authenticated session.
+        respondWith(401, "", "qolab-session=anonymous-rotated; path=/; httponly");
+        store.jar.put("qolab-session", "authenticated-value");
+        HomeDataClient.Result r = client.fetchHome(store, server.url("/mobile/home"));
+        assertEquals(401, r.status);
+        assertEquals("401 Set-Cookie must NOT overwrite the store",
+                "authenticated-value", store.jar.get("qolab-session"));
+        assertTrue("no setCookie calls expected on 401", store.setCookieCalls.isEmpty());
+    }
+
+    @Test
+    public void non2xx500SetCookieIsNotSynchronizedIntoStore() {
+        respondWith(500, "boom", "qolab-session=poison; path=/");
+        store.jar.put("qolab-session", "authenticated-value");
+        HomeDataClient.Result r = client.fetchHome(store, server.url("/mobile/home"));
+        assertEquals(500, r.status);
+        assertEquals("5xx Set-Cookie must NOT overwrite the store",
+                "authenticated-value", store.jar.get("qolab-session"));
+    }
+
+    @Test
+    public void ok200SetCookieStillSynchronizesIntoStore() {
+        respondWith(200, "{}", "qolab-session=rotated-authenticated; path=/; httponly");
+        client.fetchHome(store, server.url("/mobile/home"));
+        assertEquals("2xx Set-Cookie must still sync (normal rotation)",
+                "rotated-authenticated", store.jar.get("qolab-session"));
+    }
+
+    @Test
+    public void pinnedFirstAttemptHeaderIsSentVerbatim() {
+        // The first Java probe attempt carries the exact cookie header the
+        // WebView proved authenticated — the store must NOT be consulted.
+        respondWith(200, "{}", null);
+        store.jar.put("qolab-session", "stale-anonymous");
+        HomeDataClient.Result r = client.fetchHome(store, server.url("/mobile/home"),
+                "qolab-session=web-verified-value");
+        assertEquals(200, r.status);
+        synchronized (server.cookieHeaders) {
+            assertEquals("pinned header must be sent verbatim",
+                    "qolab-session=web-verified-value", server.cookieHeaders.get(0));
+        }
+    }
+
+    @Test
+    public void pinnedNullFallsBackToStoreAtRequestTime() {
+        respondWith(200, "{}", null);
+        store.jar.put("qolab-session", "from-store");
+        HomeDataClient.Result r = client.fetchHome(store, server.url("/mobile/home"), null);
+        assertEquals(200, r.status);
+        synchronized (server.cookieHeaders) {
+            assertTrue(server.cookieHeaders.get(0).contains("from-store"));
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 401 policy
     // ------------------------------------------------------------------
 
