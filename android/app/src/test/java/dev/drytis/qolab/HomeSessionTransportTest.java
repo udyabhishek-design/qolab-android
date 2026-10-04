@@ -110,7 +110,7 @@ public class HomeSessionTransportTest {
 
     @Test
     public void evaluateJavascriptReturnDecodesStatusAndBody() {
-        // WebView delivers the promise result as a JSON string literal
+        // The poll reads a window variable whose value is the {s,b} JSON text
         String raw = "\"{\\\"s\\\":200,\\\"b\\\":\\\"{\\\\\\\"user\\\\\\\":{}}\\\"}\"";
         QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript(raw);
         assertEquals(200, r.status);
@@ -129,7 +129,6 @@ public class HomeSessionTransportTest {
         QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript("<not json");
         assertEquals(QolabWebViewTransport.Result.STATUS_IO, r.status);
     }
-
     @Test
     public void evaluateJavascriptNetworkFailureMapsToIO() {
         // fetch catch → JSON.stringify({s:-1,b:''}) → delivered as literal
@@ -145,6 +144,22 @@ public class HomeSessionTransportTest {
         QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript(raw);
         assertEquals(QolabWebViewTransport.Result.STATUS_IO, r.status);
         assertEquals("bad-beacon", r.errorCategory);
+    }
+
+    @Test
+    public void evaluateJavascriptPromiseObjectReturnIsRejectedNotMistakenForData() {
+        // v1.5.18 regression: a Promise return serializes to '{}' — it must
+        // NOT be accepted as a result (it decodes to a beacon with no 's').
+        QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript("\"{}\"");
+        assertEquals("promise-serialization must map to bad-beacon, not data",
+                "bad-beacon", r.errorCategory);
+    }
+
+    @Test
+    public void evaluateJavascriptPendingNullIsNoValueCategory() {
+        QolabWebViewTransport.Result r = QolabWebViewTransport.resultFromEvaluateJavascript("null");
+        assertEquals("no-value", r.errorCategory);
+        assertEquals(QolabWebViewTransport.Result.STATUS_IO, r.status);
     }
 
     // ------------------------------------------------------------------

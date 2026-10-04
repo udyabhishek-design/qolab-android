@@ -104,13 +104,17 @@ public final class QolabWebViewTransport {
      * stay inside the configured origin — otherwise the request is
      * rejected before any JavaScript runs.
      *
-     * v1.5.17 FIX: the fetch result is returned through
-     * evaluateJavascript's OWN ValueCallback (a promise return value)
-     * instead of an addJavascriptInterface bridge. Physical v1.5.16
-     * evidence: the bridge object injected AFTER the page already loaded
-     * is never present in that page's JS context, so every beacon was
-     * silently swallowed and Home never received data. The promise-return
-     * channel needs no page-level injection at all.
+     * v1.5.18 FIX: evaluateJavascript's ValueCallback delivers the
+     * SYNCHRONOUS return value only — a Promise return serializes to '{}'
+     * and is never awaited (this was the v1.5.17 physical failure: every
+     * request decoded as bad-beacon → IO → "Couldn't load"). And
+     * addJavascriptInterface added after page load never reaches the
+     * already-loaded page (the v1.5.16 failure). Neither channel works
+     * here. Instead: the fetch KICK-OFF stores its result in a unique
+     * window variable; a bounded POLL of synchronous-returning
+     * evaluateJavascript expressions reads that variable — each poll
+     * returns a real value ('null' while pending), so the result reaches
+     * Java without any injection at all.
      */
     public void getJson(String path, final Callback cb) {
         final String url = resolveInsideOrigin(path);
@@ -124,47 +128,73 @@ public final class QolabWebViewTransport {
                 cb.onResult(new Result(Result.STATUS_TRANSPORT_DEAD, null, "transport-dead"));
                 return;
             }
-            final AtomicLong reqId = new AtomicLong();
             try {
                 final long id = SEQ.incrementAndGet();
-                reqId.set(id);
+                final String key = "__qolabT" + id; // numeric id → safe JS ident
                 final java.util.concurrent.atomic.AtomicBoolean delivered =
                         new java.util.concurrent.atomic.AtomicBoolean(false);
-                String js =
-                        "(function(){try{"
-                        + "return fetch(" + jsonString(url) + "," +
+                final long deadline = android.os.SystemClock.elapsedRealtime()
+                        + REQUEST_TIMEOUT_MS;
+                // Kick off: fetch stores {s,b} into window[key] when done.
+                String kick =
+                        "(function(){try{window['" + key + "']=null;" +
+                        "fetch(" + jsonString(url) + "," +
                         "{credentials:'same-origin',headers:{'Accept':'application/json'}})" +
-                        ".then(function(r){return r.text().then(function(t){" +
-                        "return JSON.stringify({s:r.status,b:t});}," +
-                        "function(){return JSON.stringify({s:r.status,b:''});});})" +
-                        ".catch(function(e){return JSON.stringify({s:-1,b:''});});"
-                        + "}catch(e){return JSON.stringify({s:-1,b:''});}})()";
-                wv.evaluateJavascript(js, value -> {
-                    if (reqId.get() != id) return;          // stale delivery
-                    if (!delivered.compareAndSet(false, true)) return;
-                    Result r = resultFromEvaluateJavascript(value);
-                    main.post(() -> cb.onResult(r));
-                });
-                // Bounded watchdog — never an infinite callback.
-                main.postDelayed(() -> {
-                    if (delivered.compareAndSet(false, true)) {
-                        cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
+                        ".then(function(r){r.text().then(function(t){" +
+                        "window['" + key + "']=JSON.stringify({s:r.status,b:t});}," +
+                        "function(){window['" + key + "']=JSON.stringify({s:r.status,b:''});});})" +
+                        ".catch(function(e){window['" + key + "']=JSON.stringify({s:-1,b:''});});" +
+                        "}catch(e){window['" + key + "']=JSON.stringify({s:-1,b:''});}return 1;})()";
+                wv.evaluateJavascript(kick, null);
+                // Poll the window variable with a SYNCHRONOUS expression.
+                final Runnable[] poll = new Runnable[1];
+                poll[0] = () -> {
+                    if (delivered.get()) return;
+                    String read =
+                            "(function(){var v=window['" + key + "'];" +
+                            "if(v!==undefined&&v!==null){window['" + key + "']=undefined;return v;}" +
+                            "return null;})()";
+                    try {
+                        wv.evaluateJavascript(read, value -> {
+                            if (delivered.get()) return;
+                            Result r = resultFromEvaluateJavascript(value);
+                            if (!"no-value".equals(r.errorCategory)) {
+                                if (delivered.compareAndSet(false, true)) {
+                                    main.post(() -> cb.onResult(r));
+                                }
+                                return;
+                            }
+                            // still pending — bounded re-poll
+                            if (android.os.SystemClock.elapsedRealtime() < deadline) {
+                                main.postDelayed(poll[0], POLL_INTERVAL_MS);
+                            } else if (delivered.compareAndSet(false, true)) {
+                                cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
+                            }
+                        });
+                    } catch (Exception e) {
+                        if (delivered.compareAndSet(false, true)) {
+                            cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
+                        }
                     }
-                }, REQUEST_TIMEOUT_MS);
+                };
+                main.postDelayed(poll[0], POLL_INTERVAL_MS);
             } catch (Exception e) {
                 cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
             }
         });
     }
 
+    private static final long POLL_INTERVAL_MS = 250;
+
     private static final AtomicLong SEQ = new AtomicLong();
     private static final long REQUEST_TIMEOUT_MS = 25_000;
 
     /**
-     * v1.5.17: decode the evaluateJavascript promise-return value. The
-     * callback receives the JS expression's result as a JSON-encoded
-     * string — either a quoted string or the literal 'null'. Static and
-     * JVM-testable.
+     * v1.5.17/18: decode an evaluateJavascript return value. The callback
+     * receives the JS expression's result as a JSON-encoded string — either
+     * a quoted string or the literal 'null'. 'null' (still pending / absent)
+     * maps to the "no-value" IO category, which the poll loop treats as
+     * "keep waiting", not an error. Static and JVM-testable.
      */
     public static Result resultFromEvaluateJavascript(String value) {
         if (value == null || "null".equals(value.trim())) {
