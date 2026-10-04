@@ -571,6 +571,7 @@ public class LoginActivity extends AppCompatActivity {
                         QolabCookieSession.containsSessionCookie(cookieHeader);
                 HomeHandoffTrace.get().sessionCookieName =
                         sessionCookieName(cookieHeader);
+                recordSessionCookieComposition(cookieHeader);
                 holder.client = new HomeDataClient(origin);
                 final android.os.Handler ui = h;
                 new Thread(() -> {
@@ -633,8 +634,10 @@ public class LoginActivity extends AppCompatActivity {
             HomeDataClient.Result r = client.fetchHome(store, origin + "/mobile/home");
             HomeHandoffTrace t = HomeHandoffTrace.get();
             t.httpStatus = r.status;
-            t.sessionCookieSent = QolabCookieSession.containsSessionCookie(
-                    store.cookieHeaderFor(origin + "/mobile/home"));
+            String cookieHeader = store.cookieHeaderFor(origin + "/mobile/home");
+            t.sessionCookieSent = QolabCookieSession.containsSessionCookie(cookieHeader);
+            t.sessionCookieName = sessionCookieName(cookieHeader);
+            recordSessionCookieComposition(cookieHeader);
             t.setCookieReceived = client.lastSetCookieSeen;
             runOnUiThread(() -> {
                 if (r.data != null && r.status / 100 == 2) {
@@ -689,6 +692,57 @@ public class LoginActivity extends AppCompatActivity {
         HomeDataClient client;
     }
 
+    /** v1.5.12: count *-session entries + duplicate names (names only). */
+    private static void recordSessionCookieComposition(String cookieHeader) {
+        HomeHandoffTrace t = HomeHandoffTrace.get();
+        if (cookieHeader == null || cookieHeader.isEmpty()) {
+            t.sessionCookieEntries = 0;
+            t.sessionCookieDuplicate = false;
+            return;
+        }
+        java.util.List<String> sessionNames = new java.util.ArrayList<>();
+        for (String part : cookieHeader.split(";")) {
+            String name = part.split("=", 2)[0].trim();
+            if (name.toLowerCase().endsWith("session")) sessionNames.add(name);
+        }
+        t.sessionCookieEntries = sessionNames.size();
+        t.sessionCookieDuplicate = sessionNames.size() > 1;
+    }
+
+    /**
+     * v1.5.12: decision evidence from the dual probe — shown in the diag
+     * panel so one physical screenshot is sufficient.
+     * A) web 200 + java 401 → browser session valid; Android cookie
+     *    transport broken. B) both 401 → do NOT blame the transport.
+     * C) both 200 → handoff works; investigate afterwards.
+     * Domain/path scope is NOT reported: CookieManager.getCookie()
+     * does not expose it.
+     */
+    private static String dualProbeDecision() {
+        QolabWebLoginDriver.Trace d = QolabWebLoginDriver.LAST;
+        HomeHandoffTrace t = HomeHandoffTrace.get();
+        if (d.webProbeStatus == -2 || t.httpStatus == -2) return null;
+        boolean webOk = d.webProbeStatus >= 200 && d.webProbeStatus < 300;
+        boolean javaOk = t.httpStatus >= 200 && t.httpStatus < 300;
+        if (webOk && !javaOk) {
+            return "A: WebView probe " + d.webProbeStatus + " OK but Java probe "
+                    + t.httpStatus + " — browser session valid; Android cookie "
+                    + "transport broken (duplicate session-cookie names="
+                    + (t.sessionCookieDuplicate ? "Y" : "N") + ")";
+        }
+        if (!webOk && !javaOk) {
+            return "B: both probes 401 (web=" + d.webProbeStatus + ", java="
+                    + t.httpStatus + ") — session not authenticated; do NOT "
+                    + "blame Java cookie transport";
+        }
+        if (webOk && javaOk) {
+            return "C: both probes 200 — handoff works; investigate what "
+                    + "happens after handoff";
+        }
+        return "mixed: web=" + d.webProbeStatus + ", java=" + t.httpStatus
+                + " — unexpected combination";
+    }
+
     /**
      * v1.5.9: STATIC handoff diagnostics — survive routeToLogin() and
      * activity recreation so the failed-login diag panel can always show
@@ -703,6 +757,12 @@ public class LoginActivity extends AppCompatActivity {
         volatile int retryCount = 0;
         volatile String authLostReason = null;
         volatile String sessionCookieName = null; // NAME only, never value
+        // v1.5.12: cookie-header composition evidence (names/counts only).
+        volatile int sessionCookieEntries = 0;   // *-session entries in header
+        volatile boolean sessionCookieDuplicate = false;
+        volatile String decision = null;         // A / B / C comparison verdict
+        // CookieManager.getCookie() exposes names+values only — no
+        // domain/path metadata, so scope is reported as unavailable.
 
         static HomeHandoffTrace get() { return I; }
         String render() {
@@ -711,8 +771,11 @@ public class LoginActivity extends AppCompatActivity {
                     + ", session sent=" + (sessionCookieSent ? "Y" : "N")
                     + ", set-cookie=" + (setCookieReceived ? "Y" : "N")
                     + ", retries=" + retryCount
-                    + (authLostReason != null ? ", reason=" + authLostReason : "")
-                    + (sessionCookieName != null ? ", cookie=" + sessionCookieName : "");
+                    + ", sessionCookieEntries=" + sessionCookieEntries
+                    + ", duplicateSessionNames="
+                    + (sessionCookieEntries > 1 ? "Y(" + sessionCookieEntries + ")" : "N")
+                    + (sessionCookieName != null ? ", cookie=" + sessionCookieName : "")
+                    + (authLostReason != null ? ", reason=" + authLostReason : "");
         }
     }
 

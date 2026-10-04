@@ -67,6 +67,14 @@ public final class QolabWebLoginDriver {
         public volatile boolean postLoginInitiated = false;
         public volatile int postLoginStatus = -2;   // -2 not observable, -1 network error
         public volatile boolean postLoginFailed = false;
+        // v1.5.12: login POST response + dual-probe decision evidence.
+        public volatile boolean postLoginRedirected = false;
+        public volatile String postLoginFinalUrl = ""; // sanitized path only
+        public volatile boolean sessionBeforePost = false;
+        public volatile boolean sessionAfterPost = false;
+        public volatile Boolean sessionChanged = null;  // null = not determinable
+        public volatile int webProbeStatus = -2;        // -2 not run
+        public volatile boolean webProbeOk = false;
 
         /** One-line, panel-safe rendering (booleans only). */
         public String render() {
@@ -85,6 +93,14 @@ public final class QolabWebLoginDriver {
                         : "")
                     + " title=" + QolabWebLoginDriver.sanitizeNote(title)
                     + " href=" + href
+                    + " postRedirected=" + (postLoginRedirected ? "Y" : "N")
+                    + (postLoginFinalUrl.isEmpty() ? "" : " postFinal=" + postLoginFinalUrl)
+                    + " sessionBefore=" + (sessionBeforePost ? "Y" : "N")
+                    + " sessionAfter=" + (sessionAfterPost ? "Y" : "N")
+                    + (sessionChanged == null ? " sessionChanged=?" :
+                        " sessionChanged=" + (sessionChanged ? "Y" : "N"))
+                    + " webProbe=" + (webProbeStatus == -2 ? "not run" : String.valueOf(webProbeStatus))
+                    + (webProbeStatus >= 200 && webProbeStatus < 300 ? " OK" : "")
                     + (note.isEmpty() ? "" : " note=" + note)
                     + (totalMs >= 0 ? " ms=" + totalMs : "");
         }
@@ -466,22 +482,37 @@ public final class QolabWebLoginDriver {
         main.removeCallbacks(probe);
         main.removeCallbacks(postSubmitPoll);
         final WebView wv = webView;
+        final boolean runWebProbe = wv != null && r.stage != null
+                && (r.success || r.stage.startsWith("tx-2xx"));
+        // v1.5.12: BEFORE destroying the authenticated WebView, run the
+        // in-page /mobile/home probe so the diagnostic panel can compare
+        // browser-context vs Java-context session validity (decision
+        // evidence A/B/C). Teardown is delayed just long enough for the
+        // beacon to arrive.
         main.post(() -> {
-            if (wv != null) {
+            if (wv != null && runWebProbe) {
                 try {
-                    wv.removeJavascriptInterface("QolabLoginDriver");
-                    wv.stopLoading();
-                    ViewGroup parent = (ViewGroup) wv.getParent();
-                    if (parent != null) {
-                        ViewGroup grand = (ViewGroup) parent.getParent();
-                        if (grand != null) grand.removeView(parent);
-                    }
-                    wv.destroy();
+                    wv.evaluateJavascript(WEB_PROBE_JS, null);
                 } catch (Exception ignored) {
                 }
             }
-            if (webView == wv) webView = null;
-            listener.onLoginResult(r);
+            main.postDelayed(() -> {
+                if (wv != null) {
+                    try {
+                        wv.removeJavascriptInterface("QolabLoginDriver");
+                        wv.stopLoading();
+                        ViewGroup parent = (ViewGroup) wv.getParent();
+                        if (parent != null) {
+                            ViewGroup grand = (ViewGroup) parent.getParent();
+                            if (grand != null) grand.removeView(parent);
+                        }
+                        wv.destroy();
+                    } catch (Exception ignored) {
+                    }
+                }
+                if (webView == wv) webView = null;
+                listener.onLoginResult(r);
+            }, runWebProbe ? 1500 : 0);
         });
     }
 
@@ -532,6 +563,38 @@ public final class QolabWebLoginDriver {
         @JavascriptInterface
         public void onOutcome(String json) {
             main.post(() -> onOutcomeJson(json));
+        }
+
+        /** v1.5.12: WebView-context /mobile/home probe result (status only). */
+        @JavascriptInterface
+        public void onWebProbe(String json) {
+            main.post(() -> {
+                try {
+                    JSONObject o = new JSONObject(json);
+                    LAST.webProbeStatus = o.optInt("status", -1);
+                    LAST.webProbeOk = LAST.webProbeStatus >= 200 && LAST.webProbeStatus < 300;
+                } catch (Exception ignored) {
+                }
+            });
+        }
+
+        /** v1.5.12: login POST response metadata (no values). */
+        @JavascriptInterface
+        public void onLoginMeta(String json) {
+            main.post(() -> {
+                try {
+                    JSONObject o = new JSONObject(json);
+                    LAST.postLoginRedirected = o.optBoolean("redirected", false);
+                    String fu = sanitizeUrl(o.optString("finalUrl", ""));
+                    // keep path only
+                    int i = fu.indexOf('/', fu.indexOf("//") + 2);
+                    LAST.postLoginFinalUrl = i >= 0 ? fu.substring(i) : fu;
+                    LAST.sessionBeforePost = o.optBoolean("sessionBefore", false);
+                    LAST.sessionAfterPost = o.optBoolean("sessionAfter", false);
+                    if (o.has("changed")) LAST.sessionChanged = o.optBoolean("changed", false);
+                } catch (Exception ignored) {
+                }
+            });
         }
 
         /**
@@ -616,20 +679,26 @@ public final class QolabWebLoginDriver {
             "  try{xsrf=decodeURIComponent(row.split('=').slice(1).join('='));}catch(e){xsrf=row.split('=').slice(1).join('=');}" +
             " }" +
             "});" +
-            "var sess=false;" +
-            "document.cookie.split(';').forEach(function(row){" +
-            " var n=row.trim().split('=')[0];if(/session$/i.test(n))sess=true;" +
-            "});" +
-            "var rep=function(s,extra){try{d.onTx(JSON.stringify(Object.assign({status:s,sessionCookie:sess},extra||{})));}catch(e){}};" +
+            "var sess=function(){" +
+            " var f=false;document.cookie.split(';').forEach(function(row){" +
+            " var n=row.trim().split('=')[0];if(/session$/i.test(n))f=true;" +
+            "});return f;};" +
+            "var sessBefore=sess();" +
+            "var rep=function(s,extra){try{d.onTx(JSON.stringify(Object.assign({status:s,sessionCookie:sess()},extra||{})));}catch(e){}};" +
             "var body=new URLSearchParams();" +
             "body.append('email',d.getEmail());body.append('password',d.getPassword());" +
             "fetch(location.origin+'/login',{method:'POST',credentials:'same-origin',headers:" +
             "{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'," +
             "'X-Requested-With':'XMLHttpRequest','X-XSRF-TOKEN':xsrf},body:body})" +
             ".then(function(r){rep(r.status,{started:true});" +
+            " try{d.onLoginMeta(JSON.stringify({redirected:r.redirected===true," +
+            " finalUrl:r.url||location.href,sessionBefore:sessBefore," +
+            " sessionAfter:sess(),changed:null}));}catch(e){}" +
             " if(r.status>=200&&r.status<300){setTimeout(function(){location.href=location.origin+'/dashboard';},150);}" +
             "})" +
-            ".catch(function(e){rep(-1,{started:true,networkError:(e&&e.name)?String(e.name).substring(0,40):'network'});});" +
+            ".catch(function(e){rep(-1,{started:true,networkError:(e&&e.name)?String(e.name).substring(0,40):'network'});" +
+            " try{d.onLoginMeta(JSON.stringify({redirected:false,finalUrl:location.href," +
+            " sessionBefore:sessBefore,sessionAfter:sess(),changed:null}));}catch(e2){}});" +
             "}catch(e){try{d.onTx(JSON.stringify({status:-2,sessionCookie:false,started:false}));}catch(e2){}}})()";
 
     /**
@@ -673,6 +742,22 @@ public final class QolabWebLoginDriver {
             " window.fetch=function(input,init){var m=((init&&init.method)||'GET'),u=(typeof input==='string')?input:(input&&input.url)||'';" +
             "  return of.apply(this,arguments).then(function(r){rep(m,u,r.status,false);return r;},function(e){rep(m,u,-1,true);throw e;});};" +
             "}}catch(e){}})()";
+
+    /**
+     * v1.5.12: WebView-context /mobile/home probe — run INSIDE the
+     * authenticated hidden WebView before destroy. Reports the HTTP
+     * status only (never body/cookies/tokens). This distinguishes
+     * browser-session-authenticated (A: web 200 + java 401 → cookie
+     * transport broken) from a genuinely unauthenticated session
+     * (B: both 401 → do not blame the Java transport).
+     */
+    static final String WEB_PROBE_JS =
+            "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
+            "fetch(location.origin+'/mobile/home',{credentials:'same-origin'," +
+            "headers:{'Accept':'application/json'}})" +
+            ".then(function(r){d.onWebProbe(JSON.stringify({status:r.status}));})" +
+            ".catch(function(){d.onWebProbe(JSON.stringify({status:-1}));});" +
+            "}catch(e){try{d.onWebProbe(JSON.stringify({status:-1}));}catch(e2){}}})()";
 
     /** Read the page state directly when evaluateOutcome runs on /login. */
     private static final String OUTCOME_JS =            "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
