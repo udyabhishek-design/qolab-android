@@ -606,9 +606,22 @@ public final class QolabWebLoginDriver {
     /** v1.5.13: the ONLY teardown path for the kept-alive WebView. */
     private static WebView keepAliveWebView;
 
-    /** v1.5.13: destroy the kept-alive WebView (after both probes 200,
-     *  or when the user retries / the activity dies). Safe to call
-     *  repeatedly; must run on the main thread. */
+    /**
+     * v1.5.15: HAND OVER the kept-alive authenticated WebView to the
+     * application-scoped WebView transport instead of destroying it.
+     * Must run on the main thread (called when both probes have passed).
+     * Returns true if a live WebView was handed over.
+     */
+    public static boolean handOverToTransport(String origin) {
+        WebView wv = keepAliveWebView;
+        keepAliveWebView = null;
+        if (wv == null) return false;
+        QolabWebViewTransport.adopt(wv, origin);
+        return true;
+    }
+
+    /** v1.5.13/15: destroy the kept-alive WebView WITHOUT adopting it
+     *  (retry / activity death paths). Safe to call repeatedly; main thread. */
     public static void destroyKeptAlive() {
         WebView wv = keepAliveWebView;
         keepAliveWebView = null;

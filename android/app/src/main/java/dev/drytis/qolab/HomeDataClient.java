@@ -3,34 +3,28 @@ package dev.drytis.qolab;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
-import javax.net.ssl.HttpsURLConnection;
-
 /**
- * Home data client for the native Android Home (Home V1) — pure Java,
- * unit-testable, modelled on QolabAuthClient.
+ * v1.5.15 (Architecture B): HomeDataClient is now the PURE MODEL + PARSING
+ * layer for the native Android Home. All JSON parsing, model classes and
+ * error classification tests are preserved unchanged.
  *
- * Data source: the Development-only aggregate endpoint
+ * The authenticated transport is {@link QolabWebViewTransport}: the
+ * application-scoped WebView that owns the Laravel session performs
+ * GET /mobile/home inside the browser context and hands only the JSON
+ * text to this parser. Java HttpURLConnection no longer carries the
+ * session (physically disproven on device: WebView 200 / Java 401).
  *
+ * Data source (unchanged): the Development-only aggregate endpoint
  *   GET {origin}/mobile/home     (session-authenticated, read-only)
- *   GET {origin}/notifications/unread-count
  *
- * The authenticated session cookies live in the WebView CookieManager (the
- * same session the shell uses); the caller passes them in as a Cookie header
- * string. GET requests only — no CSRF-requiring mutations from Home.
- *
- * 401 from the backend means the session is gone; the caller should route to
- * LoginActivity (gate re-used; the Logout implementation is NOT touched).
+ * GET requests only — no CSRF-requiring mutations from Home.
  */
 public final class HomeDataClient {
+
+    private HomeDataClient() {} // static parse layer only
 
     /** Outcome of one aggregate fetch. */
     public static final class Result {
@@ -187,119 +181,6 @@ public final class HomeDataClient {
         }
     }
 
-    private final String baseUrl;
-    private int connectTimeoutMs = 10_000;
-    private int readTimeoutMs = 20_000;
-
-    /** v1.5.9 diagnostics: Y/N only — a Set-Cookie header was seen on the
-     *  most recent response (name(s) only are ever surfaced, never values). */
-    public volatile boolean lastSetCookieSeen = false;
-
-    public HomeDataClient(String baseUrl) {
-        this.baseUrl = baseUrl == null ? "" : baseUrl.replaceAll("/+$", "");
-    }
-
-    public void setTimeouts(int connectMs, int readMs) {
-        this.connectTimeoutMs = connectMs;
-        this.readTimeoutMs = readMs;
-    }
-
-    /** Blocking — background thread. Cookies come from (and Set-Cookie
-     *  responses are synchronized back to) the AUTHORITATIVE cookie store
-     *  at request time — never a stale one-shot snapshot. */
-    public Result fetchHome(QolabCookieSession.CookieStore store, String url) {
-        return fetchHome(store, url, null);
-    }
-
-    /**
-     * v1.5.14: fetchHome with a PINNED first-attempt cookie header. The
-     * caller captured it on the main thread at the exact moment the
-     * WebView proved the session (see QolabWebLoginDriver.LAST
-     * .verifiedCookieHeader). The FIRST request uses the pinned header —
-     * the same session the WebView sent. Subsequent behavior is
-     * unchanged: 2xx Set-Cookie still syncs into the store; non-2xx
-     * never mutates the store (401s regenerate an ANONYMOUS session
-     * cookie that must not clobber the authenticated one).
-     */
-    public Result fetchHome(QolabCookieSession.CookieStore store, String url,
-                            String pinnedCookieHeader) {
-        HttpURLConnection c = null;
-        try {
-            URL u = new URL(url);
-            String cookieHeader = (pinnedCookieHeader != null && !pinnedCookieHeader.isEmpty())
-                    ? pinnedCookieHeader
-                    : store.cookieHeaderFor(url);
-            c = (HttpURLConnection) u.openConnection();
-            if (c instanceof HttpsURLConnection) { /* system trust store */ }
-            c.setRequestMethod("GET");
-            c.setRequestProperty("Accept", "application/json");
-            if (cookieHeader != null && !cookieHeader.isEmpty()) {
-                c.setRequestProperty("Cookie", cookieHeader);
-            }
-            c.setConnectTimeout(connectTimeoutMs);
-            c.setReadTimeout(readTimeoutMs);
-            c.setInstanceFollowRedirects(false);
-            int code = c.getResponseCode();
-            lastSetCookieSeen = c.getHeaderFields() != null
-                    && c.getHeaderFields().containsKey("Set-Cookie");
-            // v1.5.14: synchronize Set-Cookie ONLY on 2xx responses.
-            // PROVEN defect (device + dev-backend evidence): Laravel's 401
-            // REGENERATES the session cookie (a fresh ANONYMOUS session in
-            // Set-Cookie). Syncing that back overwrites the authoritative
-            // store — destroying a just-authenticated session and freezing
-            // every retry on the anonymous cookie (web 200 / java 401×8).
-            if (code / 100 == 2) {
-                QolabCookieSession.synchronize(c.getHeaderFields(), url, store);
-            }
-            boolean hadSession = QolabCookieSession.containsSessionCookie(cookieHeader);
-            if (code == 401) {
-                // A 401 is only a real session loss if we actually SENT a
-                // session cookie. Without one this is a transport/seam
-                // problem — surfacing it as "logged out" would be the bug.
-                return new Result(code, null, null, hadSession);
-            }
-            if (code / 100 != 2) {
-                return new Result(code, null, null, false);
-            }
-            String body = readAll(c);
-            return new Result(code, parse(body), null, false);
-        } catch (Exception e) {
-            return new Result(Result.STATUS_IO, null, e.getClass().getSimpleName(), false);
-        } finally {
-            if (c != null) c.disconnect();
-        }
-    }
-
-    /** Blocking — unread notification count for the header badge. */
-    public int fetchUnreadCount(QolabCookieSession.CookieStore store, String url) {
-        HttpURLConnection c = null;
-        try {
-            URL u = new URL(url);
-            String cookieHeader = store.cookieHeaderFor(url);
-            c = (HttpURLConnection) u.openConnection();
-            c.setRequestMethod("GET");
-            c.setRequestProperty("Accept", "application/json");
-            if (cookieHeader != null && !cookieHeader.isEmpty()) {
-                c.setRequestProperty("Cookie", cookieHeader);
-            }
-            c.setConnectTimeout(connectTimeoutMs);
-            c.setReadTimeout(readTimeoutMs);
-            c.setInstanceFollowRedirects(false);
-            int code = c.getResponseCode();
-            // v1.5.14: 2xx-only Set-Cookie sync here too (see fetchHome).
-            if (code / 100 == 2) {
-                QolabCookieSession.synchronize(c.getHeaderFields(), url, store);
-            }
-            if (code / 100 != 2) return -1;
-            JSONObject root = new JSONObject(readAll(c));
-            return root.optInt("unread_count", 0);
-        } catch (Exception e) {
-            return -1;
-        } finally {
-            if (c != null) c.disconnect();
-        }
-    }
-
     // ------------------------------------------------------------------
     // Parsing — pure, unit-tested
     // ------------------------------------------------------------------
@@ -420,19 +301,4 @@ public final class HomeDataClient {
         return (v == null || v.isEmpty() || "null".equals(v)) ? null : v;
     }
 
-    private static String readAll(HttpURLConnection c) throws Exception {
-        InputStream is;
-        try {
-            is = c.getInputStream();
-        } catch (Exception e) {
-            is = c.getErrorStream();
-        }
-        if (is == null) return "";
-        BufferedReader r = new BufferedReader(new InputStreamReader(is, StandardCharsets.UTF_8));
-        StringBuilder sb = new StringBuilder();
-        String line;
-        while ((line = r.readLine()) != null) sb.append(line);
-        r.close();
-        return sb.toString();
-    }
 }

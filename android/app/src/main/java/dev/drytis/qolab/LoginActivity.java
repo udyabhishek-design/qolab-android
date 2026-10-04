@@ -314,12 +314,25 @@ public class LoginActivity extends AppCompatActivity {
                             + (r.note == null || r.note.isEmpty() ? "" : " note=" + r.note));
 
                     if (r.success) {
-                        // Authenticated redirect completed (driver-verified).
-                        // v1.5.7: the redirect was detected AFTER auth
-                        // completed, so there is no pre-login value to
-                        // compare against — wait for session cookie
-                        // PRESENCE (with flush), not a value change.
-                        waitForAuthenticatedSessionPresent();
+                        // v1.5.15 (Architecture B): the driver's success now
+                        // means POST /login 200 AND the authenticated WebView
+                        // itself returned 200 for /mobile/home (VERIFY_JS).
+                        // The Java-session verification gate is REMOVED —
+                        // physical proof showed Java can never faithfully
+                        // carry the browser session. Instead the authenticated
+                        // WebView is preserved as the application transport
+                        // and native Home launches on it.
+                        boolean adopted = QolabWebLoginDriver.handOverToTransport(appOrigin);
+                        android.util.Log.i(TAG, "handover to WebView transport: " + adopted);
+                        if (adopted) {
+                            onLoginSuccess();
+                        } else {
+                            // WebView vanished between verify and handover —
+                            // honest failure, no Java cookie reconstruction.
+                            lastFailure = traceSnapshot("handover-lost-webview",
+                                    "authenticated WebView no longer available for transport");
+                            onLoginFailure(getString(R.string.login_error_generic));
+                        }
                         return;
                     }
                     String message;
@@ -341,16 +354,12 @@ public class LoginActivity extends AppCompatActivity {
                             message = getString(R.string.login_error_generic);
                             break;
                         case "timeout":
-                            // v1.5.10: a driver timeout means only that
-                            // location.href never left /login — an Inertia
-                            // login may STILL have succeeded. Decide from
-                            // the server: run ONE /mobile/home probe with
-                            // the exact cookie path HomeDataClient uses.
-                            // 200 → authenticated → Home. 401 → genuine
-                            // failure → diagnostics. network/5xx → reported
-                            // separately, never classified as auth loss.
-                            runTimeoutProbe();
-                            return;
+                            // v1.5.15: the login transaction is a direct
+                            // in-page POST with an explicit outcome beacon;
+                            // a timeout now means the POST never completed
+                            // (network/slow device). Honest failure.
+                            message = getString(R.string.login_error_generic);
+                            break;
                         case "load":
                         case "page-error":
                         case "bridge":
@@ -491,7 +500,7 @@ public class LoginActivity extends AppCompatActivity {
             sb.append("Cookie bridge: ").append("n/a (WebView session context)").append('\n');
             sb.append("Session cookie present (may be anonymous): ")
                     .append(sessionCookieValue(appOrigin) != null ? "Yes" : "No").append('\n');
-            // v1.5.10: POST /login observability + probe result.
+            // v1.5.10: POST /login observability.
             QolabWebLoginDriver.Trace dt = QolabWebLoginDriver.LAST;
             sb.append("POST /login initiated: ")
                     .append(dt.postLoginInitiated ? "Yes" : "No").append('\n');
@@ -502,18 +511,17 @@ public class LoginActivity extends AppCompatActivity {
                                 : String.valueOf(dt.postLoginStatus))
                         .append(dt.postLoginFailed ? " (failed)" : "").append('\n');
             }
-            // v1.5.13: the three verification stages, distinguished.
+            // v1.5.15: Architecture B diagnostics — no Java cookie-transfer
+            // lines (that path no longer exists in the active flow).
             sb.append("Login POST authenticated: ")
                     .append(dt.loginPostAuthenticated ? "Yes" : "No").append('\n');
             sb.append("WebView session verified: ")
                     .append(dt.webSessionVerified ? "Yes" : "No").append('\n');
-            sb.append("Java session verified: ")
-                    .append((HomeHandoffTrace.get().httpStatus >= 200
-                            && HomeHandoffTrace.get().httpStatus < 300) ? "Yes" : "No").append('\n');
-            sb.append("Home probe: ")
-                    .append(HomeHandoffTrace.get().httpStatus == -1
-                            ? "not run" : HomeHandoffTrace.get().render()).append('\n');
-            sb.append("MainActivity launched: No");
+            sb.append("WebView transport alive: ")
+                    .append(QolabWebViewTransport.get() != null
+                            && QolabWebViewTransport.get().isAlive() ? "Yes" : "No").append('\n');
+            sb.append("Home launched via transport: ")
+                    .append(MainActivityLaunchedMarker.get() ? "Yes" : "No").append('\n');
         }
         diagBody.setText(sb.toString());
     }
@@ -575,149 +583,6 @@ public class LoginActivity extends AppCompatActivity {
      * Never routes to login from the probe — the user just authenticated.
      * No cookies are cleared at any point here.
      */
-    private void waitForAuthenticatedSessionPresent() {
-        final String origin = appOrigin;
-        final android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-        final int MAX_ATTEMPTS = 8;
-        final int[] attempts = {0};
-        final QolabDataClientHolder holder = new QolabDataClientHolder();
-        final Runnable probe = new Runnable() {
-            @Override
-            public void run() {
-                HomeHandoffTrace.get().retryCount = attempts[0];
-                final QolabCookieSession.CookieStore store = new QolabCookieSession.WebViewCookieStore();
-                final String url = origin + "/mobile/home";
-                // Read the cookie header exactly as HomeDataClient will.
-                final String cookieHeader = store.cookieHeaderFor(url);
-                HomeHandoffTrace.get().sessionCookieSent =
-                        QolabCookieSession.containsSessionCookie(cookieHeader);
-                HomeHandoffTrace.get().sessionCookieName =
-                        sessionCookieName(cookieHeader);
-                recordSessionCookieComposition(cookieHeader);
-                holder.client = new HomeDataClient(origin);
-                final String pinned = attempts[0] == 0
-                        ? QolabWebLoginDriver.LAST.verifiedCookieHeader : null;
-                final android.os.Handler ui = h;
-                new Thread(() -> {
-                    final HomeDataClient.Result r = holder.client.fetchHome(store, url, pinned);
-                    ui.post(() -> {
-                        HomeHandoffTrace.get().httpStatus = r.status;
-                        HomeHandoffTrace.get().setCookieReceived = holder.client.lastSetCookieSeen;
-                        HomeHandoffTrace.get().authLostReason =
-                                r.authLost ? "401 with session cookie" : null;
-                        boolean ok = r.data != null && r.status / 100 == 2;
-                        if (ok) {
-                            android.util.Log.i(TAG, "Java probe 200 — dual gate: "
-                                    + "web=" + QolabWebLoginDriver.LAST.webProbeStatus
-                                    + " java=" + r.status);
-                            boolean webVerified = QolabWebLoginDriver.LAST.webSessionVerified;
-                            if (webVerified) {
-                                // BOTH probes 200 → launch Home, then (and
-                                // only then) destroy the kept-alive WebView.
-                                android.util.Log.i(TAG, "both probes 200 → Home");
-                                QolabWebLoginDriver.destroyKeptAlive();
-                                onLoginSuccess();
-                            } else {
-                                // Java 200 but WebView not verified —
-                                // mixed result, preserved verbatim. Do NOT
-                                // launch Home, do NOT destroy the WebView,
-                                // do NOT auto-workaround.
-                                QolabWebLoginDriver.LAST.stage = "gate-mixed-java-only";
-                                lastFailure = traceSnapshot("gate-mixed-java-only",
-                                        "Java probe 200 but WebView session not verified"
-                                                + " (web=" + QolabWebLoginDriver.LAST.webProbeStatus + ")");
-                                diagExpanded = true;
-                                onLoginFailure(getString(R.string.login_error_generic));
-                            }
-                            return;
-                        }
-                        boolean authLoss = r.authLost;             // 401 with session sent
-                        boolean transientFailure = !ok && !authLoss; // network/5xx/parse/401-no-session
-                        if (attempts[0]++ >= MAX_ATTEMPTS) {
-                            android.util.Log.w(TAG, "auth probe exhausted (status="
-                                    + r.status + " authLoss=" + authLoss + ")");
-                            QolabWebLoginDriver.LAST.stage = "probe-exhausted";
-                            QolabWebLoginDriver.LAST.note = "GET /mobile/home never returned 200"
-                                    + " (last status=" + r.status + ", authLoss=" + authLoss + ")";
-                            lastFailure = traceSnapshot("probe-exhausted",
-                                    "authenticated probe failed after " + MAX_ATTEMPTS + " attempts");
-                            onLoginFailure(getString(R.string.login_error_generic));
-                            return;
-                        }
-                        // Either a 401 (session not committed yet) or a
-                        // transient failure — wait and re-probe. NEVER
-                        // routeToLogin from here.
-                        ui.postDelayed(this, 1200);
-                    });
-                }, "auth-handoff-probe").start();
-            }
-        };
-        h.postDelayed(probe, 150);
-    }
-
-    /**
-     * v1.5.10: driver timed out (href still /login) — but the Inertia
-     * POST /login may still have succeeded without a client-side
-     * navigation. Decide from the SERVER: one authenticated
-     * GET /mobile/home probe on the exact cookie path HomeDataClient
-     * uses. 200 → authentication succeeded → Home. 401 → genuine
-     * unauthenticated → diagnostics panel. network/5xx → reported as
-     * 'server unreachable', never auth loss. Never clears cookies.
-     */
-    private void runTimeoutProbe() {
-        final String origin = appOrigin;
-        new Thread(() -> {
-            final QolabCookieSession.CookieStore store =
-                    new QolabCookieSession.WebViewCookieStore();
-            // Flush CookieManager so the probe reads the committed state.
-            try {
-                android.webkit.CookieManager.getInstance().flush();
-            } catch (Exception ignored) {
-            }
-            HomeDataClient client = new HomeDataClient(origin);
-            HomeDataClient.Result r = client.fetchHome(store, origin + "/mobile/home");
-            HomeHandoffTrace t = HomeHandoffTrace.get();
-            t.httpStatus = r.status;
-            String cookieHeader = store.cookieHeaderFor(origin + "/mobile/home");
-            t.sessionCookieSent = QolabCookieSession.containsSessionCookie(cookieHeader);
-            t.sessionCookieName = sessionCookieName(cookieHeader);
-            recordSessionCookieComposition(cookieHeader);
-            t.setCookieReceived = client.lastSetCookieSeen;
-            runOnUiThread(() -> {
-                if (r.data != null && r.status / 100 == 2) {
-                    android.util.Log.i(TAG, "timeout probe 200 → authenticated → Home");
-                    onLoginSuccess();
-                    return;
-                }
-                String message;
-                String stage;
-                if (r.authLost) {                    // 401 with session cookie sent
-                    message = getString(R.string.login_error_generic);
-                    stage = "timeout-401";
-                } else if (r.status == HomeDataClient.Result.STATUS_IO) {
-                    // network/timeout — NOT an authentication failure.
-                    message = getString(R.string.login_error_generic);
-                    stage = "timeout-server-unreachable";
-                } else {                             // 5xx etc.
-                    message = getString(R.string.login_error_generic);
-                    stage = "timeout-server-error-" + r.status;
-                }
-                lastFailure = traceSnapshot(stage,
-                        "driver timed out on /login; server probe: "
-                                + (r.authLost ? "401 unauthenticated"
-                                : r.status == HomeDataClient.Result.STATUS_IO
-                                ? "network failure (" + safeIo(r.ioError) + ")"
-                                : "HTTP " + r.status));
-                diagExpanded = true;
-                onLoginFailure(message);
-            });
-        }, "timeout-probe").start();
-    }
-
-    private static String safeIo(String io) {
-        return io == null ? "io" : io;
-    }
-
     /** Cookie NAME (never value) for diagnostics, longest-name rule. */
     private static String sessionCookieName(String cookieHeader) {        if (cookieHeader == null) return null;
         String best = null;
@@ -731,96 +596,12 @@ public class LoginActivity extends AppCompatActivity {
         return best;
     }
 
-    /** Small holder so the probe runnable can reach its client instance. */
-    private static final class QolabDataClientHolder {
-        HomeDataClient client;
-    }
-
-    /** v1.5.12: count *-session entries + duplicate names (names only). */
-    private static void recordSessionCookieComposition(String cookieHeader) {
-        HomeHandoffTrace t = HomeHandoffTrace.get();
-        if (cookieHeader == null || cookieHeader.isEmpty()) {
-            t.sessionCookieEntries = 0;
-            t.sessionCookieDuplicate = false;
-            return;
-        }
-        java.util.List<String> sessionNames = new java.util.ArrayList<>();
-        for (String part : cookieHeader.split(";")) {
-            String name = part.split("=", 2)[0].trim();
-            if (name.toLowerCase().endsWith("session")) sessionNames.add(name);
-        }
-        t.sessionCookieEntries = sessionNames.size();
-        t.sessionCookieDuplicate = sessionNames.size() > 1;
-    }
-
-    /**
-     * v1.5.12: decision evidence from the dual probe — shown in the diag
-     * panel so one physical screenshot is sufficient.
-     * A) web 200 + java 401 → browser session valid; Android cookie
-     *    transport broken. B) both 401 → do NOT blame the transport.
-     * C) both 200 → handoff works; investigate afterwards.
-     * Domain/path scope is NOT reported: CookieManager.getCookie()
-     * does not expose it.
-     */
-    private static String dualProbeDecision() {
-        QolabWebLoginDriver.Trace d = QolabWebLoginDriver.LAST;
-        HomeHandoffTrace t = HomeHandoffTrace.get();
-        if (d.webProbeStatus == -2 || t.httpStatus == -2) return null;
-        boolean webOk = d.webProbeStatus >= 200 && d.webProbeStatus < 300;
-        boolean javaOk = t.httpStatus >= 200 && t.httpStatus < 300;
-        if (webOk && !javaOk) {
-            return "A: WebView probe " + d.webProbeStatus + " OK but Java probe "
-                    + t.httpStatus + " — browser session valid; Android cookie "
-                    + "transport broken (duplicate session-cookie names="
-                    + (t.sessionCookieDuplicate ? "Y" : "N") + ")";
-        }
-        if (!webOk && !javaOk) {
-            return "B: both probes 401 (web=" + d.webProbeStatus + ", java="
-                    + t.httpStatus + ") — session not authenticated; do NOT "
-                    + "blame Java cookie transport";
-        }
-        if (webOk && javaOk) {
-            return "C: both probes 200 — handoff works; investigate what "
-                    + "happens after handoff";
-        }
-        return "mixed: web=" + d.webProbeStatus + ", java=" + t.httpStatus
-                + " — unexpected combination";
-    }
-
-    /**
-     * v1.5.9: STATIC handoff diagnostics — survive routeToLogin() and
-     * activity recreation so the failed-login diag panel can always show
-     * WHY Home never launched (or why it did, then died). Booleans,
-     * status codes and cookie NAMEs only — never values/tokens/creds.
-     */
-    static final class HomeHandoffTrace {
-        static final HomeHandoffTrace I = new HomeHandoffTrace();
-        volatile int httpStatus = -2; // -2 never run, -1 IO failure
-        volatile boolean sessionCookieSent = false;
-        volatile boolean setCookieReceived = false;
-        volatile int retryCount = 0;
-        volatile String authLostReason = null;
-        volatile String sessionCookieName = null; // NAME only, never value
-        // v1.5.12: cookie-header composition evidence (names/counts only).
-        volatile int sessionCookieEntries = 0;   // *-session entries in header
-        volatile boolean sessionCookieDuplicate = false;
-        volatile String decision = null;         // A / B / C comparison verdict
-        // CookieManager.getCookie() exposes names+values only — no
-        // domain/path metadata, so scope is reported as unavailable.
-
-        static HomeHandoffTrace get() { return I; }
-        String render() {
-            return "probe status=" + (httpStatus == -2 ? "not run"
-                            : httpStatus == -1 ? "IO failure" : String.valueOf(httpStatus))
-                    + ", session sent=" + (sessionCookieSent ? "Y" : "N")
-                    + ", set-cookie=" + (setCookieReceived ? "Y" : "N")
-                    + ", retries=" + retryCount
-                    + ", sessionCookieEntries=" + sessionCookieEntries
-                    + ", duplicateSessionNames="
-                    + (sessionCookieEntries > 1 ? "Y(" + sessionCookieEntries + ")" : "N")
-                    + (sessionCookieName != null ? ", cookie=" + sessionCookieName : "")
-                    + (authLostReason != null ? ", reason=" + authLostReason : "");
-        }
+    /** v1.5.15: static marker so the login diag panel can state whether
+     *  Home was launched via the transport in this process. */
+    static final class MainActivityLaunchedMarker {
+        private static volatile boolean launched = false;
+        static void mark() { launched = true; }
+        static boolean get() { return launched; }
     }
 
     /** v1.5.7: snapshot from the persistent driver trace (safe fields). */
@@ -866,6 +647,7 @@ public class LoginActivity extends AppCompatActivity {
 
     private void onLoginSuccess() {
         android.util.Log.i(TAG, "login success → HomeActivity");
+        MainActivityLaunchedMarker.mark();
         setSubmitting(false);
         Intent i = new Intent(this, HomeActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);

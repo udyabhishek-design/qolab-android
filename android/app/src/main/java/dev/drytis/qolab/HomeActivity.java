@@ -47,8 +47,6 @@ public class HomeActivity extends AppCompatActivity {
     private static final String TAG = "QolabHome";
     private static final int AVATAR_MAX = 4;
 
-    private HomeDataClient client;
-
     // header / greeting
     private TextView greetingDate, greetingName;
     private View notificationBadge;
@@ -82,34 +80,32 @@ public class HomeActivity extends AppCompatActivity {
     private HomeDataClient.HomeData data;
     private volatile boolean fetching = false;
 
-    /** DEBUG-only diagnostics for the last Home fetch. Booleans/names ONLY —
-     *  never cookie values, tokens, or credentials. */
+    /** DEBUG-only diagnostics for the new (v1.5.15) architecture:
+     *  the authenticated WebView transport fetches Home data. Booleans and
+     *  categories only — never cookie values, tokens, or credentials. */
     static final class HomeDiag {
-        volatile boolean sessionCookieBefore;
-        volatile boolean requestCookieSent;
-        volatile int httpStatus = -2; // -2 never run, -1 IO
+        volatile boolean requestMade;
+        volatile int httpStatus = -2; // -2 never run, -1 IO, -3 transport dead
         volatile long durationMs;
-        volatile boolean setCookieReceived;
-        volatile boolean sessionCookieAfter;
+        volatile boolean payloadReceived;
         volatile boolean parseOk;
         volatile boolean loginTransition;
         volatile String loginReason;
-        volatile int retryCount = 0;
-        volatile String sessionCookieName; // NAME only, never value
+        volatile String transportErrorCategory;
+        volatile boolean transportAlive = true;
 
         String render() {
-            return "Home request diagnostics (names/booleans only)\n"
-                    + "• thread: home-fetch (background)\n"
-                    + "• session cookie present before request: " + (sessionCookieBefore ? "Yes" : "No") + "\n"
-                    + "• request cookie header present: " + (requestCookieSent ? "Yes" : "No") + "\n"
+            return "Home request diagnostics (WebView transport)\n"
+                    + "• transport alive at request time: " + (transportAlive ? "Yes" : "No") + "\n"
+                    + "• request made: " + (requestMade ? "Yes" : "No") + "\n"
                     + "• /mobile/home HTTP status: "
-                    + (httpStatus == -2 ? "not run" : httpStatus == -1 ? "IO failure" : String.valueOf(httpStatus)) + "\n"
+                    + (httpStatus == -2 ? "not run" : httpStatus == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
+                            ? "transport dead" : httpStatus == QolabWebViewTransport.Result.STATUS_IO
+                            ? "IO failure" : String.valueOf(httpStatus)) + "\n"
                     + "• response time: " + durationMs + " ms\n"
-                    + "• Set-Cookie received: " + (setCookieReceived ? "Yes" : "No") + "\n"
-                    + "• session cookie present after request: " + (sessionCookieAfter ? "Yes" : "No") + "\n"
-                    + "• selected session cookie: " + (sessionCookieName == null ? "n/a" : sessionCookieName) + "\n"
-                    + "• verification retries: " + retryCount + "\n"
+                    + "• Home payload received: " + (payloadReceived ? "Yes" : "No") + "\n"
                     + "• JSON parse success: " + (parseOk ? "Yes" : "No") + "\n"
+                    + "• transport error category: " + (transportErrorCategory == null ? "none" : transportErrorCategory) + "\n"
                     + "• Login transition requested: " + (loginTransition ? "Yes" : "No")
                     + (loginReason == null ? "" : "\n• reason: " + loginReason);
         }
@@ -122,7 +118,8 @@ public class HomeActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_home);
 
-        client = new HomeDataClient(BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", ""));
+        // v1.5.15: Home parsing stays in HomeDataClient (pure JSON layer);
+        // the authenticated transport fetches the payload.
         bindViews();
         applyInsets();
         bindActions();
@@ -353,94 +350,72 @@ public class HomeActivity extends AppCompatActivity {
         if (fetching) return;
         fetching = true;
         showLoading();
-        final QolabCookieSession.CookieStore store = new RecordingWebViewCookieStore();
-        final String origin = BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", "");
-        final String url = origin + "/mobile/home";
-        lastDiag.sessionCookieBefore = QolabCookieSession.containsSessionCookie(store.cookieHeaderFor(url));
-        lastDiag.sessionCookieName = sessionCookieName(store.cookieHeaderFor(url));
         lastDiag.loginTransition = false;
         lastDiag.loginReason = null;
-        new Thread(() -> {
-            long t0 = android.os.SystemClock.elapsedRealtime();
-            HomeDataClient.Result result = client.fetchHome(store, url);
-            int unread = client.fetchUnreadCount(store, origin + "/notifications/unread-count");
-            long duration = android.os.SystemClock.elapsedRealtime() - t0;
-            lastDiag.httpStatus = result.status;
-            lastDiag.durationMs = duration;
-            lastDiag.requestCookieSent = true;
-            lastDiag.setCookieReceived = setCookieSeen;
-            lastDiag.sessionCookieAfter = QolabCookieSession.containsSessionCookie(store.cookieHeaderFor(url));
-            lastDiag.parseOk = result.data != null;
-            // A real 401 (we sent a session cookie and the server rejected
-            // it) gets ONE verification retry with cookies re-read from the
-            // authoritative store at request time — never more than one,
-            // and never for IO/5xx/parse problems.
-            if (result.authLost) {
-                lastDiag.loginReason = "verification retry (401 with session cookie)";
-                lastDiag.retryCount++;
-                HomeDataClient.Result retry = client.fetchHome(store, url);
-                lastDiag.httpStatus = retry.status;
-                lastDiag.parseOk = retry.data != null;
-                if (retry.authLost) {
-                    result = retry;
-                } else {
-                    result = retry.data != null ? retry : result;
-                }
+        // v1.5.15 (Architecture B): Home data comes from the AUTHENTICATED
+        // WEBVIEW TRANSPORT — the same browser context that physically
+        // returned 200 for /mobile/home after login. Java HTTP no longer
+        // carries the session; no cookies are read or reconstructed here.
+        QolabWebViewTransport transport = QolabWebViewTransport.get();
+        lastDiag.transportAlive = transport != null && transport.isAlive();
+        if (transport == null || !transport.isAlive()) {
+            lastDiag.httpStatus = QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD;
+            lastDiag.loginReason = "WebView transport not alive → Login";
+            lastDiag.loginTransition = true;
+            fetching = false;
+            routeToLogin();
+            return;
+        }
+        long t0 = android.os.SystemClock.elapsedRealtime();
+        transport.getJson("/mobile/home", r -> {
+            lastDiag.durationMs = android.os.SystemClock.elapsedRealtime() - t0;
+            lastDiag.httpStatus = r.status;
+            lastDiag.transportErrorCategory = r.errorCategory;
+            lastDiag.requestMade = true;
+            lastDiag.payloadReceived = r.body != null;
+            lastDiag.parseOk = false;
+            fetching = false;
+            if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+                lastDiag.loginReason = "transport dead → Login";
+                lastDiag.loginTransition = true;
+                routeToLogin();
+                return;
             }
-            final HomeDataClient.Result finalResult = result;
-            runOnUiThread(() -> {
-                fetching = false;
-                if (finalResult.authLost) {
-                    if (lastDiag.loginReason == null) lastDiag.loginReason = "401 confirmed after retry";
-                    lastDiag.loginTransition = true;
-                    routeToLogin();
-                    return;
+            if (r.status == 401) {
+                // Genuine session loss inside the browser context itself.
+                // Route to Login — NO Java cookie reconstruction.
+                lastDiag.loginReason = "401 from WebView transport → Login";
+                lastDiag.loginTransition = true;
+                routeToLogin();
+                return;
+            }
+            if (r.status == QolabWebViewTransport.Result.STATUS_IO
+                    || r.status / 100 != 2 || r.body == null) {
+                lastDiag.transportErrorCategory = r.errorCategory != null
+                        ? r.errorCategory : ("http-" + r.status);
+                showError(); // retry — never a logout
+                return;
+            }
+            HomeDataClient.HomeData data = HomeDataClient.parse(r.body);
+            lastDiag.parseOk = data != null;
+            if (data == null) {
+                showError();
+                return;
+            }
+            this.data = data;
+            // Unread badge through the same transport.
+            transport.getJson("/notifications/unread-count", u -> {
+                int unread = -1;
+                try {
+                    org.json.JSONObject o = new org.json.JSONObject(u.body == null ? "{}" : u.body);
+                    unread = o.optInt("unread_count", 0);
+                } catch (Exception ignored) {
                 }
-                if (finalResult.data == null) {
-                    showError();
-                    return;
-                }
-                data = finalResult.data;
                 renderAll(unread);
             });
-        }, "home-fetch").start();
+        });
     }
 
-    private volatile boolean setCookieSeen = false;
-
-    /** WebViewCookieStore wrapper that records whether any Set-Cookie
-     *  arrived (boolean only — for the DEBUG diagnostics panel). */
-    private final class RecordingWebViewCookieStore extends QolabCookieSession.WebViewCookieStore {
-        @Override
-        public void setCookie(String url, String setCookieValue) {
-            setCookieSeen = true;
-            super.setCookie(url, setCookieValue);
-        }
-    }
-
-    private String sessionCookieHeader() {
-        try {
-            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
-            String cookies = cm.getCookie(BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", ""));
-            return cookies;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /** Cookie NAME (never value) for diagnostics — longest *-session name. */
-    private static String sessionCookieName(String cookieHeader) {
-        if (cookieHeader == null) return null;
-        String best = null;
-        for (String part : cookieHeader.split(";")) {
-            String name = part.split("=", 2)[0].trim();
-            if (name.toLowerCase().endsWith("session")
-                    && (best == null || name.length() > best.length())) {
-                best = name;
-            }
-        }
-        return best;
-    }
 
     private void routeToLogin() {
         Intent i = new Intent(this, LoginActivity.class);
