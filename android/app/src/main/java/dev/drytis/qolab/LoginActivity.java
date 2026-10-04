@@ -303,6 +303,10 @@ public class LoginActivity extends AppCompatActivity {
         // session → 401 → the device auto-logout. Never logged.
         preAuthSessionValue = sessionCookieValue(appOrigin);
 
+        // v1.5.13: a kept-alive WebView from a previous attempt must not
+        // leak across retries.
+        QolabWebLoginDriver.destroyKeptAlive();
+
         QolabWebLoginDriver driver = new QolabWebLoginDriver(this, appOrigin, email, password,
                 r -> runOnUiThread(() -> {
                     android.util.Log.i(TAG, "web-login-driver success=" + r.success
@@ -320,6 +324,16 @@ public class LoginActivity extends AppCompatActivity {
                     }
                     String message;
                     switch (r.stage) {
+                        case "web-verify-failed":
+                            // v1.5.13: POST /login returned genuine 2xx but
+                            // the WebView /mobile/home probe did not verify.
+                            // NOT a login failure — preserved verbatim in the
+                            // trace/diag panel. WebView stays alive for
+                            // inspection; no retry, no Home launch.
+                            lastFailure = traceSnapshot("web-verify-failed", r.note);
+                            diagExpanded = true;
+                            onLoginFailure(getString(R.string.login_error_generic));
+                            return;
                         case "invalid-credentials":
                             // The real login form showed a field error —
                             // the credentials were rejected. Show the same
@@ -488,6 +502,14 @@ public class LoginActivity extends AppCompatActivity {
                                 : String.valueOf(dt.postLoginStatus))
                         .append(dt.postLoginFailed ? " (failed)" : "").append('\n');
             }
+            // v1.5.13: the three verification stages, distinguished.
+            sb.append("Login POST authenticated: ")
+                    .append(dt.loginPostAuthenticated ? "Yes" : "No").append('\n');
+            sb.append("WebView session verified: ")
+                    .append(dt.webSessionVerified ? "Yes" : "No").append('\n');
+            sb.append("Java session verified: ")
+                    .append((HomeHandoffTrace.get().httpStatus >= 200
+                            && HomeHandoffTrace.get().httpStatus < 300) ? "Yes" : "No").append('\n');
             sb.append("Home probe: ")
                     .append(HomeHandoffTrace.get().httpStatus == -1
                             ? "not run" : HomeHandoffTrace.get().render()).append('\n');
@@ -583,8 +605,28 @@ public class LoginActivity extends AppCompatActivity {
                                 r.authLost ? "401 with session cookie" : null;
                         boolean ok = r.data != null && r.status / 100 == 2;
                         if (ok) {
-                            android.util.Log.i(TAG, "auth probe 200 → Home");
-                            onLoginSuccess();
+                            android.util.Log.i(TAG, "Java probe 200 — dual gate: "
+                                    + "web=" + QolabWebLoginDriver.LAST.webProbeStatus
+                                    + " java=" + r.status);
+                            boolean webVerified = QolabWebLoginDriver.LAST.webSessionVerified;
+                            if (webVerified) {
+                                // BOTH probes 200 → launch Home, then (and
+                                // only then) destroy the kept-alive WebView.
+                                android.util.Log.i(TAG, "both probes 200 → Home");
+                                QolabWebLoginDriver.destroyKeptAlive();
+                                onLoginSuccess();
+                            } else {
+                                // Java 200 but WebView not verified —
+                                // mixed result, preserved verbatim. Do NOT
+                                // launch Home, do NOT destroy the WebView,
+                                // do NOT auto-workaround.
+                                QolabWebLoginDriver.LAST.stage = "gate-mixed-java-only";
+                                lastFailure = traceSnapshot("gate-mixed-java-only",
+                                        "Java probe 200 but WebView session not verified"
+                                                + " (web=" + QolabWebLoginDriver.LAST.webProbeStatus + ")");
+                                diagExpanded = true;
+                                onLoginFailure(getString(R.string.login_error_generic));
+                            }
                             return;
                         }
                         boolean authLoss = r.authLost;             // 401 with session sent

@@ -68,13 +68,17 @@ public final class QolabWebLoginDriver {
         public volatile int postLoginStatus = -2;   // -2 not observable, -1 network error
         public volatile boolean postLoginFailed = false;
         // v1.5.12: login POST response + dual-probe decision evidence.
-        public volatile boolean postLoginRedirected = false;
-        public volatile String postLoginFinalUrl = ""; // sanitized path only
+        public volatile boolean postLoginRedirected = false; // actual r.redirected
+        public volatile String postLoginFinalUrl = ""; // actual r.url ONLY (no location.href fallback)
         public volatile boolean sessionBeforePost = false;
         public volatile boolean sessionAfterPost = false;
         public volatile Boolean sessionChanged = null;  // null = not determinable
         public volatile int webProbeStatus = -2;        // -2 not run
         public volatile boolean webProbeOk = false;
+        // v1.5.13: three-stage verification flags (the diag panel's core).
+        public volatile boolean loginPostAuthenticated = false; // 2xx from POST /login
+        public volatile boolean webSessionVerified = false;     // WebView /mobile/home 200
+        public volatile boolean javaSessionVerified = false;    // Java /mobile/home 200
 
         /** One-line, panel-safe rendering (booleans only). */
         public String render() {
@@ -94,7 +98,7 @@ public final class QolabWebLoginDriver {
                     + " title=" + QolabWebLoginDriver.sanitizeNote(title)
                     + " href=" + href
                     + " postRedirected=" + (postLoginRedirected ? "Y" : "N")
-                    + (postLoginFinalUrl.isEmpty() ? "" : " postFinal=" + postLoginFinalUrl)
+                    + (postLoginFinalUrl.isEmpty() ? "" : " responseUrl=" + postLoginFinalUrl)
                     + " sessionBefore=" + (sessionBeforePost ? "Y" : "N")
                     + " sessionAfter=" + (sessionAfterPost ? "Y" : "N")
                     + (sessionChanged == null ? " sessionChanged=?" :
@@ -364,11 +368,61 @@ public final class QolabWebLoginDriver {
                 return;
             }
             if (status >= 200 && status < 300) {
-                LAST.stage = "tx-2xx-awaiting-redirect";
-                // The JS side navigates to /dashboard; success is finalized
-                // by onPageFinished/poll detecting the navigation (and the
-                // server-truth probe at the LoginActivity seam). Do not
-                // finish() here — wait for navigation evidence.
+                // v1.5.13: genuine Fortify AJAX success (200 {"two_factor":...}).
+                // No navigation happens and none is needed. Keep this exact
+                // WebView ALIVE and verify its session in-page (authoritative),
+                // then report to LoginActivity which runs the Java probe.
+                LAST.loginPostAuthenticated = true;
+                LAST.stage = "tx-2xx-verifying";
+                submitted = true; // stop the postSubmitPoll
+                main.removeCallbacks(submitWatchdog);
+                main.removeCallbacks(postSubmitPoll);
+                // v1.5.13: synchronize WebView→CookieManager cookie state
+                // BEFORE any verification reads it. flush() is the proper
+                // Android mechanism (persists pending cookies); it is not
+                // a success criterion, just state synchronization.
+                try {
+                    android.webkit.CookieManager.getInstance().flush();
+                } catch (Exception ignored) {
+                }
+                if (webView != null) {
+                    try {
+                        webView.evaluateJavascript(VERIFY_JS, null);
+                    } catch (Exception e) {
+                        // WebView gone — report honestly, no retry theater.
+                        LAST.webProbeStatus = -1;
+                        finish(new Result(false, "verify-lost-webview",
+                                "WebView unavailable for session verification",
+                                elapsed(), lastUrl, lastDomDiag));
+                        return;
+                    }
+                    // VERIFY_JS retries up to ~4s internally. Wait bounded
+                    // time for the authoritative web probe before giving up.
+                    main.postDelayed(() -> {
+                        if (finished) return;
+                        if (LAST.webProbeOk) {
+                            LAST.webSessionVerified = true;
+                            // Second flush AFTER the web probe returned 200
+                            // (spec: flush/sync again before the Java probe).
+                            try {
+                                android.webkit.CookieManager.getInstance().flush();
+                            } catch (Exception ignored) {
+                            }
+                            finish(new Result(true, "done",
+                                    "web session verified", elapsed(), lastUrl, lastDomDiag),
+                                    true /* keep WebView alive until Java probe 200 */);
+                        } else {
+                            // WebView 401 after genuine POST success — NOT a
+                            // login failure. Preserve exactly; WebView KEPT
+                            // ALIVE for inspection (caller decides teardown).
+                            finish(new Result(true, "web-verify-failed",
+                                    "POST /login authenticated but WebView /mobile/home="
+                                            + LAST.webProbeStatus
+                                            + " — preserved for diagnostics",
+                                    elapsed(), lastUrl, lastDomDiag), true);
+                        }
+                    }, 4500);
+                }
                 return;
             }
             // Other statuses (429, 500, ...) — report, don't guess.
@@ -471,6 +525,17 @@ public final class QolabWebLoginDriver {
     }
 
     private void finish(Result r) {
+        finish(r, false);
+    }
+
+    /**
+     * v1.5.13: finish(r, keepWebView) — the driver may report a result
+     * WITHOUT destroying the WebView. The tx-handoff path does exactly
+     * that: the WebView stays alive so the caller can (a) keep probing /
+     * inspecting, and (b) destroy it only when BOTH the WebView probe
+     * and the Java probe have returned 200 (see destroy()).
+     */
+    private void finish(Result r, boolean keepWebView) {
         if (finished) return;
         finished = true;
         LAST.stage = r.stage;
@@ -482,38 +547,53 @@ public final class QolabWebLoginDriver {
         main.removeCallbacks(probe);
         main.removeCallbacks(postSubmitPoll);
         final WebView wv = webView;
-        final boolean runWebProbe = wv != null && r.stage != null
-                && (r.success || r.stage.startsWith("tx-2xx"));
-        // v1.5.12: BEFORE destroying the authenticated WebView, run the
-        // in-page /mobile/home probe so the diagnostic panel can compare
-        // browser-context vs Java-context session validity (decision
-        // evidence A/B/C). Teardown is delayed just long enough for the
-        // beacon to arrive.
+        if (keepWebView) {
+            // WebView stays ALIVE. The caller MUST eventually destroy()
+            // it. Report immediately — no teardown, no probe here.
+            keepAliveWebView = wv;
+            main.post(() -> listener.onLoginResult(r));
+            return;
+        }
         main.post(() -> {
-            if (wv != null && runWebProbe) {
+            if (wv != null) {
                 try {
-                    wv.evaluateJavascript(WEB_PROBE_JS, null);
+                    wv.removeJavascriptInterface("QolabLoginDriver");
+                    wv.stopLoading();
+                    ViewGroup parent = (ViewGroup) wv.getParent();
+                    if (parent != null) {
+                        ViewGroup grand = (ViewGroup) parent.getParent();
+                        if (grand != null) grand.removeView(parent);
+                    }
+                    wv.destroy();
                 } catch (Exception ignored) {
                 }
             }
-            main.postDelayed(() -> {
-                if (wv != null) {
-                    try {
-                        wv.removeJavascriptInterface("QolabLoginDriver");
-                        wv.stopLoading();
-                        ViewGroup parent = (ViewGroup) wv.getParent();
-                        if (parent != null) {
-                            ViewGroup grand = (ViewGroup) parent.getParent();
-                            if (grand != null) grand.removeView(parent);
-                        }
-                        wv.destroy();
-                    } catch (Exception ignored) {
-                    }
-                }
-                if (webView == wv) webView = null;
-                listener.onLoginResult(r);
-            }, runWebProbe ? 1500 : 0);
+            if (webView == wv) webView = null;
+            listener.onLoginResult(r);
         });
+    }
+
+    /** v1.5.13: the ONLY teardown path for the kept-alive WebView. */
+    private static WebView keepAliveWebView;
+
+    /** v1.5.13: destroy the kept-alive WebView (after both probes 200,
+     *  or when the user retries / the activity dies). Safe to call
+     *  repeatedly; must run on the main thread. */
+    public static void destroyKeptAlive() {
+        WebView wv = keepAliveWebView;
+        keepAliveWebView = null;
+        if (wv == null) return;
+        try {
+            wv.removeJavascriptInterface("QolabLoginDriver");
+            wv.stopLoading();
+            ViewGroup parent = (ViewGroup) wv.getParent();
+            if (parent != null) {
+                ViewGroup grand = (ViewGroup) parent.getParent();
+                if (grand != null) grand.removeView(parent);
+            }
+            wv.destroy();
+        } catch (Exception ignored) {
+        }
     }
 
     private long elapsed() {
@@ -691,10 +771,15 @@ public final class QolabWebLoginDriver {
             "{'Content-Type':'application/x-www-form-urlencoded','Accept':'application/json'," +
             "'X-Requested-With':'XMLHttpRequest','X-XSRF-TOKEN':xsrf},body:body})" +
             ".then(function(r){rep(r.status,{started:true});" +
+            // v1.5.13: r.url ONLY — the actual fetch response URL. No
+            // location.href fallback (that made postFinal=/dashboard a
+            // synthetic artifact, not proof of anything).
             " try{d.onLoginMeta(JSON.stringify({redirected:r.redirected===true," +
-            " finalUrl:r.url||location.href,sessionBefore:sessBefore," +
+            " finalUrl:r.url||'',sessionBefore:sessBefore," +
             " sessionAfter:sess(),changed:null}));}catch(e){}" +
-            " if(r.status>=200&&r.status<300){setTimeout(function(){location.href=location.origin+'/dashboard';},150);}" +
+            // v1.5.13: DO NOT navigate to /dashboard. The WebView stays
+            // exactly where it is and alive; the Java side now runs the
+            // authoritative in-page /mobile/home probe (VERIFY_JS).
             "})" +
             ".catch(function(e){rep(-1,{started:true,networkError:(e&&e.name)?String(e.name).substring(0,40):'network'});" +
             " try{d.onLoginMeta(JSON.stringify({redirected:false,finalUrl:location.href," +
@@ -742,6 +827,31 @@ public final class QolabWebLoginDriver {
             " window.fetch=function(input,init){var m=((init&&init.method)||'GET'),u=(typeof input==='string')?input:(input&&input.url)||'';" +
             "  return of.apply(this,arguments).then(function(r){rep(m,u,r.status,false);return r;},function(e){rep(m,u,-1,true);throw e;});};" +
             "}}catch(e){}})()";
+
+    /**
+     * v1.5.13: AUTHORITATIVE WebView-session verification. Run INSIDE the
+     * SAME live hidden WebView immediately after POST /login succeeds —
+     * no navigation, no teardown, no fixed delay. Retries on a short
+     * bounded cadence (CookieManager/WebView network-stack cookie commit
+     * is event-driven, not timed, so we poll until 200 or the budget is
+     * exhausted — the poll cadence is not the success criterion; the 200
+     * is). Beacons the final status only.
+     */
+    static final String VERIFY_JS =
+            "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
+            "var n=0;" +
+            "var go=function(){" +
+            " fetch(location.origin+'/mobile/home',{credentials:'same-origin'," +
+            " headers:{'Accept':'application/json'}})" +
+            " .then(function(r){d.onWebProbe(JSON.stringify({status:r.status}));" +
+            "  if(r.status>=200&&r.status<300)return;" +
+            "  if(++n<10)setTimeout(go,400);" +
+            " })" +
+            " .catch(function(){if(++n<10)setTimeout(go,400);" +
+            "  else d.onWebProbe(JSON.stringify({status:-1}));});" +
+            "};" +
+            "go();" +
+            "}catch(e){try{d.onWebProbe(JSON.stringify({status:-1}));}catch(e2){}}})()";
 
     /**
      * v1.5.12: WebView-context /mobile/home probe — run INSIDE the
