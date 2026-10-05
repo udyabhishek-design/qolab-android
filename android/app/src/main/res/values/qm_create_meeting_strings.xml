@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="cm_heading">New Meeting</string>
+    <string name="cm_subtitle">Engineering Room</string>
+    <string name="cm_field_title">Title</string>
+    <string name="cm_hint_title">What is this meeting about?</string>
+    <string name="cm_field_description">Description</string>
+    <string name="cm_hint_description">Optional agenda or context</string>
+    <string name="cm_field_date">Date</string>
+    <string name="cm_field_time">Start time</string>
+    <string name="cm_pick_date_empty">Pick date</string>
+    <string name="cm_pick_time_empty">Pick time</string>
+    <string name="cm_field_participants">Participants</string>
+    <string name="cm_participant_hint">Optional — invite room members</string>
+    <string name="cm_action_start_now">Start now</string>
+    <string name="cm_action_cancel">Cancel</string>
+    <string name="cm_action_schedule">Schedule</string>
+    <string name="cm_error_title_required">Please add a meeting title.</string>
+    <string name="cm_error_when_required">Please pick a date and start time.</string>
+    <string name="cm_error_generic">Couldn\'t create the meeting. Please try again.</string>
+    <string name="cm_created_toast">Meeting scheduled</string>
+    <string name="cm_started_toast">Instant meeting created</string>
+    <string name="room_new_meeting">New Meeting</string>
+    <string name="cm_cd_pick_date">Pick a date</string>
+    <string name="cm_cd_pick_time">Pick a start time</string>
+</resources>

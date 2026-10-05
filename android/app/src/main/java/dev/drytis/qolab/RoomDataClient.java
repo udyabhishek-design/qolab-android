@@ -79,6 +79,7 @@ public final class RoomDataClient {
 
     /** Aggregate parsed from the /office/rooms/{slug} page JSON. */
     public static final class RoomPage {
+        public final long channelId;             // channel.id (v1.5.31: meeting create)
         public final String roomName;
         public final String roomDescription;
         public final List<Member> members;      // channel.members (ordered by name)
@@ -87,9 +88,10 @@ public final class RoomDataClient {
         public final List<Meeting> live;
         public final List<Meeting> cancelled;
 
-        RoomPage(String roomName, String roomDescription, List<Member> members,
+        RoomPage(long channelId, String roomName, String roomDescription, List<Member> members,
                  List<Meeting> upcoming, List<Meeting> completed,
                  List<Meeting> live, List<Meeting> cancelled) {
+            this.channelId = channelId;
             this.roomName = roomName;
             this.roomDescription = roomDescription;
             this.members = members;
@@ -250,6 +252,7 @@ public final class RoomDataClient {
             }
 
             return new RoomPage(
+                    channel.optLong("id", 0),
                     channel.optString("name", null),
                     channel.optString("description", null),
                     members,

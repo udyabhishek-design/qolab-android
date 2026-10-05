@@ -84,32 +84,59 @@
                 android:contentDescription="@string/room_cd_avatar" />
         </LinearLayout>
 
-        <!-- Tabs pill -->
+        <!-- Tabs pill + New Meeting primary action (v1.5.31) -->
         <LinearLayout
-            android:id="@+id/room_tabs"
-            android:layout_width="wrap_content"
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="horizontal"
-            android:layout_gravity="start"
+            android:gravity="center_vertical"
             android:layout_marginStart="@dimen/qm_room_page_pad"
-            android:layout_marginTop="8dp"
-            android:background="@drawable/qm_bg_room_tabs"
-            android:padding="4dp">
+            android:layout_marginEnd="@dimen/qm_room_page_pad"
+            android:layout_marginTop="8dp">
 
-            <TextView
-                android:id="@+id/room_tab_overview"
+            <LinearLayout
+                android:id="@+id/room_tabs"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_gravity="start"
+                android:background="@drawable/qm_bg_room_tabs"
+                android:padding="4dp">
+
+                <TextView
+                    android:id="@+id/room_tab_overview"
                 style="@style/QmRoomTab"
                 android:text="@string/room_tab_overview" />
 
-            <TextView
-                android:id="@+id/room_tab_meetings"
+                <TextView
+                    android:id="@+id/room_tab_meetings"
                 style="@style/QmRoomTab"
                 android:text="@string/room_tab_meetings" />
 
+                <TextView
+                    android:id="@+id/room_tab_tasks"
+                    style="@style/QmRoomTab"
+                    android:text="@string/room_tab_tasks" />
+            </LinearLayout>
+
+            <Space
+                android:layout_width="0dp"
+                android:layout_height="1dp"
+                android:layout_weight="1" />
+
             <TextView
-                android:id="@+id/room_tab_tasks"
-                style="@style/QmRoomTab"
-                android:text="@string/room_tab_tasks" />
+                android:id="@+id/room_new_meeting"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="8dp"
+                android:paddingBottom="8dp"
+                android:background="@drawable/qm_bg_room_tab_active"
+                android:text="@string/room_new_meeting"
+                android:textColor="@color/qm_cream_on_wine"
+                android:textSize="13sp"
+                android:textStyle="bold" />
         </LinearLayout>
 
         <!-- Shared states -->

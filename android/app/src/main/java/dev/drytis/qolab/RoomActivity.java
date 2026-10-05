@@ -138,6 +138,31 @@ public class RoomActivity extends AppCompatActivity {
         tabMeetings.setOnClickListener(v -> showTab(1));
         tabTasks.setOnClickListener(v -> showTab(2));
         retryText.setOnClickListener(v -> loadRoom());
+        // v1.5.31: New Meeting — primary action next to the tabs; visible on
+        // Overview and Meetings alike (tabs/layout otherwise untouched).
+        TextView newMeeting = findViewById(R.id.room_new_meeting);
+        if (newMeeting != null) {
+            newMeeting.setOnClickListener(v -> openCreateMeeting());
+        }
+    }
+
+    /**
+     * v1.5.31: opens the native Create Meeting sheet against the existing
+     * POST /office/rooms/{channelId}/meetings contract. Channel id comes
+     * from the room page payload; the room association is server-side.
+     */
+    private void openCreateMeeting() {
+        if (page == null || page.channelId <= 0) {
+            showComingSoon(); // no usable room identity yet — honest no-op
+            return;
+        }
+        new CreateMeetingSheet(this, page.channelId, page.roomName, page.members,
+                this::onMeetingCreated).show();
+    }
+
+    /** After a successful create: refetch so Upcoming + Meetings reflect it. */
+    private void onMeetingCreated() {
+        loadRoom();
     }
 
     private void showComingSoon() {
