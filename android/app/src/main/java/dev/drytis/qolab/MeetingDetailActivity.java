@@ -46,6 +46,11 @@ public class MeetingDetailActivity extends AppCompatActivity {
     private LinearLayout transcriptCurrent;
     private View sessionsLabel, sessionsList;
 
+    // v1.5.33 participation actions
+    private View actionArea;
+    private TextView actionPrimary, actionCopy;
+    private boolean joining;
+
     private long meetingId;
     private MeetingDetail detail;
     private volatile boolean fetching;
@@ -164,7 +169,93 @@ public class MeetingDetailActivity extends AppCompatActivity {
             if (parsed.title != null) titleView.setText(parsed.title);
             renderSummary();
             renderTranscript();
+            renderActions();
         }));
+    }
+
+    // ── v1.5.33 participation actions ─────────────────────────────────
+    //
+    // Existing contract (researched + live-verified):
+    //  • POST /meetings/{id}/join-token → {success, token, url} flips a
+    //    scheduled meeting LIVE on first join. There is no separate start
+    //    action and no host gate — MeetingPolicy::join == view.
+    //  • status live → "Join"; scheduled+can_join → "Start" (first entry
+    //    starts it server-side); ended/cancelled → no action. Re-entering
+    //    an ended meeting is a NEW occurrence via start-or-join-session —
+    //    deliberately NOT exposed on a past meeting's details.
+
+    private void renderActions() {
+        if (detail == null) return;
+        String status = detail.status;
+        boolean joinable = detail.canJoin
+                && ("live".equals(status) || "scheduled".equals(status));
+        if (!joinable) {
+            vis(actionArea, false);
+            return;
+        }
+        vis(actionArea, true);
+        actionPrimary.setText("live".equals(status)
+                ? R.string.md_action_join : R.string.md_action_start);
+        vis(actionCopy, detail.meetingUrl != null && !detail.meetingUrl.isEmpty());
+    }
+
+    private void startOrJoin() {
+        if (joining || detail == null) return;
+        joining = true;
+        actionPrimary.setText(R.string.md_joining);
+        QolabWebViewTransport transport = QolabWebViewTransport.get();
+        if (transport == null) {
+            joining = false;
+            routeToLogin();
+            return;
+        }
+        transport.postJson("/meetings/" + meetingId + "/join-token", "{}", r ->
+                runOnUiThread(() -> {
+                    joining = false;
+                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
+                            || r.status == 401) {
+                        routeToLogin();
+                        return;
+                    }
+                    RoomDataClient.JoinToken jt = RoomDataClient.parseJoinToken(r.body);
+                    if (r.status != 200 || jt == null) {
+                        renderActions();
+                        android.widget.Toast.makeText(this,
+                                R.string.md_join_failed,
+                                android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    Intent i = new Intent(this, LiveRoomActivity.class);
+                    i.putExtra(LiveRoomActivity.EXTRA_TOKEN, jt.token);
+                    i.putExtra(LiveRoomActivity.EXTRA_SERVER_URL, jt.url);
+                    i.putExtra(LiveRoomActivity.EXTRA_MEETING_ID, meetingId);
+                    i.putExtra(LiveRoomActivity.EXTRA_MEETING_TITLE,
+                            detail.title != null ? detail.title : "");
+                    startActivity(i);
+                    // refresh on return: status may now be live/ended
+                    renderActions();
+                }));
+    }
+
+    /** Copies the REAL persistent meeting_url from the backend — never a
+     *  constructed or guessed URL. Hidden when the backend sent none. */
+    private void copyLink() {
+        if (detail == null || detail.meetingUrl == null) return;
+        android.content.ClipboardManager cm =
+                (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (cm == null) return;
+        cm.setPrimaryClip(android.content.ClipData.newPlainText(
+                getString(R.string.md_action_copy_link), detail.meetingUrl));
+        android.widget.Toast.makeText(this, R.string.md_link_copied,
+                android.widget.Toast.LENGTH_SHORT).show();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // returning from LiveRoomActivity: reload so status/actions reflect
+        // what the meeting backend now says (live→ended etc.)
+        if (detail != null) loadDetail();
     }
 
     private void routeToLogin() {

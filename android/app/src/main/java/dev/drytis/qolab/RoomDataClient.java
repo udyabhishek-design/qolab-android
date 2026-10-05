@@ -169,6 +169,12 @@ public final class RoomDataClient {
         public final String aiSummary;       // first summary's executive text, may be null
         public final List<String> keyDecisions;
         public final List<String> followUps;
+        // v1.5.33 join/start support (all optional, null-safe)
+        public final String sessionKey;      // LiveKit roomName, mtg-xxx
+        public final String meetingUrl;      // persistent Studio share link
+        public final String studioJoinUrl;   // same, null if malformed server-side
+        public final boolean canJoin;        // MeetingPolicy::join == view
+        public final boolean isCreator;
 
         MeetingDetail(long id, String title, String description, String status,
                       String scheduledAtDisplay, String timezoneAbbr,
@@ -176,7 +182,8 @@ public final class RoomDataClient {
                       List<Segment> segments, List<TranscriptSession> historicalSessions,
                       List<MeetingTask> tasks, int taskTotal, int taskCompleted,
                       int taskOverdue, String aiSummary, List<String> keyDecisions,
-                      List<String> followUps) {
+                      List<String> followUps, String sessionKey, String meetingUrl,
+                      String studioJoinUrl, boolean canJoin, boolean isCreator) {
             this.id = id;
             this.title = title;
             this.description = description;
@@ -194,7 +201,51 @@ public final class RoomDataClient {
             this.aiSummary = aiSummary;
             this.keyDecisions = keyDecisions;
             this.followUps = followUps;
+            this.sessionKey = sessionKey;
+            this.meetingUrl = meetingUrl;
+            this.studioJoinUrl = studioJoinUrl;
+            this.canJoin = canJoin;
+            this.isCreator = isCreator;
         }
+    }
+
+    /** Success payload of POST /meetings/{id}/join-token. */
+    public static final class JoinToken {
+        public final String token;   // LiveKit JWT
+        public final String url;     // wss LiveKit server URL
+        JoinToken(String token, String url) { this.token = token; this.url = url; }
+    }
+
+    /** Parses a join-token response body; null unless success:true + token. */
+    public static JoinToken parseJoinToken(String body) {
+        if (body == null) return null;
+        try {
+            JSONObject o = new JSONObject(body);
+            if (!o.optBoolean("success", false)) return null;
+            String token = optStr(o, "token");
+            String url = optStr(o, "url");
+            if (url == null) url = optStr(o, "server_url");
+            if (token == null || token.isEmpty()) return null;
+            return new JoinToken(token, url);
+        } catch (Exception e) {
+            return null;
+    }
+    }
+
+    /**
+     * Null-safe string read. org.json's optString(key, null) returns the
+     * literal STRING "null" when the JSON value is null — this helper maps
+     * JSON null / missing / "null" to Java null so callers can omit rows.
+     */
+    public static String optStr(JSONObject o, String key) {
+        if (o == null || o.isNull(key)) return null;
+        String v = o.optString(key, null);
+        if (v == null) return null;
+        v = v.trim();
+        if (v.isEmpty() || "null".equalsIgnoreCase(v) || "undefined".equalsIgnoreCase(v)) {
+            return null;
+        }
+        return v;
     }
 
     // ── HTML data-page extraction ─────────────────────────────────────
@@ -253,8 +304,8 @@ public final class RoomDataClient {
 
             return new RoomPage(
                     channel.optLong("id", 0),
-                    channel.optString("name", null),
-                    channel.optString("description", null),
+                    clean(channel.optString("name", null)),
+                    clean(channel.optString("description", null)),
                     members,
                     parseMeetingList(meetings.optJSONArray("upcoming")),
                     parseMeetingList(meetings.optJSONArray("completed")),
@@ -273,11 +324,11 @@ public final class RoomDataClient {
             if (m == null) continue;
             out.add(new Meeting(
                     m.optLong("id", 0),
-                    m.optString("title", null),
-                    m.optString("description", null),
-                    m.optString("status", null),
-                    m.optString("scheduled_at_display", null),
-                    m.optString("timezone_abbr", null),
+                    clean(m.optString("title", null)),
+                    clean(m.optString("description", null)),
+                    clean(m.optString("status", null)),
+                    clean(m.optString("scheduled_at_display", null)),
+                    clean(m.optString("timezone_abbr", null)),
                     m.optLong("duration_seconds", 0),
                     m.optBoolean("has_transcript", false),
                     m.optInt("task_count", m.optInt("tasks_count", 0)),
@@ -310,9 +361,9 @@ public final class RoomDataClient {
                     if (s == null) continue;
                     sessions.add(new TranscriptSession(
                             s.optLong("id", 0),
-                            s.optString("title", null),
-                            s.optString("scheduled_at", null),
-                            s.optString("transcript_text", null),
+                            clean(s.optString("title", null)),
+                            clean(s.optString("scheduled_at", null)),
+                            clean(s.optString("transcript_text", null)),
                             parseSegments(s.optJSONArray("transcript_segments"))));
                 }
             }
@@ -326,11 +377,11 @@ public final class RoomDataClient {
                     JSONObject assignee = t.optJSONObject("assignee");
                     tasks.add(new MeetingTask(
                             t.optLong("id", 0),
-                            t.optString("title", null),
-                            t.optString("status", null),
-                            t.optString("priority", null),
-                            t.optString("due_date", null),
-                            assignee != null ? assignee.optString("name", null) : null));
+                            clean(t.optString("title", null)),
+                            clean(t.optString("status", null)),
+                            clean(t.optString("priority", null)),
+                            clean(t.optString("due_date", null)),
+                            assignee != null ? clean(assignee.optString("name", null)) : null));
                 }
             }
 
@@ -349,30 +400,35 @@ public final class RoomDataClient {
             if (summaries != null && summaries.length() > 0) {
                 JSONObject s0 = summaries.optJSONObject(0);
                 if (s0 != null) {
-                    aiSummary = s0.optString("executive", null);
+                    aiSummary = clean(s0.optString("executive", null));
                     JSONArray kd = s0.optJSONArray("key_decisions");
                     if (kd != null) for (int i = 0; i < kd.length(); i++)
-                        decisions.add(kd.optString(i, null));
+                        decisions.add(clean(kd.optString(i, null)));
                     JSONArray fu = s0.optJSONArray("follow_ups");
                     if (fu != null) for (int i = 0; i < fu.length(); i++)
-                        followUps.add(fu.optString(i, null));
+                        followUps.add(clean(fu.optString(i, null)));
                 }
             }
 
             return new MeetingDetail(
                     d.optLong("id", 0),
-                    d.optString("title", null),
-                    d.optString("description", null),
-                    d.optString("status", null),
-                    d.optString("scheduled_at_display", null),
-                    d.optString("timezone_abbr", null),
+                    optStr(d, "title"),
+                    optStr(d, "description"),
+                    optStr(d, "status"),
+                    optStr(d, "scheduled_at_display"),
+                    optStr(d, "timezone_abbr"),
                     d.optLong("duration_seconds", 0),
-                    d.optString("transcript_text", null),
+                    optStr(d, "transcript_text"),
                     segments,
                     sessions,
                     tasks,
                     taskTotal, taskDone, taskOverdue,
-                    aiSummary, decisions, followUps);
+                    aiSummary, decisions, followUps,
+                    optStr(d, "session_key"),
+                    optStr(d, "meeting_url"),
+                    optStr(d, "studio_join_url"),
+                    d.optBoolean("can_join", false),
+                    d.optBoolean("is_creator", false));
         } catch (Exception e) {
             return null;
         }
@@ -385,8 +441,8 @@ public final class RoomDataClient {
             JSONObject s = arr.optJSONObject(i);
             if (s == null) continue;
             out.add(new Segment(
-                    s.optString("speakerName", null),
-                    s.optString("text", null),
+                    clean(s.optString("speakerName", null)),
+                    clean(s.optString("text", null)),
                     s.optLong("timestamp", 0)));
         }
         return out;
@@ -398,5 +454,19 @@ public final class RoomDataClient {
         String t = v.trim();
         if (t.isEmpty() || "null".equals(t) || "undefined".equals(t)) return null;
         return v;
+    }
+
+    /** Parses success payload of POST /meetings/{id}/start-or-join-session
+     *  (returns the effective meeting id: a NEW occurrence id when the
+     *  series had ended, else the same id). 0 on failure. */
+    public static long parseStartOrJoin(String body) {
+        if (body == null) return 0;
+        try {
+            JSONObject o = new JSONObject(body);
+            if (!o.optBoolean("success", false)) return 0;
+            return o.optLong("meeting_id", 0);
+        } catch (Exception e) {
+            return 0;
+        }
     }
 }

@@ -46,6 +46,60 @@
                 android:ellipsize="end" />
         </LinearLayout>
 
+        <!-- v1.5.33 participation actions — visibility driven by REAL
+             status + can_join from /meetings/{id}/detail. Primary Join/Start
+             (wine), secondary Copy Link (only when a real persistent
+             meeting_url exists). -->
+        <LinearLayout
+            android:id="@+id/meeting_action_area"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:layout_marginStart="@dimen/qm_meeting_page_pad"
+            android:layout_marginEnd="@dimen/qm_meeting_page_pad"
+            android:layout_marginTop="10dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/meeting_action_primary"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:gravity="center"
+                android:paddingStart="18dp"
+                android:paddingEnd="18dp"
+                android:paddingTop="11dp"
+                android:paddingBottom="11dp"
+                android:background="@drawable/qm_button_wine"
+                android:textColor="@color/qm_cream_on_wine"
+                android:textSize="14sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground" />
+
+            <TextView
+                android:id="@+id/meeting_action_copy"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:gravity="center"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:paddingTop="11dp"
+                android:paddingBottom="11dp"
+                android:background="@drawable/qm_live_action_outline"
+                android:textColor="@color/qm_ink"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:text="@string/md_action_copy_link"
+                android:clickable="true"
+                android:focusable="true" />
+        </LinearLayout>
+
         <!-- Tabs -->
         <LinearLayout
             android:id="@+id/meeting_detail_tabs"

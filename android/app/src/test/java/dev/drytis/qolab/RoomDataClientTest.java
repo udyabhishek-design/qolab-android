@@ -201,7 +201,9 @@ public class RoomDataClientTest {
         assertNotNull(parsed);
         assertTrue(parsed.segments.isEmpty());
         assertTrue(parsed.historicalSessions.isEmpty());
-        assertEquals("", parsed.transcriptText);
+        // v1.5.33: blank transcript_text is cleaned to null (null-safe parser);
+        // the UI treats null and "" identically (no transcript yet).
+        assertNull(parsed.transcriptText);
     }
 
     @Test

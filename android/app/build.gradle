@@ -1,5 +1,8 @@
 apply plugin: 'com.android.application'
 
+// v1.5.33: Kotlin needed for the LiveKit SDK (Kotlin-suspend API).
+apply plugin: 'kotlin-android'
+
 android {
     namespace "dev.drytis.qolab"
     compileSdk rootProject.ext.compileSdkVersion
@@ -10,8 +13,8 @@ android {
         applicationId "dev.drytis.qolab"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 48
-        versionName "1.5.32"
+        versionCode 49
+        versionName "1.5.33"
 
         // ── Environment-aware server origin ─────────────────────────
         // DEBUG / DEVELOPMENT  -> Qolab DEVELOPMENT backend
@@ -69,6 +72,8 @@ dependencies {
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
     implementation project(':capacitor-cordova-android-plugins')
+    // LiveKit native meeting room (v1.5.33) — server-issued token+url only.
+    implementation "io.livekit:livekit-android:2.18.2"
 }
 
 apply from: 'capacitor.build.gradle'

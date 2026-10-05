@@ -79,10 +79,34 @@
         </LinearLayout>
     </LinearLayout>
 
-    <ImageView
-        android:layout_width="18dp"
-        android:layout_height="18dp"
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
         android:layout_marginStart="10dp"
-        android:src="@drawable/qm_ic_arrow_right"
-        android:importantForAccessibility="no" />
+        android:orientation="vertical"
+        android:gravity="center">
+
+        <!-- v1.5.33 contextual action — only visible when the backend
+             status allows entering (live → Join, scheduled → Start). -->
+        <TextView
+            android:id="@+id/meeting_row_enter"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:background="@drawable/qm_button_wine"
+            android:textColor="@color/qm_cream_on_wine"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <ImageView
+            android:layout_width="18dp"
+            android:layout_height="18dp"
+            android:layout_marginTop="6dp"
+            android:src="@drawable/qm_ic_arrow_right"
+            android:importantForAccessibility="no" />
+    </LinearLayout>
 </LinearLayout>

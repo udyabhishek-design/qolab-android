@@ -456,6 +456,22 @@ public class RoomActivity extends AppCompatActivity {
                     getString(R.string.room_meeting_tasks_n), m.taskCount));
         }
 
+        // v1.5.33 contextual action — only for meetings that can actually
+        // be entered per the backend status (live → Join, scheduled →
+        // Start: first entry flips it live server-side).
+        TextView enterAction = card.findViewById(R.id.meeting_row_enter);
+        if (enterAction != null) {
+            if ("live".equals(m.status)) {
+                enterAction.setVisibility(View.VISIBLE);
+                enterAction.setText(R.string.room_meeting_join);
+            } else if ("scheduled".equals(m.status)) {
+                enterAction.setVisibility(View.VISIBLE);
+                enterAction.setText(R.string.room_meeting_start);
+            } else {
+                enterAction.setVisibility(View.GONE);
+            }
+        }
+
         if (interactive && m.id > 0) {
             card.setOnClickListener(v -> {
                 Intent i = new Intent(this, MeetingDetailActivity.class);
