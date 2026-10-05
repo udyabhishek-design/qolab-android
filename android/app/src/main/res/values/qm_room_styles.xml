@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="QmRoomTab">
+        <item name="android:layout_width">wrap_content</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:paddingStart">@dimen/qm_room_tab_pad_h</item>
+        <item name="android:paddingEnd">@dimen/qm_room_tab_pad_h</item>
+        <item name="android:paddingTop">@dimen/qm_room_tab_pad_v</item>
+        <item name="android:paddingBottom">@dimen/qm_room_tab_pad_v</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:textStyle">bold</item>
+        <item name="android:textColor">@color/qm_muted</item>
+        <item name="android:background">?attr/selectableItemBackground</item>
+    </style>
+</resources>

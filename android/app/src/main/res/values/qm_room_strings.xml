@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="room_title_template">%s</string>
+    <string name="room_cd_back">Back</string>
+    <string name="room_cd_notifications">Notifications</string>
+    <string name="room_cd_avatar">Your avatar</string>
+
+    <string name="room_tab_overview">Overview</string>
+    <string name="room_tab_meetings">Meetings</string>
+    <string name="room_tab_tasks">Tasks</string>
+
+    <string name="room_members_section">Members</string>
+    <string name="room_members_count">%1$d members</string>
+    <string name="room_meeting_section">Meetings</string>
+    <string name="room_upcoming_meeting">Upcoming</string>
+    <string name="room_recent_meetings">Recent</string>
+    <string name="room_tasks_section">Tasks</string>
+
+    <string name="room_no_meetings">No meetings yet</string>
+    <string name="room_no_meetings_hint">Meetings created for this room will appear here.</string>
+    <string name="room_no_completed">No completed meetings</string>
+    <string name="room_no_tasks">No tasks for this room yet</string>
+    <string name="room_no_tasks_hint">Action items extracted from this room\u2019s meetings will appear here.</string>
+    <string name="room_no_upcoming">No upcoming meetings</string>
+    <string name="room_loading">Loading\u2026</string>
+    <string name="room_error">Couldn\u2019t load</string>
+    <string name="room_retry">Retry</string>
+
+    <string name="room_meeting_live">Live</string>
+    <string name="room_meeting_scheduled">Scheduled</string>
+    <string name="room_meeting_ended">Ended</string>
+    <string name="room_meeting_cancelled">Cancelled</string>
+    <string name="room_meeting_minutes">%1$dm</string>
+    <string name="room_meeting_tasks_n">%1$d tasks</string>
+    <string name="room_meeting_transcript">Transcript</string>
+    <string name="room_meeting_task_count_badge">%1$d</string>
+
+    <string name="meeting_detail_cd_back">Back</string>
+    <string name="meeting_detail_tab_summary">Summary</string>
+    <string name="meeting_detail_tab_transcript">Transcript</string>
+    <string name="meeting_detail_about">About</string>
+    <string name="meeting_detail_summary">Summary</string>
+    <string name="meeting_detail_no_summary">No AI summary available for this meeting yet.</string>
+    <string name="meeting_detail_key_decisions">Key decisions</string>
+    <string name="meeting_detail_follow_ups">Follow-ups</string>
+    <string name="meeting_detail_action_items">Action items</string>
+    <string name="meeting_detail_no_action_items">No action items were extracted from this meeting.</string>
+    <string name="meeting_detail_task_count">%1$d of %2$d completed</string>
+    <string name="meeting_detail_transcript_none">No transcript is available for this meeting.</string>
+    <string name="meeting_detail_transcript_none_session">No transcript for this session.</string>
+    <string name="meeting_detail_session">Session %1$d</string>
+    <string name="meeting_detail_sessions_title">Sessions</string>
+    <string name="meeting_detail_current_session">This session</string>
+    <string name="meeting_detail_loading">Loading\u2026</string>
+    <string name="meeting_detail_error">Couldn\u2019t load meeting</string>
+    <string name="meeting_detail_retry">Retry</string>
+    <string name="meeting_detail_unassigned">Unassigned</string>
+    <string name="meeting_detail_duration_min">%1$d min</string>
+    <string name="meeting_detail_no_meeting_desc">No description.</string>
+    <string name="room_participants_n">%1$d online</string>
+</resources>

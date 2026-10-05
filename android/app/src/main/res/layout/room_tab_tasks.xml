@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Room → Tasks tab -->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/room_tab_tasks_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="@dimen/qm_room_page_pad"
+    android:paddingEnd="@dimen/qm_room_page_pad"
+    android:paddingTop="@dimen/qm_room_section_gap"
+    android:paddingBottom="24dp"
+    android:visibility="gone">
+
+    <View
+        android:id="@+id/room_tasks_skeleton"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/qm_room_task_row_min"
+        android:layout_marginBottom="12dp"
+        android:background="@drawable/qm_bg_skeleton" />
+
+    <LinearLayout
+        android:id="@+id/room_tasks_list"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/room_tasks_empty"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="@drawable/qm_bg_room_card"
+        android:padding="@dimen/qm_room_card_pad"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/room_no_tasks"
+            android:textColor="@color/qm_ink"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="@string/room_no_tasks_hint"
+            android:textColor="@color/qm_muted"
+            android:textSize="13sp" />
+    </LinearLayout>
+</LinearLayout>

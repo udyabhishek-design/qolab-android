@@ -55,6 +55,25 @@
             android:theme="@style/AppTheme.NoActionBar"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Native Engineering Room (department room) — opened from the
+             Office department card / Enter. Existing backend contracts only:
+             /office/rooms/{slug} page props + /meetings/{id}/detail. -->
+        <activity
+            android:name=".RoomActivity"
+            android:exported="false"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Native Meeting Details — opened from the room Meetings tab.
+             GET /meetings/{id}/detail; Summary | Transcript tabs. -->
+        <activity
+            android:name=".MeetingDetailActivity"
+            android:exported="false"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

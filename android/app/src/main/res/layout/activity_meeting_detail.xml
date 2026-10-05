@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ═══ Qolab Mobile — Meeting Details (native) ═══
+     Header (back, title) → Summary|Transcript tabs. -->
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/qm_canvas">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="@dimen/qm_meeting_page_pad"
+            android:paddingTop="8dp"
+            android:paddingBottom="4dp">
+
+            <ImageButton
+                android:id="@+id/meeting_detail_btn_back"
+                android:layout_width="@dimen/qm_room_back_target"
+                android:layout_height="@dimen/qm_room_back_target"
+                android:src="@drawable/qm_ic_back"
+                android:scaleType="center"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/meeting_detail_cd_back" />
+
+            <TextView
+                android:id="@+id/meeting_detail_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:textColor="@color/qm_ink"
+                android:textSize="18sp"
+                android:textStyle="bold"
+                android:maxLines="2"
+                android:ellipsize="end" />
+        </LinearLayout>
+
+        <!-- Tabs -->
+        <LinearLayout
+            android:id="@+id/meeting_detail_tabs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_marginStart="@dimen/qm_meeting_page_pad"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/qm_bg_room_tabs"
+            android:padding="4dp">
+
+            <TextView
+                android:id="@+id/meeting_detail_tab_summary"
+                style="@style/QmRoomTab"
+                android:text="@string/meeting_detail_tab_summary" />
+
+            <TextView
+                android:id="@+id/meeting_detail_tab_transcript"
+                style="@style/QmRoomTab"
+                android:text="@string/meeting_detail_tab_transcript" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/meeting_detail_error"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/qm_meeting_page_pad"
+            android:layout_marginTop="@dimen/qm_meeting_section_gap"
+            android:text="@string/meeting_detail_error"
+            android:textColor="@color/qm_ink"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/meeting_detail_retry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/qm_meeting_page_pad"
+            android:layout_marginTop="10dp"
+            android:padding="6dp"
+            android:text="@string/meeting_detail_retry"
+            android:textColor="@color/qm_wine"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:scrollbars="none"
+            android:overScrollMode="never">
+
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content">
+
+                <include layout="@layout/meeting_detail_tab_summary" />
+                <include layout="@layout/meeting_detail_tab_transcript" />
+            </FrameLayout>
+        </ScrollView>
+    </LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

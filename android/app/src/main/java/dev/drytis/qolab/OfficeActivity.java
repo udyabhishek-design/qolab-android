@@ -55,28 +55,10 @@ public class OfficeActivity extends AppCompatActivity {
         bindViews();
         applyInsets();
         bindActions();
-        stampDevVersion();
         Log.d(TAG, "onCreate build=" + BuildConfig.VERSION_NAME + "/" + BuildConfig.VERSION_CODE);
         if (data == null) {
             showLoading();
             loadOffice();
-        }
-    }
-
-    /**
-     * v1.5.27: on-screen DEVELOPMENT version stamp (debug builds only).
-     * Physical G32 evidence showed the v1.5.25 'no room cards' symptom
-     * while the shipped v1.5.26 binary provably contains the visibility
-     * fix (dex-verified) — the stamp makes the executing binary version
-     * directly observable on the device screen.
-     */
-    private void stampDevVersion() {
-        if (!BuildConfig.DEBUG) return;
-        TextView stamp = findViewById(R.id.office_dev_stamp);
-        if (stamp != null) {
-            stamp.setText("DEV " + BuildConfig.VERSION_NAME
-                    + " (" + BuildConfig.VERSION_CODE + ")");
-            stamp.setVisibility(View.VISIBLE);
         }
     }
 
@@ -364,8 +346,24 @@ public class OfficeActivity extends AppCompatActivity {
         deptAvatars.removeAllViews();
         renderAvatarRow(deptAvatars, dept.participants, dept.membersCount);
         deptOverflow.setText(overflowText(dept.participants.size(), dept.membersCount));
-        deptEnter.setOnClickListener(v ->
-                showComingSoon(dept.name != null ? dept.name : getString(R.string.home_dept_empty_title)));
+        deptEnter.setOnClickListener(v -> openDepartmentRoom(dept));
+        deptCard.setOnClickListener(v -> openDepartmentRoom(dept));
+    }
+
+    /**
+     * v1.5.28: native Engineering Room (department room) screen.
+     * Uses the room identity from the /mobile/home payload.
+     */
+    private void openDepartmentRoom(HomeDataClient.Room dept) {
+        String slug = dept.roomSlug;
+        if (slug == null || slug.isEmpty()) {
+            showComingSoon(dept.name != null ? dept.name : getString(R.string.home_dept_empty_title));
+            return;
+        }
+        Intent i = new Intent(this, RoomActivity.class);
+        i.putExtra(RoomActivity.EXTRA_ROOM_NAME, dept.name);
+        i.putExtra(RoomActivity.EXTRA_ROOM_SLUG, slug);
+        startActivity(i);
     }
 
     // ------------------------------------------------------------------

@@ -40,6 +40,8 @@
         android:layout_marginTop="8dp"
         android:orientation="vertical"
         android:background="@drawable/qm_bg_card_orange"
+        android:clickable="true"
+        android:focusable="true"
         android:padding="@dimen/qm_home_card_pad"
         android:visibility="gone">
 

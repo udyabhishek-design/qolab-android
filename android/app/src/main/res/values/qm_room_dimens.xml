@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Engineering Room screen -->
+    <dimen name="qm_room_page_pad">20dp</dimen>
+    <dimen name="qm_room_section_gap">22dp</dimen>
+    <dimen name="qm_room_card_radius">18dp</dimen>
+    <dimen name="qm_room_card_pad">16dp</dimen>
+    <dimen name="qm_room_avatar">34dp</dimen>
+    <dimen name="qm_room_avatar_border">2dp</dimen>
+    <dimen name="qm_room_tab_pad_h">18dp</dimen>
+    <dimen name="qm_room_tab_pad_v">10dp</dimen>
+    <dimen name="qm_room_meeting_card_height">92dp</dimen>
+    <dimen name="qm_room_task_row_min">76dp</dimen>
+    <dimen name="qm_room_back_target">44dp</dimen>
+
+    <!-- Meeting details -->
+    <dimen name="qm_meeting_page_pad">20dp</dimen>
+    <dimen name="qm_meeting_section_gap">20dp</dimen>
+    <dimen name="qm_meeting_card_pad">16dp</dimen>
+    <dimen name="qm_meeting_card_radius">18dp</dimen>
+</resources>

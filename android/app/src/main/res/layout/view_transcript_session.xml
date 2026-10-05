@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Meeting Details → one historical session block -->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@drawable/qm_bg_room_card"
+    android:padding="@dimen/qm_meeting_card_pad"
+    android:layout_marginBottom="10dp">
+
+    <TextView
+        android:id="@+id/transcript_session_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="@color/qm_ink"
+        android:textSize="14sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/transcript_session_when"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="2dp"
+        android:textColor="@color/qm_muted"
+        android:textSize="12sp" />
+
+    <LinearLayout
+        android:id="@+id/transcript_session_body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="10dp"
+        android:orientation="vertical" />
+</LinearLayout>
