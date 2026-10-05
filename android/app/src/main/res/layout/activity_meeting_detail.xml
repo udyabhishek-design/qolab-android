@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- ═══ Qolab Mobile — Meeting Details (native) ═══
-     Header (back, title) → Summary|Transcript tabs. -->
+     v1.5.29: header shows a compact single-line title (full title lives in
+     the Summary facts card); Summary|Transcript segmented control. -->
 <androidx.coordinatorlayout.widget.CoordinatorLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -39,9 +40,9 @@
                 android:layout_weight="1"
                 android:layout_marginStart="4dp"
                 android:textColor="@color/qm_ink"
-                android:textSize="18sp"
+                android:textSize="17sp"
                 android:textStyle="bold"
-                android:maxLines="2"
+                android:maxLines="1"
                 android:ellipsize="end" />
         </LinearLayout>
 

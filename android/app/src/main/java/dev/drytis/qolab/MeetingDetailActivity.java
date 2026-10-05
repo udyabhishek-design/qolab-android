@@ -36,7 +36,7 @@ public class MeetingDetailActivity extends AppCompatActivity {
     private View summarySkeleton, transcriptSkeleton, transcriptNone;
 
     // summary views
-    private View facts, whenView, metaView, descriptionView;
+    private View facts, whenView, metaView, descriptionView, titleFull;
     private View summaryLabel, summaryText, summaryNone;
     private View decisionsLabel, decisionsList;
     private View followUpsLabel, followUpsList;
@@ -67,6 +67,7 @@ public class MeetingDetailActivity extends AppCompatActivity {
 
     private void bindViews() {
         titleView = findViewById(R.id.meeting_detail_title);
+        titleFull = findViewById(R.id.meeting_summary_title_full);
         tabSummary = findViewById(R.id.meeting_detail_tab_summary);
         tabTranscript = findViewById(R.id.meeting_detail_tab_transcript);
         summaryRoot = findViewById(R.id.meeting_summary_root);
@@ -189,6 +190,9 @@ public class MeetingDetailActivity extends AppCompatActivity {
         vis(summarySkeleton, false);
 
         vis(facts, true);
+        if (titleFull != null) {
+            ((TextView) titleFull).setText(detail.title != null ? detail.title : "");
+        }
         ((TextView) whenView).setText(detail.scheduledAtDisplay != null
                 ? detail.scheduledAtDisplay
                 + (detail.timezoneAbbr != null ? " " + detail.timezoneAbbr : "")
@@ -217,9 +221,9 @@ public class MeetingDetailActivity extends AppCompatActivity {
             vis(summaryNone, true);
         }
 
-        // key decisions / follow-ups (bullet lists)
-        renderBulletList(decisionsLabel, decisionsList, detail.keyDecisions);
-        renderBulletList(followUpsLabel, followUpsList, detail.followUps);
+        // key decisions / follow-ups (structured rows)
+        renderBulletList(decisionsLabel, decisionsList, detail.keyDecisions, true);
+        renderBulletList(followUpsLabel, followUpsList, detail.followUps, false);
 
         // action items
         List<MeetingTask> tasks = detail.tasks;
@@ -239,19 +243,26 @@ public class MeetingDetailActivity extends AppCompatActivity {
         }
     }
 
-    private void renderBulletList(View label, View list, List<String> items) {
+    private void renderBulletList(View label, View list, List<String> items, boolean marker) {
         if (items == null || items.isEmpty()) return;
         vis(label, true);
         LinearLayout l = (LinearLayout) list;
         l.removeAllViews();
         for (String item : items) {
-            TextView tv = new TextView(this);
-            tv.setText("•  " + item);
-            tv.setTextColor(getColor(R.color.qm_ink));
-            tv.setTextSize(13);
-            tv.setLineSpacing(dp(2), 1f);
-            tv.setPadding(0, dp(4), 0, dp(4));
-            l.addView(tv);
+            if (marker) {
+                View row = getLayoutInflater().inflate(R.layout.view_summary_item_row, null, false);
+                ((TextView) row.findViewById(R.id.summary_item_text))
+                        .setText(item != null ? item : "");
+                l.addView(row);
+            } else {
+                TextView tv = new TextView(this);
+                tv.setText(item != null ? item : "");
+                tv.setTextColor(getColor(R.color.qm_ink));
+                tv.setTextSize(13.5f);
+                tv.setLineSpacing(dp(2), 1f);
+                tv.setPadding(dp(2), dp(4), dp(2), dp(4));
+                l.addView(tv);
+            }
         }
         vis(list, true);
     }
@@ -261,30 +272,38 @@ public class MeetingDetailActivity extends AppCompatActivity {
         ((TextView) row.findViewById(R.id.room_task_title)).setText(t.title != null ? t.title : "");
 
         TextView status = row.findViewById(R.id.room_task_status);
-        status.setText(t.status != null ? t.status : "");
-        if ("completed".equals(t.status)) {
-            status.setBackgroundResource(R.drawable.qm_chip_scheduled);
-            status.setTextColor(getColor(R.color.qm_mint_text));
+        String statusLabel = RoomFormat.statusLabel(t.status);
+        if (statusLabel != null) {
+            status.setVisibility(View.VISIBLE);
+            status.setText(statusLabel);
+            if ("Completed".equals(statusLabel)) {
+                status.setBackgroundResource(R.drawable.qm_chip_scheduled);
+                status.setTextColor(getColor(R.color.qm_mint_text));
+            } else {
+                status.setBackgroundResource(R.drawable.qm_chip_ended);
+                status.setTextColor(getColor(R.color.qm_muted));
+            }
         } else {
-            status.setBackgroundResource(R.drawable.qm_chip_ended);
-            status.setTextColor(getColor(R.color.qm_muted));
+            status.setVisibility(View.GONE);
         }
 
         TextView assignee = row.findViewById(R.id.room_task_assignee);
-        if (t.assigneeName != null) {
+        if (t.assigneeName != null && !t.assigneeName.isEmpty()) {
             assignee.setVisibility(View.VISIBLE);
-            assignee.setText(t.assigneeName);
+            assignee.setText(getString(R.string.room_task_assigned_to, t.assigneeName));
         }
         TextView due = row.findViewById(R.id.room_task_due);
-        if (t.dueDate != null) {
+        String dueLabel = RoomFormat.formatDueDate(t.dueDate);
+        if (dueLabel != null) {
             due.setVisibility(View.VISIBLE);
-            due.setText(t.dueDate);
+            due.setText(dueLabel);
         }
         TextView priority = row.findViewById(R.id.room_task_priority);
-        if (t.priority != null) {
+        String priorityLabel = RoomFormat.statusLabel(t.priority);
+        if (priorityLabel != null) {
             priority.setVisibility(View.VISIBLE);
             priority.setTextColor(getColor(R.color.qm_peach_text));
-            priority.setText(t.priority);
+            priority.setText(priorityLabel);
         }
         return row;
     }
@@ -353,7 +372,8 @@ public class MeetingDetailActivity extends AppCompatActivity {
                 .setText(String.format(Locale.getDefault(),
                         getString(R.string.meeting_detail_session), index));
         ((TextView) block.findViewById(R.id.transcript_session_when))
-                .setText(s.scheduledAt != null ? s.scheduledAt : "");
+                .setText(RoomFormat.formatIsoDate(s.scheduledAt) != null
+                        ? RoomFormat.formatIsoDate(s.scheduledAt) : "");
 
         LinearLayout body = block.findViewById(R.id.transcript_session_body);
         boolean has = (s.transcriptText != null && !s.transcriptText.isEmpty())
@@ -380,10 +400,8 @@ public class MeetingDetailActivity extends AppCompatActivity {
     }
 
     private String statusLabel(String status) {
-        if ("live".equals(status)) return getString(R.string.room_meeting_live);
-        if ("cancelled".equals(status)) return getString(R.string.room_meeting_cancelled);
-        if ("ended".equals(status)) return getString(R.string.room_meeting_ended);
-        return getString(R.string.room_meeting_scheduled);
+        String l = RoomFormat.statusLabel(status);
+        return l != null ? l : getString(R.string.room_meeting_scheduled);
     }
 
     private int dp(int v) {

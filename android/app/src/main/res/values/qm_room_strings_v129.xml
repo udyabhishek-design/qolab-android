@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="room_view_all_members">View all %1$d members</string>
+    <string name="room_member_owner">Owner</string>
+    <string name="room_member_admin">Admin</string>
+    <string name="room_member_member">Member</string>
+    <string name="room_task_assigned_to">Assigned to %1$s</string>
+</resources>

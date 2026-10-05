@@ -49,7 +49,7 @@ public class RoomActivity extends AppCompatActivity {
     private View meetingsSkeleton, tasksSkeleton;
 
     // Overview
-    private TextView overviewDescription, membersCount;
+    private TextView membersCount, membersMore;
     private LinearLayout membersRow, membersList, upcomingCard, recentList;
     private View upcomingEmpty, recentEmpty, tasksSummary;
 
@@ -108,10 +108,10 @@ public class RoomActivity extends AppCompatActivity {
         meetingsSkeleton = findViewById(R.id.room_meetings_skeleton);
         tasksSkeleton = findViewById(R.id.room_tasks_skeleton);
 
-        overviewDescription = findViewById(R.id.room_overview_description);
         membersCount = findViewById(R.id.room_overview_members_count);
         membersRow = findViewById(R.id.room_overview_members_row);
         membersList = findViewById(R.id.room_overview_members_list);
+        membersMore = (TextView) findViewById(R.id.room_overview_members_more);
         upcomingCard = findViewById(R.id.room_overview_upcoming_card);
         upcomingEmpty = findViewById(R.id.room_overview_upcoming_empty);
         recentList = findViewById(R.id.room_overview_recent_list);
@@ -241,10 +241,7 @@ public class RoomActivity extends AppCompatActivity {
         overviewRendered = true;
         setVisible(meetingsSkeleton, false);
 
-        overviewDescription.setText(page.roomDescription != null
-                ? page.roomDescription : "");
-
-        // members
+        // members — compact people section (v1.5.29)
         membersCount.setText(String.format(Locale.getDefault(),
                 getString(R.string.room_members_count), page.members.size()));
         membersRow.removeAllViews();
@@ -255,19 +252,22 @@ public class RoomActivity extends AppCompatActivity {
             shown++;
         }
         membersList.removeAllViews();
+        int rows = 0;
         for (RoomDataClient.Member m : page.members) {
-            TextView row = new TextView(this);
-            StringBuilder sb = new StringBuilder(m.name != null ? m.name : "");
-            String detail = joinNonNull(" · ", m.jobTitle, m.departmentName);
-            if (detail != null) sb.append("\n").append(detail);
-            row.setText(sb);
-            row.setTextColor(getColor(R.color.qm_ink));
-            row.setTextSize(13);
-            row.setPadding(0, dp(6), 0, dp(6));
-            membersList.addView(row);
+            if (rows >= 3) break;
+            membersList.addView(memberRow(m));
+            rows++;
+        }
+        // "View all N members" only when there are actually more than 3
+        if (page.members.size() > 3) {
+            membersMore.setVisibility(View.VISIBLE);
+            membersMore.setText(String.format(Locale.getDefault(),
+                    getString(R.string.room_view_all_members), page.members.size()));
+        } else {
+            membersMore.setVisibility(View.GONE);
         }
 
-        // upcoming meeting
+        // upcoming meeting — primary card (interactive in v1.5.29)
         List<Meeting> upcoming = page.upcoming;
         if (upcoming.isEmpty()) {
             setVisible(upcomingCard, false);
@@ -276,11 +276,11 @@ public class RoomActivity extends AppCompatActivity {
             setVisible(upcomingEmpty, false);
             upcomingCard.removeAllViews();
             Meeting m = upcoming.get(0);
-            upcomingCard.addView(meetingCard(m, false));
+            upcomingCard.addView(meetingCard(m, true));
             setVisible(upcomingCard, true);
         }
 
-        // recent meetings
+        // recent meetings — compact cards (interactive)
         recentList.removeAllViews();
         if (page.completed.isEmpty()) {
             setVisible(recentEmpty, true);
@@ -289,7 +289,7 @@ public class RoomActivity extends AppCompatActivity {
             int n = 0;
             for (Meeting m : page.completed) {
                 if (n >= 3) break;
-                recentList.addView(meetingCard(m, false));
+                recentList.addView(meetingCard(m, true));
                 n++;
             }
         }
@@ -297,6 +297,45 @@ public class RoomActivity extends AppCompatActivity {
         // tasks summary — honest: room-level task list is not exposed by any
         // existing endpoint as JSON; show where task data stands.
         ((TextView) tasksSummary).setText(getString(R.string.room_no_tasks_hint));
+    }
+
+    /**
+     * Compact member row: name (bold) + role/title (muted, human label).
+     * Department is intentionally omitted — we are already inside the room.
+     */
+    private View memberRow(RoomDataClient.Member m) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.VERTICAL);
+        row.setPadding(0, dp(5), 0, dp(5));
+
+        TextView name = new TextView(this);
+        name.setText(m.name != null ? m.name : "");
+        name.setTextColor(getColor(R.color.qm_ink));
+        name.setTextSize(14);
+        name.setTypeface(null, android.graphics.Typeface.BOLD);
+        row.addView(name);
+
+        String roleLabel = humanMemberRole(m.role);
+        String detail = joinNonNull(" · ", roleLabel, m.jobTitle);
+        if (detail != null) {
+            TextView sub = new TextView(this);
+            sub.setText(detail);
+            sub.setTextColor(getColor(R.color.qm_muted));
+            sub.setTextSize(12);
+            row.addView(sub);
+        }
+        return row;
+    }
+
+    /** channel_role slug → human label; unknown/null → null (omitted). */
+    private static String humanMemberRole(String role) {
+        if (role == null || role.trim().isEmpty()) return null;
+        switch (role) {
+            case "owner": return "Owner";
+            case "admin": return "Admin";
+            case "member": return "Member";
+            default: return null;
+        }
     }
 
     private void renderMeetings() {

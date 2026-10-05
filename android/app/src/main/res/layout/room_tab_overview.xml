@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Room → Overview tab -->
+<!-- Room → Overview tab (v1.5.29 refined) -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/room_tab_overview_root"
@@ -8,76 +8,26 @@
     android:orientation="vertical"
     android:paddingStart="@dimen/qm_room_page_pad"
     android:paddingEnd="@dimen/qm_room_page_pad"
-    android:paddingTop="@dimen/qm_room_section_gap"
+    android:paddingTop="18dp"
     android:paddingBottom="24dp"
     android:visibility="gone">
 
-    <!-- Room description -->
-    <TextView
-        android:id="@+id/room_overview_description"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:textColor="@color/qm_muted"
-        android:textSize="14sp"
-        android:lineSpacingExtra="2dp" />
-
-    <!-- Members card -->
-    <TextView
-        android:id="@+id/room_overview_members_label"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/qm_room_section_gap"
-        android:text="@string/room_members_section"
-        android:textColor="@color/qm_ink"
-        android:textSize="16sp"
-        android:textStyle="bold" />
-
-    <TextView
-        android:id="@+id/room_overview_members_count"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
-        android:textColor="@color/qm_muted"
-        android:textSize="12sp" />
-
-    <LinearLayout
-        android:id="@+id/room_overview_members_card"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:orientation="vertical"
-        android:background="@drawable/qm_bg_room_card"
-        android:padding="@dimen/qm_room_card_pad">
-
-        <LinearLayout
-            android:id="@+id/room_overview_members_row"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal" />
-
-        <LinearLayout
-            android:id="@+id/room_overview_members_list"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:orientation="vertical" />
-    </LinearLayout>
-
-    <!-- Upcoming meeting -->
+    <!-- Primary: Upcoming meeting -->
     <TextView
         android:id="@+id/room_overview_upcoming_label"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/qm_room_section_gap"
         android:text="@string/room_upcoming_meeting"
-        android:textColor="@color/qm_ink"
-        android:textSize="16sp"
-        android:textStyle="bold" />
+        android:textColor="@color/qm_muted"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.04"
+        android:textAllCaps="true" />
 
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp">
+        android:layout_marginTop="8dp">
 
         <LinearLayout
             android:id="@+id/room_overview_upcoming_card"
@@ -100,22 +50,24 @@
             android:visibility="gone" />
     </FrameLayout>
 
-    <!-- Recent meetings summary -->
+    <!-- Recent -->
     <TextView
         android:id="@+id/room_overview_recent_label"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/qm_room_section_gap"
         android:text="@string/room_recent_meetings"
-        android:textColor="@color/qm_ink"
-        android:textSize="16sp"
-        android:textStyle="bold" />
+        android:textColor="@color/qm_muted"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.04"
+        android:textAllCaps="true" />
 
     <LinearLayout
         android:id="@+id/room_overview_recent_list"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="8dp"
         android:orientation="vertical" />
 
     <TextView
@@ -129,22 +81,88 @@
         android:textSize="13sp"
         android:visibility="gone" />
 
-    <!-- Tasks summary -->
+    <!-- People (compact) -->
+    <TextView
+        android:id="@+id/room_overview_members_label"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="@dimen/qm_room_section_gap"
+        android:text="@string/room_members_section"
+        android:textColor="@color/qm_muted"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.04"
+        android:textAllCaps="true" />
+
+    <LinearLayout
+        android:id="@+id/room_overview_members_card"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="vertical"
+        android:background="@drawable/qm_bg_room_card"
+        android:padding="@dimen/qm_room_card_pad">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <LinearLayout
+                android:id="@+id/room_overview_members_row"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_weight="1" />
+
+            <TextView
+                android:id="@+id/room_overview_members_count"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/qm_muted"
+                android:textSize="12sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/room_overview_members_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:orientation="vertical" />
+
+        <TextView
+            android:id="@+id/room_overview_members_more"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:textColor="@color/qm_wine"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+    </LinearLayout>
+
+    <!-- Tasks summary (honest state) -->
     <TextView
         android:id="@+id/room_overview_tasks_label"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginTop="@dimen/qm_room_section_gap"
         android:text="@string/room_tasks_section"
-        android:textColor="@color/qm_ink"
-        android:textSize="16sp"
-        android:textStyle="bold" />
+        android:textColor="@color/qm_muted"
+        android:textSize="12sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.04"
+        android:textAllCaps="true" />
 
     <TextView
         android:id="@+id/room_overview_tasks_summary"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="8dp"
         android:background="@drawable/qm_bg_room_card"
         android:padding="@dimen/qm_room_card_pad"
         android:textColor="@color/qm_muted"

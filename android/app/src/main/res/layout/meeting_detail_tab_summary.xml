@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Meeting Details → Summary tab -->
+<!-- Meeting Details → Summary tab (v1.5.29 visual hierarchy refinement).
+     Full title now lives here in the facts card; the toolbar shows a
+     compact single-line title. -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/meeting_summary_root"
@@ -29,12 +31,21 @@
         android:visibility="gone">
 
         <TextView
-            android:id="@+id/meeting_summary_when"
+            android:id="@+id/meeting_summary_title_full"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:textColor="@color/qm_ink"
-            android:textSize="14sp"
-            android:textStyle="bold" />
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:lineSpacingExtra="2dp" />
+
+        <TextView
+            android:id="@+id/meeting_summary_when"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:textColor="@color/qm_ink"
+            android:textSize="13sp" />
 
         <TextView
             android:id="@+id/meeting_summary_meta"
@@ -48,9 +59,10 @@
             android:id="@+id/meeting_summary_description"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="9dp"
             android:textColor="@color/qm_muted"
             android:textSize="13sp"
+            android:lineSpacingExtra="2dp"
             android:visibility="gone" />
     </LinearLayout>
 
