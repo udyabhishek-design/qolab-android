@@ -33,7 +33,7 @@
     <string name="home_task_due_today">Due today</string>
     <string name="home_task_overdue">Overdue</string>
     <string name="home_continue_conversation_empty">No recent conversations</string>
-    <string name="home_continue_task_empty">No tasks due</string>
+    <string name="home_continue_task_empty">No priority tasks</string>
     <!-- Today strip -->
     <string name="home_today_tasks">Tasks</string>
     <string name="home_today_meetings">Meetings</string>

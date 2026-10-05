@@ -1,83 +1,169 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home — Today: quiet compact summary strip (Tasks / Meetings / Updates) -->
+<!-- Home — Today: compact summary strip with icon tiles (Tasks / Meeting /
+     Updates). Counts are real payload values set in code. -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginTop="@dimen/qm_home_section_gap"
     android:orientation="horizontal"
-    android:background="@drawable/qm_bg_today_strip"
-    android:padding="@dimen/qm_home_today_strip_pad">
+    android:gravity="center_vertical"
+    android:background="@drawable/qm_bg_card_white"
+    android:paddingStart="@dimen/qm_home_today_strip_pad"
+    android:paddingEnd="@dimen/qm_home_today_strip_pad"
+    android:paddingTop="12dp"
+    android:paddingBottom="12dp">
 
+    <!-- Tasks — mint tile, workflow icon -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:orientation="vertical"
-        android:gravity="center">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
-        <TextView
-            android:id="@+id/home_today_tasks"
+        <FrameLayout
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/qm_bg_tile_mint">
+
+            <ImageView
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_gravity="center"
+                android:src="@drawable/qm_ic_tasks"
+                android:importantForAccessibility="no"
+                xmlns:app="http://schemas.android.com/apk/res-auto"
+                app:tint="@color/qm_mint_text" />
+        </FrameLayout>
+
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="@color/qm_ink"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            android:layout_marginStart="10dp"
+            android:orientation="vertical">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:text="@string/home_today_tasks"
-            android:textColor="@color/qm_muted"
-            android:textSize="10sp" />
+            <TextView
+                android:id="@+id/home_today_tasks"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/qm_ink"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="@string/home_today_tasks"
+                android:textColor="@color/qm_muted"
+                android:textSize="10sp" />
+        </LinearLayout>
     </LinearLayout>
 
+    <View
+        android:layout_width="1dp"
+        android:layout_height="30dp"
+        android:background="@color/qm_card_border" />
+
+    <!-- Meeting — lavender tile, calendar icon -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:orientation="vertical"
-        android:gravity="center">
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp">
 
-        <TextView
-            android:id="@+id/home_today_meetings"
+        <FrameLayout
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/qm_bg_tile_lavender">
+
+            <ImageView
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_gravity="center"
+                android:src="@drawable/qm_ic_calendar"
+                android:importantForAccessibility="no"
+                xmlns:app="http://schemas.android.com/apk/res-auto"
+                app:tint="@color/qm_lavender_text" />
+        </FrameLayout>
+
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="@color/qm_ink"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            android:layout_marginStart="10dp"
+            android:orientation="vertical">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:text="@string/home_today_meetings"
-            android:textColor="@color/qm_muted"
-            android:textSize="10sp" />
+            <TextView
+                android:id="@+id/home_today_meetings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/qm_ink"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="@string/home_today_meetings"
+                android:textColor="@color/qm_muted"
+                android:textSize="10sp" />
+        </LinearLayout>
     </LinearLayout>
 
+    <View
+        android:layout_width="1dp"
+        android:layout_height="30dp"
+        android:background="@color/qm_card_border" />
+
+    <!-- Updates — peach tile, bell icon -->
     <LinearLayout
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:orientation="vertical"
-        android:gravity="center">
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="12dp">
 
-        <TextView
-            android:id="@+id/home_today_updates"
+        <FrameLayout
+            android:layout_width="38dp"
+            android:layout_height="38dp"
+            android:background="@drawable/qm_bg_tile_peach">
+
+            <ImageView
+                android:layout_width="18dp"
+                android:layout_height="18dp"
+                android:layout_gravity="center"
+                android:src="@drawable/qm_ic_notifications"
+                android:importantForAccessibility="no"
+                xmlns:app="http://schemas.android.com/apk/res-auto"
+                app:tint="@color/qm_peach_text" />
+        </FrameLayout>
+
+        <LinearLayout
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textColor="@color/qm_ink"
-            android:textSize="17sp"
-            android:textStyle="bold" />
+            android:layout_marginStart="10dp"
+            android:orientation="vertical">
 
-        <TextView
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
-            android:text="@string/home_today_updates"
-            android:textColor="@color/qm_muted"
-            android:textSize="10sp" />
+            <TextView
+                android:id="@+id/home_today_updates"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/qm_ink"
+                android:textSize="17sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="1dp"
+                android:text="@string/home_today_updates"
+                android:textColor="@color/qm_muted"
+                android:textSize="10sp" />
+        </LinearLayout>
     </LinearLayout>
 </LinearLayout>

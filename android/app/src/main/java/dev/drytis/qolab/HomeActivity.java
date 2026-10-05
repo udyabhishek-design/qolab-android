@@ -204,6 +204,7 @@ public class HomeActivity extends AppCompatActivity {
         taskCard = findViewById(R.id.home_continue_task);
         taskSkeleton = findViewById(R.id.home_continue_task_skeleton);
         convEmpty = findViewById(R.id.home_continue_conversation_empty);
+        taskEmpty = findViewById(R.id.home_continue_task_empty);
         convName = findViewById(R.id.home_continue_conversation_name);
         convMeta = findViewById(R.id.home_continue_conversation_meta);
         taskTitle = findViewById(R.id.home_continue_task_title);

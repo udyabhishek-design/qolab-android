@@ -5,7 +5,8 @@
          meeting 88dp, rooms 150dp, department 118dp, continue 92dp, today 64dp,
          section gaps 14dp — totals ≈ 740dp with the fixed bottom nav. -->
     <dimen name="qm_home_page_pad">16dp</dimen>
-    <dimen name="qm_home_section_gap">14dp</dimen>
+    <!-- modest v1.5.22 balance bump: content ends nearer the fixed nav -->
+    <dimen name="qm_home_section_gap">20dp</dimen>
     <dimen name="qm_home_section_title">15sp</dimen>
     <dimen name="qm_home_greeting_name">24sp</dimen>
     <dimen name="qm_home_greeting_date">12sp</dimen>
