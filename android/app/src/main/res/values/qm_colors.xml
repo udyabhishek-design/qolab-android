@@ -63,4 +63,6 @@
     <!-- Bottom nav label states -->
     <color name="qm_nav_selected">#1A1A1A</color>
     <color name="qm_nav_unselected">#7A756D</color>
+    <!-- Warm white navigation container -->
+    <color name="qm_nav_bg">#FFFDF8</color>
 </resources>

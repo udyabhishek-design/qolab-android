@@ -40,7 +40,7 @@
             android:background="?attr/selectableItemBackgroundBorderless"
             android:contentDescription="@string/home_cd_notifications" />
 
-        <View
+        <TextView
             android:id="@+id/office_notification_badge"
             android:layout_width="11dp"
             android:layout_height="11dp"
