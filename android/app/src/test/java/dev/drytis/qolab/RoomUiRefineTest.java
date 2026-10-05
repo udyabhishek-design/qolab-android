@@ -88,9 +88,9 @@ public class RoomUiRefineTest {
 
     // Decisions rendered as marker rows, not plain bullets
     @Test
-    public void decisionsUseMarkerRowsFollowUpsPlain() throws Exception {
+    public void decisionsAndFollowUpsUseMarkerRows() throws Exception {
         String src = read(JAVA + "/MeetingDetailActivity.java");
         assertTrue(src.contains("detail.keyDecisions, true"));
-        assertTrue(src.contains("detail.followUps, false"));
+        assertTrue(src.contains("detail.followUps, true"));
     }
 }

@@ -1,0 +1,299 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ═══ Qolab Mobile — The Lobby (native social room) ═══
+     Header (back, title, bell+avatar) → tabs pill Discussion|Members.
+     Discussion: message list + composer; Members: compact people section. -->
+<androidx.coordinatorlayout.widget.CoordinatorLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/qm_canvas">
+
+    <LinearLayout
+        android:id="@+id/lobby_root"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+
+        <!-- Header -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:paddingStart="8dp"
+            android:paddingEnd="@dimen/qm_room_page_pad"
+            android:paddingTop="8dp"
+            android:paddingBottom="4dp">
+
+            <ImageButton
+                android:id="@+id/lobby_btn_back"
+                android:layout_width="@dimen/qm_room_back_target"
+                android:layout_height="@dimen/qm_room_back_target"
+                android:src="@drawable/qm_ic_back"
+                android:scaleType="center"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@string/room_cd_back" />
+
+            <TextView
+                android:id="@+id/lobby_title"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="4dp"
+                android:textColor="@color/qm_ink"
+                android:textSize="20sp"
+                android:textStyle="bold"
+                android:letterSpacing="-0.01"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <FrameLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content">
+
+                <ImageButton
+                    android:id="@+id/lobby_btn_notifications"
+                    android:layout_width="44dp"
+                    android:layout_height="44dp"
+                    android:src="@drawable/qm_ic_notifications"
+                    android:scaleType="center"
+                    android:background="?attr/selectableItemBackgroundBorderless"
+                    android:contentDescription="@string/room_cd_notifications" />
+
+                <TextView
+                    android:id="@+id/lobby_notification_badge"
+                    android:layout_width="11dp"
+                    android:layout_height="11dp"
+                    android:layout_gravity="top|end"
+                    android:layout_marginTop="7dp"
+                    android:layout_marginEnd="7dp"
+                    android:background="@drawable/qm_bg_red_dot"
+                    android:visibility="gone"
+                    android:contentDescription="@string/home_cd_notification_badge" />
+            </FrameLayout>
+
+            <TextView
+                android:id="@+id/lobby_avatar"
+                android:layout_width="38dp"
+                android:layout_height="38dp"
+                android:layout_marginStart="10dp"
+                android:gravity="center"
+                android:textColor="#FFFFFF"
+                android:textSize="13sp"
+                android:textStyle="bold"
+                android:contentDescription="@string/room_cd_avatar" />
+        </LinearLayout>
+
+        <!-- Tabs pill -->
+        <LinearLayout
+            android:id="@+id/lobby_tabs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:layout_gravity="start"
+            android:layout_marginStart="@dimen/qm_room_page_pad"
+            android:layout_marginTop="8dp"
+            android:background="@drawable/qm_bg_room_tabs"
+            android:padding="4dp">
+
+            <TextView
+                android:id="@+id/lobby_tab_discussion"
+                style="@style/QmRoomTab"
+                android:text="@string/lobby_tab_discussion" />
+
+            <TextView
+                android:id="@+id/lobby_tab_members"
+                style="@style/QmRoomTab"
+                android:text="@string/lobby_tab_members" />
+        </LinearLayout>
+
+        <!-- Shared error/retry -->
+        <TextView
+            android:id="@+id/lobby_error"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/qm_room_page_pad"
+            android:layout_marginTop="@dimen/qm_room_section_gap"
+            android:text="@string/room_error"
+            android:textColor="@color/qm_ink"
+            android:textSize="15sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/lobby_retry"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="@dimen/qm_room_page_pad"
+            android:layout_marginTop="10dp"
+            android:padding="6dp"
+            android:text="@string/room_retry"
+            android:textColor="@color/qm_wine"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
+        <!-- Discussion tab content -->
+        <FrameLayout
+            android:id="@+id/lobby_discussion_pane"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:orientation="vertical">
+
+                <ScrollView
+                    android:id="@+id/lobby_messages_scroll"
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1"
+                    android:fillViewport="true"
+                    android:scrollbars="none"
+                    android:overScrollMode="never">
+
+                    <LinearLayout
+                        android:id="@+id/lobby_messages_list"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:paddingStart="@dimen/qm_room_page_pad"
+                        android:paddingEnd="@dimen/qm_room_page_pad"
+                        android:paddingTop="@dimen/qm_room_section_gap" />
+
+                </ScrollView>
+
+                <View
+                    android:id="@+id/lobby_skeleton"
+                    android:layout_width="match_parent"
+                    android:layout_height="120dp"
+                    android:layout_marginStart="@dimen/qm_room_page_pad"
+                    android:layout_marginEnd="@dimen/qm_room_page_pad"
+                    android:layout_marginTop="@dimen/qm_room_section_gap"
+                    android:background="@drawable/qm_bg_skeleton"
+                    android:visibility="gone" />
+
+                <!-- Composer -->
+                <LinearLayout
+                    android:id="@+id/lobby_composer"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:paddingStart="@dimen/qm_room_page_pad"
+                    android:paddingEnd="@dimen/qm_room_page_pad"
+                    android:paddingTop="8dp"
+                    android:paddingBottom="10dp">
+
+                    <EditText
+                        android:id="@+id/lobby_composer_input"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:minHeight="46dp"
+                        android:background="@drawable/qm_bg_room_card"
+                        android:paddingStart="14dp"
+                        android:paddingEnd="14dp"
+                        android:paddingTop="10dp"
+                        android:paddingBottom="10dp"
+                        android:hint="@string/lobby_composer_hint"
+                        android:textColorHint="@color/qm_muted"
+                        android:textColor="@color/qm_ink"
+                        android:textSize="14sp"
+                        android:inputType="textCapSentences|textMultiLine"
+                        android:maxLines="4"
+                        android:imeOptions="actionSend" />
+
+                    <TextView
+                        android:id="@+id/lobby_composer_send"
+                        android:layout_width="wrap_content"
+                        android:layout_height="46dp"
+                        android:layout_marginStart="8dp"
+                        android:gravity="center"
+                        android:paddingStart="16dp"
+                        android:paddingEnd="16dp"
+                        android:background="@drawable/qm_bg_room_tabs"
+                        android:text="@string/lobby_composer_send"
+                        android:textColor="@color/qm_wine"
+                        android:textSize="14sp"
+                        android:textStyle="bold"
+                        android:enabled="false"
+                        android:alpha="0.45" />
+                </LinearLayout>
+            </LinearLayout>
+        </FrameLayout>
+
+        <!-- Members tab content -->
+        <ScrollView
+            android:id="@+id/lobby_members_pane"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="true"
+            android:scrollbars="none"
+            android:overScrollMode="never"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingStart="@dimen/qm_room_page_pad"
+                android:paddingEnd="@dimen/qm_room_page_pad"
+                android:paddingTop="@dimen/qm_room_section_gap">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/qm_bg_room_card"
+                    android:padding="@dimen/qm_room_card_pad">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <LinearLayout
+                            android:id="@+id/lobby_members_avatars"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="horizontal" />
+
+                        <TextView
+                            android:id="@+id/lobby_members_count"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:textColor="@color/qm_ink"
+                            android:textSize="14sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/lobby_members_list"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="vertical" />
+
+                    <TextView
+                        android:id="@+id/lobby_members_skeleton"
+                        android:layout_width="match_parent"
+                        android:layout_height="60dp"
+                        android:layout_marginTop="8dp"
+                        android:background="@drawable/qm_bg_skeleton"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <View
+                    android:id="@+id/lobby_members_spacer"
+                    android:layout_width="match_parent"
+                    android:layout_height="24dp" />
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+</androidx.coordinatorlayout.widget.CoordinatorLayout>

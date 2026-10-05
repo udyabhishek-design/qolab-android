@@ -240,10 +240,12 @@ public final class RoomDataClient {
                     JSONObject dept = m.optJSONObject("department");
                     members.add(new Member(
                             m.optLong("id", 0),
-                            m.optString("name", null),
-                            m.optString("job_title", null),
-                            dept != null ? dept.optString("name", null) : null,
-                            m.optString("channel_role", null)));
+                            clean(m.optString("name", null)),
+                            // v1.5.30: JSON null / literal "null" / blank must
+                            // not surface in UI (was the "Member · null" bug)
+                            clean(m.optString("job_title", null)),
+                            dept != null ? clean(dept.optString("name", null)) : null,
+                            clean(m.optString("channel_role", null))));
                 }
             }
 
@@ -385,5 +387,13 @@ public final class RoomDataClient {
                     s.optLong("timestamp", 0)));
         }
         return out;
+    }
+
+    /** JSON-null-safe optString: null / literal "null" / blank → null. */
+    private static String clean(String v) {
+        if (v == null) return null;
+        String t = v.trim();
+        if (t.isEmpty() || "null".equals(t) || "undefined".equals(t)) return null;
+        return v;
     }
 }

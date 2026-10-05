@@ -74,6 +74,15 @@
             android:theme="@style/AppTheme.NoActionBar"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Native The Lobby social room — opened from Office social rooms.
+             GET/POST /chat/channels/{id}/messages + /office/rooms/{slug}. -->
+        <activity
+            android:name=".LobbyActivity"
+            android:exported="false"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

@@ -312,12 +312,16 @@ public class OfficeActivity extends AppCompatActivity {
             circle.setShape(android.graphics.drawable.GradientDrawable.OVAL);
             circle.setColor(style.enterBg);
             arrowCircle.setBackground(circle);
-            arrowCircle.setOnClickListener(v ->
-                    showComingSoon(room.name != null ? room.name : getString(R.string.home_room_cd_enter)));
+            arrowCircle.setOnClickListener(v -> openRoom(room));
             arrowCircle.setContentDescription(getString(R.string.home_room_cd_enter));
         }
         if (arrow != null) {
             arrow.setImageTintList(android.content.res.ColorStateList.valueOf(style.enterText));
+        }
+        // v1.5.30: Lobby (theme lobby) opens natively; other social rooms
+        // keep their Coming Soon treatment — built one at a time.
+        if ("lobby".equals(room.roomTheme)) {
+            card.setOnClickListener(v -> openRoom(room));
         }
 
         online.setText(getString(R.string.home_room_online, room.membersCount));
@@ -364,6 +368,24 @@ public class OfficeActivity extends AppCompatActivity {
         i.putExtra(RoomActivity.EXTRA_ROOM_NAME, dept.name);
         i.putExtra(RoomActivity.EXTRA_ROOM_SLUG, slug);
         startActivity(i);
+    }
+
+    /**
+     * v1.5.30: The Lobby opens natively using the room identity (channel id
+     * + slug) from the /mobile/home payload. Other social rooms remain
+     * Coming Soon until they get their own native build.
+     */
+    private void openRoom(HomeDataClient.Room room) {
+        if ("lobby".equals(room.roomTheme) && room.id > 0
+                && room.roomSlug != null && !room.roomSlug.isEmpty()) {
+            Intent i = new Intent(this, LobbyActivity.class);
+            i.putExtra(LobbyActivity.EXTRA_ROOM_ID, room.id);
+            i.putExtra(LobbyActivity.EXTRA_ROOM_SLUG, room.roomSlug);
+            i.putExtra(LobbyActivity.EXTRA_ROOM_NAME, room.name);
+            startActivity(i);
+            return;
+        }
+        showComingSoon(room.name != null ? room.name : getString(R.string.home_room_cd_enter));
     }
 
     // ------------------------------------------------------------------

@@ -221,9 +221,9 @@ public class MeetingDetailActivity extends AppCompatActivity {
             vis(summaryNone, true);
         }
 
-        // key decisions / follow-ups (structured rows)
+        // key decisions / follow-ups (structured rows — same treatment, v1.5.30)
         renderBulletList(decisionsLabel, decisionsList, detail.keyDecisions, true);
-        renderBulletList(followUpsLabel, followUpsList, detail.followUps, false);
+        renderBulletList(followUpsLabel, followUpsList, detail.followUps, true);
 
         // action items
         List<MeetingTask> tasks = detail.tasks;

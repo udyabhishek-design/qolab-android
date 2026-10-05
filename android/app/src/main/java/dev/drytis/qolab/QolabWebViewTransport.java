@@ -184,6 +184,84 @@ public final class QolabWebViewTransport {
         });
     }
 
+    /**
+     * v1.5.30: authenticated JSON POST through the session WebView
+     * (Lobby composer). Same same-origin/eval safety rules as getJson;
+     * body is JSON-escaped and never interpolated raw. Laravel CSRF is
+     * satisfied by reading the XSRF-TOKEN cookie INSIDE the page and
+     * echoing it as the X-XSRF-TOKEN header — the token never crosses
+     * the bridge into Java.
+     */
+    public void postJson(String path, String jsonBody, final Callback cb) {
+        final String url = resolveInsideOrigin(path);
+        if (url == null) {
+            cb.onResult(new Result(Result.STATUS_IO, null, "off-origin"));
+            return;
+        }
+        main.post(() -> {
+            WebView wv = webView;
+            if (wv == null) {
+                cb.onResult(new Result(Result.STATUS_TRANSPORT_DEAD, null, "transport-dead"));
+                return;
+            }
+            try {
+                final long id = SEQ.incrementAndGet();
+                final String key = "__qolabT" + id;
+                final java.util.concurrent.atomic.AtomicBoolean delivered =
+                        new java.util.concurrent.atomic.AtomicBoolean(false);
+                final long deadline = android.os.SystemClock.elapsedRealtime()
+                        + REQUEST_TIMEOUT_MS;
+                String kick =
+                        "(function(){try{window['" + key + "']=null;" +
+                        "var xsrf='';var m=document.cookie.match(/(?:^|;\\s*)XSRF-TOKEN=([^;]+)/);" +
+                        "if(m){xsrf=decodeURIComponent(m[1].replace(/\\+/g,'%20'));}" +
+                        "var h={'Accept':'application/json','Content-Type':'application/json'};" +
+                        "if(xsrf)h['X-XSRF-TOKEN']=xsrf;" +
+                        "fetch(" + jsonString(url) + "," +
+                        "{method:'POST',credentials:'same-origin',headers:h," +
+                        "body:JSON.stringify(" + jsonString(jsonBody == null ? "{}" : jsonBody) + ")})" +
+                        ".then(function(r){r.text().then(function(t){" +
+                        "window['" + key + "']=JSON.stringify({s:r.status,b:t});}," +
+                        "function(){window['" + key + "']=JSON.stringify({s:r.status,b:''});});})" +
+                        ".catch(function(e){window['" + key + "']=JSON.stringify({s:-1,b:''});});" +
+                        "}catch(e){window['" + key + "']=JSON.stringify({s:-1,b:''});}return 1;})()";
+                wv.evaluateJavascript(kick, null);
+                final Runnable[] poll = new Runnable[1];
+                poll[0] = () -> {
+                    if (delivered.get()) return;
+                    String read =
+                            "(function(){var v=window['" + key + "'];" +
+                            "if(v!==undefined&&v!==null){window['" + key + "']=undefined;return v;}" +
+                            "return null;})()";
+                    try {
+                        wv.evaluateJavascript(read, value -> {
+                            if (delivered.get()) return;
+                            Result r = resultFromEvaluateJavascript(value);
+                            if (!"no-value".equals(r.errorCategory)) {
+                                if (delivered.compareAndSet(false, true)) {
+                                    main.post(() -> cb.onResult(r));
+                                }
+                                return;
+                            }
+                            if (android.os.SystemClock.elapsedRealtime() < deadline) {
+                                main.postDelayed(poll[0], POLL_INTERVAL_MS);
+                            } else if (delivered.compareAndSet(false, true)) {
+                                cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
+                            }
+                        });
+                    } catch (Exception e) {
+                        if (delivered.compareAndSet(false, true)) {
+                            cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
+                        }
+                    }
+                };
+                main.postDelayed(poll[0], POLL_INTERVAL_MS);
+            } catch (Exception e) {
+                cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
+            }
+        });
+    }
+
     private static final long POLL_INTERVAL_MS = 250;
 
     private static final AtomicLong SEQ = new AtomicLong();

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="lobby_tab_discussion">Discussion</string>
+    <string name="lobby_tab_members">Members</string>
+    <string name="lobby_composer_hint">Message The Lobby…</string>
+    <string name="lobby_composer_send">Send</string>
+    <string name="lobby_discussion_empty">No messages yet. Be the first to say hello.</string>
+    <string name="lobby_members_count">%1$d members</string>
+    <string name="lobby_thread_replies">%1$d replies</string>
+    <string name="lobby_thread_one_reply">1 reply</string>
+    <string name="lobby_send_failed">Couldn\'t send. Tap to retry.</string>
+    <string name="lobby_member_owner">Owner</string>
+    <string name="lobby_member_admin">Admin</string>
+    <string name="lobby_member_member">Member</string>
+    <string name="lobby_title_default">The Lobby</string>
+    <string name="lobby_thread_heading">Thread</string>
+</resources>
