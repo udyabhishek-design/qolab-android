@@ -58,6 +58,7 @@ public class HomeActivity extends AppCompatActivity {
 
     // rooms
     private LinearLayout roomsRow;
+    private LinearLayout roomsSkeletonRow;
     private View roomsEmpty;
     private TextView roomsSeeAll;
 
@@ -181,6 +182,7 @@ public class HomeActivity extends AppCompatActivity {
         if (meetingRetry != null) meetingRetry.setOnClickListener(v -> loadHome());
 
         roomsRow = findViewById(R.id.home_rooms_row);
+        roomsSkeletonRow = findViewById(R.id.home_rooms_skeleton_row);
         roomsEmpty = findViewById(R.id.home_rooms_empty);
         roomsSeeAll = findViewById(R.id.home_rooms_see_all);
 
@@ -477,7 +479,8 @@ public class HomeActivity extends AppCompatActivity {
         hide(meetingSkeleton); show(meetingError);
         hide(deptSkeleton); show(deptError);
         hide(convSkeleton, taskSkeleton, convCard, convEmpty, taskCard, taskEmpty);
-        // rooms: remove skeleton children, show the empty/error placeholder
+        // rooms: hide grid skeletons, show the empty/error placeholder
+        hide(roomsSkeletonRow);
         roomsRow.removeAllViews();
         show(roomsEmpty);
         ((TextView) roomsEmpty).setText(R.string.home_error_section);
@@ -536,8 +539,21 @@ public class HomeActivity extends AppCompatActivity {
         java.util.Collections.sort(rooms, (a, b) ->
                 Integer.compare(RoomThemeStyle.preferredOrder(a.roomTheme, a.roomSlug),
                         RoomThemeStyle.preferredOrder(b.roomTheme, b.roomSlug)));
-        for (HomeDataClient.Room room : rooms) {
-            roomsRow.addView(inflateRoomCard(room));
+        int count = rooms.size();
+        int gap = getResources().getDimensionPixelSize(R.dimen.qm_home_room_gap);
+        for (int i = 0; i < count; i++) {
+            View card = inflateRoomCard(rooms.get(i));
+            // Responsive grid: each card takes an equal weight share of the
+            // row width (match_parent row), so all cards are fully visible
+            // with no horizontal scrolling on any phone width. Height stays
+            // the fixed card dimen so all cards are equal.
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0,
+                    getResources().getDimensionPixelSize(R.dimen.qm_home_room_card_height),
+                    1f);
+            if (i < count - 1) lp.setMarginEnd(gap);
+            card.setLayoutParams(lp);
+            roomsRow.addView(card);
         }
     }
 

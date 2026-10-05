@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home V1 — Social Rooms: horizontal scrolling color cards -->
+<!-- Home — Social Rooms: responsive 3-column grid, all cards fully visible -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -32,32 +32,43 @@
             android:textStyle="bold" />
     </LinearLayout>
 
-    <HorizontalScrollView
-        android:id="@+id/home_rooms_scroll"
+    <!-- Responsive 3-column grid: no horizontal scrolling, no clipping.
+         Card width is computed at runtime from the row's measured width
+         (see HomeActivity.applyRoomsGrid()); here we only set the gap. -->
+    <LinearLayout
+        android:id="@+id/home_rooms_row"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginTop="14dp"
-        android:scrollbars="none"
-        android:overScrollMode="never">
+        android:orientation="horizontal" />
 
-        <LinearLayout
-            android:id="@+id/home_rooms_row"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
+    <LinearLayout
+        android:id="@+id/home_rooms_skeleton_row"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:orientation="horizontal">
 
-            <View
-                android:layout_width="@dimen/qm_home_room_card_width"
-                android:layout_height="@dimen/qm_home_room_card_height"
-                android:layout_marginEnd="12dp"
-                android:background="@drawable/qm_bg_skeleton" />
+        <View
+            android:layout_width="0dp"
+            android:layout_height="@dimen/qm_home_room_card_height"
+            android:layout_weight="1"
+            android:layout_marginEnd="@dimen/qm_home_room_gap"
+            android:background="@drawable/qm_bg_skeleton" />
 
-            <View
-                android:layout_width="@dimen/qm_home_room_card_width"
-                android:layout_height="@dimen/qm_home_room_card_height"
-                android:background="@drawable/qm_bg_skeleton" />
-        </LinearLayout>
-    </HorizontalScrollView>
+        <View
+            android:layout_width="0dp"
+            android:layout_height="@dimen/qm_home_room_card_height"
+            android:layout_weight="1"
+            android:layout_marginEnd="@dimen/qm_home_room_gap"
+            android:background="@drawable/qm_bg_skeleton" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="@dimen/qm_home_room_card_height"
+            android:layout_weight="1"
+            android:background="@drawable/qm_bg_skeleton" />
+    </LinearLayout>
 
     <TextView
         android:id="@+id/home_rooms_empty"

@@ -39,6 +39,8 @@
     <!-- Vivid orange — Department card -->
     <color name="qm_orange">#F97316</color>
     <color name="qm_orange_text">#1A1A1A</color>
+    <!-- Cream label on the Department dark Enter pill -->
+    <color name="qm_enter_label">#FBF6EF</color>
     <!-- Soft mint — Continue Working / conversation -->
     <color name="qm_mint">#BFE8D7</color>
     <color name="qm_mint_text">#14532D</color>

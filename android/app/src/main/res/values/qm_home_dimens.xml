@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- ═══ Home V1 sizing (v1.5.19 visual refinement — spacious/premium scale) ═══ -->
+    <!-- ═══ Home V1 sizing (v1.5.19/20 visual refinement — spacious premium scale) ═══ -->
     <dimen name="qm_home_page_pad">24dp</dimen>
     <dimen name="qm_home_section_gap">34dp</dimen>
     <dimen name="qm_home_section_title">20sp</dimen>
@@ -10,8 +10,15 @@
     <dimen name="qm_home_card_radius">28dp</dimen>
     <dimen name="qm_home_card_pad">22dp</dimen>
     <dimen name="qm_home_meeting_height">204dp</dimen>
-    <dimen name="qm_home_room_card_width">228dp</dimen>
-    <dimen name="qm_home_room_card_height">244dp</dimen>
+    <!-- Responsive 3-column Social Rooms grid: card width is an equal weight
+         share of the row (computed from available screen width — no
+         device-width hardcoding); fixed height keeps all cards equal. -->
+    <dimen name="qm_home_room_card_height">252dp</dimen>
+    <dimen name="qm_home_room_gap">10dp</dimen>
+    <dimen name="qm_home_room_card_pad">14dp</dimen>
+    <dimen name="qm_home_room_text_name">19sp</dimen>
+    <dimen name="qm_home_room_text_online">12sp</dimen>
+    <dimen name="qm_home_room_text_desc">12sp</dimen>
     <dimen name="qm_home_dept_height">208dp</dimen>
     <dimen name="qm_home_continue_height">148dp</dimen>
     <dimen name="qm_home_today_strip_pad">18dp</dimen>
@@ -21,8 +28,8 @@
     <dimen name="qm_home_avatar_overlap">8dp</dimen>
     <dimen name="qm_home_skeleton_corner">10dp</dimen>
     <!-- circular room-card action -->
-    <dimen name="qm_home_room_arrow_circle">44dp</dimen>
-    <dimen name="qm_home_room_arrow_icon">18dp</dimen>
+    <dimen name="qm_home_room_arrow_circle">40dp</dimen>
+    <dimen name="qm_home_room_arrow_icon">16dp</dimen>
     <!-- content bottom pad is computed at runtime (nav height + insets)
          and overridden on the scroll container; this is the fallback -->
     <dimen name="qm_home_content_bottom_pad">110dp</dimen>
