@@ -103,6 +103,14 @@ public class MeetingDetailActivity extends AppCompatActivity {
         transcriptCurrent = findViewById(R.id.meeting_transcript_current);
         sessionsLabel = findViewById(R.id.meeting_transcript_sessions_label);
         sessionsList = findViewById(R.id.meeting_transcript_sessions_list);
+
+        // v1.5.34 FIX: these three views were added to the layout in
+        // v1.5.33 but never bound here — renderActions() then NPE'd on the
+        // first scheduled/live meeting after renderSummary(), killing the
+        // process mid-transition (the G32 black screen). Bind up front.
+        actionArea = findViewById(R.id.meeting_action_area);
+        actionPrimary = findViewById(R.id.meeting_action_primary);
+        actionCopy = findViewById(R.id.meeting_action_copy);
     }
 
     private void bindActions() {
@@ -111,6 +119,11 @@ public class MeetingDetailActivity extends AppCompatActivity {
         tabSummary.setOnClickListener(v -> showTab(0));
         tabTranscript.setOnClickListener(v -> showTab(1));
         retryText.setOnClickListener(v -> loadDetail());
+        // v1.5.34 FIX: listeners were missing with the binding — Join/Start
+        // and Copy Link could never fire. LiveRoomActivity is reachable
+        // ONLY from this explicit user action.
+        if (actionPrimary != null) actionPrimary.setOnClickListener(v -> startOrJoin());
+        if (actionCopy != null) actionCopy.setOnClickListener(v -> copyLink());
     }
 
     private void showTab(int index) {

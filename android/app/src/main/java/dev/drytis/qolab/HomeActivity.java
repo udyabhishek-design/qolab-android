@@ -279,8 +279,10 @@ public class HomeActivity extends AppCompatActivity {
                 showComingSoon(getString(R.string.home_menu_rooms)));
 
         deptEnter.setOnClickListener(v -> {
+            // v1.5.34: Enter now opens the shared native RoomActivity with
+            // the real department room identity (was Coming Soon).
             if (data != null && data.departmentRoom != null) {
-                showComingSoon(getString(R.string.home_menu_rooms));
+                openDepartmentRoom(data.departmentRoom);
             }
         });
 
@@ -662,6 +664,30 @@ public class HomeActivity extends AppCompatActivity {
         deptAvatars.removeAllViews();
         renderAvatarRow(deptAvatars, dept.participants, dept.membersCount, false);
         deptOverflow.setText(overflowText(dept.participants.size(), dept.membersCount));
+        // v1.5.34: open the SAME native RoomActivity Office uses, with the
+        // real department room identity from /mobile/home. No duplicate
+        // screen, no layout/data change.
+        deptCard.setOnClickListener(v -> openDepartmentRoom(dept));
+        deptEnter.setOnClickListener(v -> openDepartmentRoom(dept));
+    }
+
+    /**
+     * v1.5.34: mirrors OfficeActivity.openDepartmentRoom — the card now
+     * opens the shared native room screen using the room_slug from the
+     * /mobile/home payload. Missing slug → Coming Soon (same rule as
+     * Office).
+     */
+    private void openDepartmentRoom(HomeDataClient.Room dept) {
+        String slug = dept.roomSlug;
+        if (slug == null || slug.isEmpty()) {
+            showComingSoon(dept.name != null ? dept.name
+                    : getString(R.string.home_dept_empty_title));
+            return;
+        }
+        Intent i = new Intent(this, RoomActivity.class);
+        i.putExtra(RoomActivity.EXTRA_ROOM_NAME, dept.name);
+        i.putExtra(RoomActivity.EXTRA_ROOM_SLUG, slug);
+        startActivity(i);
     }
 
     private void renderContinue() {
