@@ -121,4 +121,31 @@ public class RoomThemeStyleTest {
         assertEquals(3, d.today.meetingsToday);
         assertEquals(7, d.today.unreadNotifications);
     }
+
+    // ═══ v1.5.19 visual refinement ═══
+
+    @Test
+    public void preferredOrderLobbyBeforeMusicBeforeCoffee() {
+        int lobby = RoomThemeStyle.preferredOrder("lobby", "the-lobby");
+        int music = RoomThemeStyle.preferredOrder("music", "music-lounge");
+        int coffee = RoomThemeStyle.preferredOrder("coffee", "coffee-lounge");
+        assertEquals(0, lobby);
+        assertEquals(1, music);
+        assertEquals(2, coffee);
+        assertEquals("Lobby < Music < Coffee",
+                true, lobby < music && music < coffee);
+    }
+
+    @Test
+    public void preferredOrderUnknownRoomsSortLast() {
+        assertEquals(3, RoomThemeStyle.preferredOrder(null, null));
+        assertEquals(3, RoomThemeStyle.preferredOrder("casual", "garden"));
+    }
+
+    @Test
+    public void preferredOrderMatchesThemeOrSlug() {
+        assertEquals(0, RoomThemeStyle.preferredOrder("lobby", null));
+        assertEquals(0, RoomThemeStyle.preferredOrder(null, "the-lobby"));
+        assertEquals(2, RoomThemeStyle.preferredOrder(null, "coffee-lounge"));
+    }
 }

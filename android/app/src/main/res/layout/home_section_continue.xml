@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home V1 — Continue Working: mint conversation + lavender task -->
+<!-- Home — Continue Working: mint conversation + lavender task.
+     Both slots always present; each resolves to data card, skeleton, or
+     a polished native empty state (never removed). -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -18,127 +20,167 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
+        android:layout_marginTop="14dp"
         android:orientation="horizontal">
 
         <!-- mint: recent conversation -->
-        <LinearLayout
-            android:id="@+id/home_continue_conversation"
+        <FrameLayout
             android:layout_width="0dp"
-            android:layout_height="@dimen/qm_home_continue_height"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:orientation="vertical"
-            android:background="@drawable/qm_bg_card_mint"
-            android:padding="14dp"
-            android:visibility="gone">
+            android:layout_marginEnd="8dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/home_continue_conversation_label"
-                android:textColor="@color/qm_mint_text"
-                android:alpha="0.7"
-                android:textSize="11sp"
-                android:textAllCaps="true" />
-
-            <TextView
-                android:id="@+id/home_continue_conversation_name"
+            <LinearLayout
+                android:id="@+id/home_continue_conversation"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:textColor="@color/qm_mint_text"
-                android:textSize="15sp"
-                android:textStyle="bold" />
+                android:layout_height="@dimen/qm_home_continue_height"
+                android:orientation="vertical"
+                android:background="@drawable/qm_bg_card_mint"
+                android:padding="18dp"
+                android:visibility="gone">
 
-            <Space
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_continue_conversation_label"
+                    android:textColor="@color/qm_mint_text"
+                    android:alpha="0.7"
+                    android:textSize="11sp"
+                    android:textAllCaps="true"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/home_continue_conversation_name"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:maxLines="1"
+                    android:ellipsize="end"
+                    android:textColor="@color/qm_mint_text"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <Space
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+                <TextView
+                    android:id="@+id/home_continue_conversation_meta"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:maxLines="1"
+                    android:textColor="@color/qm_mint_text"
+                    android:alpha="0.8"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <View
+                android:id="@+id/home_continue_conversation_skeleton"
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
+                android:layout_height="@dimen/qm_home_continue_height"
+                android:background="@drawable/qm_bg_skeleton" />
 
-            <TextView
-                android:id="@+id/home_continue_conversation_meta"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:textColor="@color/qm_mint_text"
-                android:alpha="0.8"
-                android:textSize="12sp" />
-        </LinearLayout>
+            <LinearLayout
+                android:id="@+id/home_continue_conversation_empty"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/qm_home_continue_height"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/qm_bg_card_mint"
+                android:padding="18dp"
+                android:visibility="gone">
 
-        <View
-            android:id="@+id/home_continue_conversation_skeleton"
-            android:layout_width="0dp"
-            android:layout_height="@dimen/qm_home_continue_height"
-            android:layout_weight="1"
-            android:layout_marginEnd="6dp"
-            android:background="@drawable/qm_bg_skeleton" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_continue_conversation_empty"
+                    android:textColor="@color/qm_mint_text"
+                    android:alpha="0.75"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:gravity="center" />
+            </LinearLayout>
+        </FrameLayout>
 
         <!-- lavender: due task -->
-        <LinearLayout
-            android:id="@+id/home_continue_task"
+        <FrameLayout
             android:layout_width="0dp"
-            android:layout_height="@dimen/qm_home_continue_height"
+            android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:layout_marginStart="6dp"
-            android:orientation="vertical"
-            android:background="@drawable/qm_bg_card_lavender"
-            android:padding="14dp"
-            android:visibility="gone">
+            android:layout_marginStart="8dp">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/home_continue_task_label"
-                android:textColor="@color/qm_lavender_text"
-                android:alpha="0.7"
-                android:textSize="11sp"
-                android:textAllCaps="true" />
-
-            <TextView
-                android:id="@+id/home_continue_task_title"
+            <LinearLayout
+                android:id="@+id/home_continue_task"
                 android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:textColor="@color/qm_lavender_text"
-                android:textSize="15sp"
-                android:textStyle="bold" />
+                android:layout_height="@dimen/qm_home_continue_height"
+                android:orientation="vertical"
+                android:background="@drawable/qm_bg_card_lavender"
+                android:padding="18dp"
+                android:visibility="gone">
 
-            <Space
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_continue_task_label"
+                    android:textColor="@color/qm_lavender_text"
+                    android:alpha="0.7"
+                    android:textSize="11sp"
+                    android:textAllCaps="true"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/home_continue_task_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="8dp"
+                    android:maxLines="2"
+                    android:ellipsize="end"
+                    android:textColor="@color/qm_lavender_text"
+                    android:textSize="17sp"
+                    android:textStyle="bold" />
+
+                <Space
+                    android:layout_width="match_parent"
+                    android:layout_height="0dp"
+                    android:layout_weight="1" />
+
+                <TextView
+                    android:id="@+id/home_continue_task_due"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:maxLines="1"
+                    android:textColor="@color/qm_lavender_text"
+                    android:alpha="0.8"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <View
+                android:id="@+id/home_continue_task_skeleton"
                 android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_weight="1" />
+                android:layout_height="@dimen/qm_home_continue_height"
+                android:background="@drawable/qm_bg_skeleton" />
 
-            <TextView
-                android:id="@+id/home_continue_task_due"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:textColor="@color/qm_lavender_text"
-                android:alpha="0.8"
-                android:textSize="12sp" />
-        </LinearLayout>
+            <LinearLayout
+                android:id="@+id/home_continue_task_empty"
+                android:layout_width="match_parent"
+                android:layout_height="@dimen/qm_home_continue_height"
+                android:orientation="vertical"
+                android:gravity="center"
+                android:background="@drawable/qm_bg_card_lavender"
+                android:padding="18dp"
+                android:visibility="gone">
 
-        <View
-            android:id="@+id/home_continue_task_skeleton"
-            android:layout_width="0dp"
-            android:layout_height="@dimen/qm_home_continue_height"
-            android:layout_weight="1"
-            android:layout_marginStart="6dp"
-            android:background="@drawable/qm_bg_skeleton" />
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/home_continue_task_empty"
+                    android:textColor="@color/qm_lavender_text"
+                    android:alpha="0.75"
+                    android:textSize="14sp"
+                    android:textStyle="bold"
+                    android:gravity="center" />
+            </LinearLayout>
+        </FrameLayout>
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/home_continue_both_empty"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginTop="10dp"
-        android:text="@string/home_continue_conversation_empty"
-        android:textColor="@color/qm_muted"
-        android:textSize="13sp"
-        android:visibility="gone" />
 </LinearLayout>

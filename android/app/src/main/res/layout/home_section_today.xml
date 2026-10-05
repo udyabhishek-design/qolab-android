@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home V1 — Today: quiet compact summary strip (Tasks / Meetings / Updates) -->
+<!-- Home — Today: quiet compact summary strip (Tasks / Meetings / Updates) -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
@@ -21,16 +21,16 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="@color/qm_ink"
-            android:textSize="18sp"
+            android:textSize="22sp"
             android:textStyle="bold" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
+            android:layout_marginTop="2dp"
             android:text="@string/home_today_tasks"
             android:textColor="@color/qm_muted"
-            android:textSize="11sp" />
+            android:textSize="12sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -45,16 +45,16 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="@color/qm_ink"
-            android:textSize="18sp"
+            android:textSize="22sp"
             android:textStyle="bold" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
+            android:layout_marginTop="2dp"
             android:text="@string/home_today_meetings"
             android:textColor="@color/qm_muted"
-            android:textSize="11sp" />
+            android:textSize="12sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -69,15 +69,15 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="@color/qm_ink"
-            android:textSize="18sp"
+            android:textSize="22sp"
             android:textStyle="bold" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="1dp"
+            android:layout_marginTop="2dp"
             android:text="@string/home_today_updates"
             android:textColor="@color/qm_muted"
-            android:textSize="11sp" />
+            android:textSize="12sp" />
     </LinearLayout>
 </LinearLayout>

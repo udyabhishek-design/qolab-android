@@ -30,51 +30,65 @@
             android:visibility="gone">
 
             <LinearLayout
-                android:layout_width="wrap_content"
+                android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
                 android:gravity="center_vertical">
 
-                <ImageView
-                    android:id="@+id/home_meeting_calendar_icon"
-                    android:layout_width="18dp"
-                    android:layout_height="18dp"
-                    android:src="@drawable/qm_ic_calendar"
-                    android:importantForAccessibility="no"
-                    app:tint="@color/qm_yellow_text"
-                    xmlns:app="http://schemas.android.com/apk/res-auto" />
+                <FrameLayout
+                    android:layout_width="46dp"
+                    android:layout_height="46dp"
+                    android:background="@drawable/qm_bg_meeting_icon_block">
 
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginStart="6dp"
-                    android:text="@string/home_meeting_label"
-                    android:textColor="@color/qm_yellow_text"
-                    android:alpha="0.75"
-                    android:textSize="12sp"
-                    android:textAllCaps="true"
-                    android:textStyle="bold" />
+                    <ImageView
+                        android:layout_width="22dp"
+                        android:layout_height="22dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/qm_ic_calendar"
+                        android:importantForAccessibility="no"
+                        app:tint="@color/qm_ink"
+                        xmlns:app="http://schemas.android.com/apk/res-auto" />
+                </FrameLayout>
 
-                <TextView
-                    android:id="@+id/home_meeting_time"
-                    android:layout_width="wrap_content"
+                <LinearLayout
+                    android:layout_width="0dp"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
-                    android:textColor="@color/qm_yellow_text"
-                    android:textSize="12sp"
-                    android:textStyle="bold" />
+                    android:layout_weight="1"
+                    android:layout_marginStart="12dp"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/home_meeting_label"
+                        android:textColor="@color/qm_yellow_text"
+                        android:alpha="0.7"
+                        android:textSize="12sp"
+                        android:textAllCaps="true"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/home_meeting_time"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:textColor="@color/qm_yellow_text"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
             </LinearLayout>
 
             <TextView
                 android:id="@+id/home_meeting_title"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="8dp"
+                android:layout_marginTop="14dp"
                 android:maxLines="2"
                 android:ellipsize="end"
                 android:textColor="@color/qm_yellow_text"
-                android:textSize="19sp"
-                android:textStyle="bold" />
+                android:textSize="22sp"
+                android:textStyle="bold"
+                android:letterSpacing="-0.01" />
 
             <Space
                 android:layout_width="match_parent"
@@ -97,9 +111,9 @@
                     android:id="@+id/home_meeting_overflow"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="10dp"
+                    android:layout_marginStart="12dp"
                     android:textColor="@color/qm_yellow_text"
-                    android:textSize="13sp" />
+                    android:textSize="14sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -124,17 +138,17 @@
                 android:layout_height="wrap_content"
                 android:text="@string/home_meeting_empty_title"
                 android:textColor="@color/qm_yellow_text"
-                android:textSize="17sp"
+                android:textSize="19sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="6dp"
                 android:text="@string/home_meeting_empty_support"
                 android:textColor="@color/qm_yellow_text"
                 android:alpha="0.75"
-                android:textSize="13sp" />
+                android:textSize="14sp" />
         </LinearLayout>
 
         <LinearLayout

@@ -18,7 +18,9 @@
     <string name="home_section_social_rooms">Social Rooms</string>
     <string name="home_rooms_see_all">See all</string>
     <string name="home_room_enter">Enter</string>
+    <string name="home_room_enter_with_arrow">Enter  \u2192</string>
     <string name="home_room_open">Open</string>
+    <string name="home_room_cd_enter">Open room</string>
     <string name="home_rooms_empty">No social rooms yet</string>
     <!-- Department -->
     <string name="home_section_department">Your Department</string>

@@ -67,7 +67,7 @@ public class HomeActivity extends AppCompatActivity {
     private LinearLayout deptAvatars;
 
     // continue working
-    private View convCard, convSkeleton, taskCard, taskSkeleton, bothEmpty;
+    private View convCard, convSkeleton, convEmpty, taskCard, taskSkeleton, taskEmpty, bothEmpty;
     private TextView convName, convMeta, taskTitle, taskDue;
 
     // today
@@ -201,7 +201,7 @@ public class HomeActivity extends AppCompatActivity {
         convSkeleton = findViewById(R.id.home_continue_conversation_skeleton);
         taskCard = findViewById(R.id.home_continue_task);
         taskSkeleton = findViewById(R.id.home_continue_task_skeleton);
-        bothEmpty = findViewById(R.id.home_continue_both_empty);
+        convEmpty = findViewById(R.id.home_continue_conversation_empty);
         convName = findViewById(R.id.home_continue_conversation_name);
         convMeta = findViewById(R.id.home_continue_conversation_meta);
         taskTitle = findViewById(R.id.home_continue_task_title);
@@ -467,7 +467,8 @@ public class HomeActivity extends AppCompatActivity {
     private void showLoading() {
         show(meetingSkeleton); hide(meetingCard, meetingEmpty, meetingError);
         show(deptSkeleton); hide(deptCard, deptEmpty, deptError);
-        show(convSkeleton, taskSkeleton); hide(convCard, taskCard, bothEmpty);
+        show(convSkeleton, taskSkeleton);
+        hide(convCard, convEmpty, taskCard, taskEmpty);
         // rooms row keeps its skeleton children until data arrives
     }
 
@@ -475,7 +476,7 @@ public class HomeActivity extends AppCompatActivity {
         lastDiag.skeletonsCleared = true;
         hide(meetingSkeleton); show(meetingError);
         hide(deptSkeleton); show(deptError);
-        hide(convSkeleton, taskSkeleton); hide(convCard, taskCard); show(bothEmpty);
+        hide(convSkeleton, taskSkeleton, convCard, convEmpty, taskCard, taskEmpty);
         // rooms: remove skeleton children, show the empty/error placeholder
         roomsRow.removeAllViews();
         show(roomsEmpty);
@@ -530,6 +531,11 @@ public class HomeActivity extends AppCompatActivity {
         }
         hide(roomsEmpty);
         ((TextView) roomsEmpty).setText(R.string.home_rooms_empty);
+        // Preferred visual order: Lobby → Music Lounge → Coffee Lounge
+        // (stable sort keeps payload order within equal ranks / unknowns).
+        java.util.Collections.sort(rooms, (a, b) ->
+                Integer.compare(RoomThemeStyle.preferredOrder(a.roomTheme, a.roomSlug),
+                        RoomThemeStyle.preferredOrder(b.roomTheme, b.roomSlug)));
         for (HomeDataClient.Room room : rooms) {
             roomsRow.addView(inflateRoomCard(room));
         }
@@ -541,22 +547,38 @@ public class HomeActivity extends AppCompatActivity {
         TextView name = card.findViewById(R.id.room_card_name);
         TextView description = card.findViewById(R.id.room_card_description);
         TextView overflow = card.findViewById(R.id.room_card_overflow);
-        TextView enter = card.findViewById(R.id.room_card_enter);
         LinearLayout avatars = card.findViewById(R.id.room_card_avatars);
+        FrameLayout arrowCircle = card.findViewById(R.id.room_card_arrow_circle);
         ImageView arrow = card.findViewById(R.id.room_card_arrow);
 
         // Approved popping palette by room theme — colors ARE the identity
         // (pure mapping lives in RoomThemeStyle; unit-tested).
         RoomThemeStyle.Style style = RoomThemeStyle.styleFor(room.roomTheme, room.roomSlug);
-        card.setBackgroundColor(style.bg);
+        // Rounded card background in the theme color (radius from dimens).
+        android.graphics.drawable.GradientDrawable cardBg =
+                new android.graphics.drawable.GradientDrawable();
+        cardBg.setShape(android.graphics.drawable.GradientDrawable.RECTANGLE);
+        cardBg.setColor(style.bg);
+        cardBg.setCornerRadius(getResources().getDimensionPixelSize(R.dimen.qm_home_card_radius));
+        card.setBackground(cardBg);
         name.setTextColor(style.title);
         online.setTextColor(style.text);
         description.setTextColor(style.text);
         overflow.setTextColor(style.text);
-        enter.setBackgroundColor(style.enterBg);
-        enter.setTextColor(style.enterText);
+        if (arrowCircle != null) {
+            // Circular arrow action (approved reference) — tinted to the
+            // theme's enter color; icon stays readable against it.
+            android.graphics.drawable.GradientDrawable circle =
+                    new android.graphics.drawable.GradientDrawable();
+            circle.setShape(android.graphics.drawable.GradientDrawable.OVAL);
+            circle.setColor(style.enterBg);
+            arrowCircle.setBackground(circle);
+            arrowCircle.setOnClickListener(v ->
+                    showComingSoon(room.name != null ? room.name : getString(R.string.home_room_cd_enter)));
+            arrowCircle.setContentDescription(getString(R.string.home_room_cd_enter));
+        }
         if (arrow != null) {
-            arrow.setImageTintList(ColorStateList.valueOf(style.enterBg));
+            arrow.setImageTintList(ColorStateList.valueOf(style.enterText));
         }
 
         online.setText(getString(R.string.home_room_online, room.membersCount));
@@ -566,8 +588,6 @@ public class HomeActivity extends AppCompatActivity {
         avatars.removeAllViews();
         renderAvatarRow(avatars, room.participants, room.membersCount, false);
         overflow.setText(overflowText(room.participants.size(), room.membersCount));
-        enter.setOnClickListener(v ->
-                showComingSoon(room.name != null ? room.name : getString(R.string.home_menu_rooms)));
         return card;
     }
 
@@ -600,8 +620,11 @@ public class HomeActivity extends AppCompatActivity {
         HomeDataClient.Conversation conv = data.recentConversation;
         HomeDataClient.Task task = data.priorityTask;
 
+        // Each slot always resolves to exactly one of data / empty —
+        // never removed, never a permanent skeleton.
         if (conv != null) {
             show(convCard);
+            hide(convEmpty);
             convName.setText(conv.type != null && conv.type.equals("dm") && conv.dmPartnerName != null
                     ? conv.dmPartnerName : conv.name);
             String meta = relativeTime(conv.lastMessageAt);
@@ -613,22 +636,19 @@ public class HomeActivity extends AppCompatActivity {
                     showComingSoon(getString(R.string.home_nav_chat)));
         } else {
             hide(convCard);
+            show(convEmpty);
         }
 
         if (task != null) {
             show(taskCard);
+            hide(taskEmpty);
             taskTitle.setText(task.title);
             taskDue.setText(dueLabel(task.dueDate));
             taskCard.setOnClickListener(v ->
                     showComingSoon(getString(R.string.home_menu_tasks)));
         } else {
             hide(taskCard);
-        }
-
-        if (conv == null && task == null) {
-            show(bothEmpty);
-        } else {
-            hide(bothEmpty);
+            show(taskEmpty);
         }
     }
 

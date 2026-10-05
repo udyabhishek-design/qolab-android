@@ -18,7 +18,7 @@
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="10dp">
+        android:layout_marginTop="14dp">
 
         <LinearLayout
             android:id="@+id/home_dept_card"
@@ -36,28 +36,30 @@
                 android:maxLines="1"
                 android:ellipsize="end"
                 android:textColor="@color/qm_orange_text"
-                android:textSize="20sp"
-                android:textStyle="bold" />
+                android:textSize="26sp"
+                android:textStyle="bold"
+                android:letterSpacing="-0.01" />
 
             <TextView
                 android:id="@+id/home_dept_online"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginTop="4dp"
                 android:textColor="@color/qm_orange_text"
                 android:alpha="0.8"
-                android:textSize="13sp" />
+                android:textSize="14sp"
+                android:textStyle="bold" />
 
             <TextView
                 android:id="@+id/home_dept_description"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="6dp"
                 android:maxLines="2"
                 android:ellipsize="end"
                 android:textColor="@color/qm_orange_text"
                 android:alpha="0.85"
-                android:textSize="13sp" />
+                android:textSize="14sp" />
 
             <Space
                 android:layout_width="match_parent"
@@ -81,21 +83,23 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="10dp"
+                    android:layout_marginStart="12dp"
                     android:maxLines="1"
                     android:textColor="@color/qm_orange_text"
-                    android:textSize="13sp" />
+                    android:textSize="14sp" />
 
                 <TextView
                     android:id="@+id/home_dept_enter"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:paddingHorizontal="18dp"
-                    android:paddingVertical="8dp"
+                    android:paddingStart="22dp"
+                    android:paddingEnd="22dp"
+                    android:paddingTop="11dp"
+                    android:paddingBottom="11dp"
                     android:background="@drawable/qm_bg_btn_enter_dark"
-                    android:text="@string/home_room_enter"
+                    android:text="@string/home_room_enter_with_arrow"
                     android:textColor="@color/qm_orange_text"
-                    android:textSize="13sp"
+                    android:textSize="15sp"
                     android:textStyle="bold" />
             </LinearLayout>
         </LinearLayout>
@@ -121,16 +125,16 @@
                 android:layout_height="wrap_content"
                 android:text="@string/home_dept_empty_title"
                 android:textColor="@color/qm_ink"
-                android:textSize="16sp"
+                android:textSize="18sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
+                android:layout_marginTop="6dp"
                 android:text="@string/home_dept_empty_support"
                 android:textColor="@color/qm_muted"
-                android:textSize="13sp" />
+                android:textSize="14sp" />
         </LinearLayout>
 
         <LinearLayout

@@ -10,7 +10,7 @@
         android:id="@+id/home_greeting_date"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
+        android:layout_marginTop="26dp"
         android:textColor="@color/qm_muted"
         android:textSize="@dimen/qm_home_greeting_date" />
 
@@ -18,16 +18,17 @@
         android:id="@+id/home_greeting_name"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="2dp"
+        android:layout_marginTop="4dp"
         android:textColor="@color/qm_ink"
         android:textSize="@dimen/qm_home_greeting_name"
-        android:textStyle="bold" />
+        android:textStyle="bold"
+        android:letterSpacing="-0.01" />
 
     <TextView
         android:id="@+id/home_greeting_support"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="6dp"
         android:text="@string/home_greeting_support_line"
         android:textColor="@color/qm_muted"
         android:textSize="@dimen/qm_home_greeting_support" />

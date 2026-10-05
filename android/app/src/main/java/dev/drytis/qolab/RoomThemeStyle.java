@@ -51,6 +51,20 @@ public final class RoomThemeStyle {
         }
     }
 
+    /**
+     * Preferred visual order for the known room identities on Home:
+     * Lobby (0) → Music Lounge (1) → Coffee Lounge (2). Unknown rooms sort
+     * last, keeping their payload order (stable when used with a stable sort).
+     */
+    public static int preferredOrder(String roomTheme, String roomSlug) {
+        String theme = roomTheme == null ? "" : roomTheme;
+        String slug = roomSlug == null ? "" : roomSlug;
+        if (theme.contains("lobby") || slug.contains("lobby")) return 0;
+        if (theme.contains("music") || slug.contains("music")) return 1;
+        if (theme.contains("coffee") || slug.contains("coffee")) return 2;
+        return 3;
+    }
+
     private RoomThemeStyle() {
     }
 
