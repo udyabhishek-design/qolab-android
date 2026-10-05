@@ -21,16 +21,16 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="@color/qm_ink"
-            android:textSize="22sp"
+            android:textSize="17sp"
             android:textStyle="bold" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
+            android:layout_marginTop="1dp"
             android:text="@string/home_today_tasks"
             android:textColor="@color/qm_muted"
-            android:textSize="12sp" />
+            android:textSize="10sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -45,16 +45,16 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="@color/qm_ink"
-            android:textSize="22sp"
+            android:textSize="17sp"
             android:textStyle="bold" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
+            android:layout_marginTop="1dp"
             android:text="@string/home_today_meetings"
             android:textColor="@color/qm_muted"
-            android:textSize="12sp" />
+            android:textSize="10sp" />
     </LinearLayout>
 
     <LinearLayout
@@ -69,15 +69,15 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:textColor="@color/qm_ink"
-            android:textSize="22sp"
+            android:textSize="17sp"
             android:textStyle="bold" />
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
+            android:layout_marginTop="1dp"
             android:text="@string/home_today_updates"
             android:textColor="@color/qm_muted"
-            android:textSize="12sp" />
+            android:textSize="10sp" />
     </LinearLayout>
 </LinearLayout>

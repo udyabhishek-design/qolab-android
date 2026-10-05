@@ -18,7 +18,7 @@
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="14dp">
+        android:layout_marginTop="8dp">
 
         <LinearLayout
             android:id="@+id/home_dept_card"
@@ -29,37 +29,65 @@
             android:padding="@dimen/qm_home_card_pad"
             android:visibility="gone">
 
-            <TextView
-                android:id="@+id/home_dept_name"
+            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:maxLines="1"
-                android:ellipsize="end"
-                android:textColor="@color/qm_orange_text"
-                android:textSize="26sp"
-                android:textStyle="bold"
-                android:letterSpacing="-0.01" />
+                android:orientation="horizontal"
+                android:gravity="center_vertical">
 
-            <TextView
-                android:id="@+id/home_dept_online"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="4dp"
-                android:textColor="@color/qm_orange_text"
-                android:alpha="0.8"
-                android:textSize="14sp"
-                android:textStyle="bold" />
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/home_dept_name"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:maxLines="1"
+                        android:ellipsize="end"
+                        android:textColor="@color/qm_orange_text"
+                        android:textSize="19sp"
+                        android:textStyle="bold"
+                        android:letterSpacing="-0.01" />
+
+                    <TextView
+                        android:id="@+id/home_dept_online"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="1dp"
+                        android:textColor="@color/qm_orange_text"
+                        android:alpha="0.8"
+                        android:textSize="11sp"
+                        android:textStyle="bold" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/home_dept_enter"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:paddingStart="18dp"
+                    android:paddingEnd="18dp"
+                    android:paddingTop="9dp"
+                    android:paddingBottom="9dp"
+                    android:background="@drawable/qm_bg_btn_enter_dark"
+                    android:text="@string/home_room_enter_with_arrow"
+                    android:textColor="@color/qm_enter_label"
+                    android:textSize="14sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
 
             <TextView
                 android:id="@+id/home_dept_description"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="6dp"
-                android:maxLines="2"
+                android:maxLines="1"
                 android:ellipsize="end"
                 android:textColor="@color/qm_orange_text"
                 android:alpha="0.85"
-                android:textSize="14sp" />
+                android:textSize="12sp" />
 
             <Space
                 android:layout_width="match_parent"
@@ -83,24 +111,10 @@
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:layout_marginStart="12dp"
+                    android:layout_marginStart="10dp"
                     android:maxLines="1"
                     android:textColor="@color/qm_orange_text"
-                    android:textSize="14sp" />
-
-                <TextView
-                    android:id="@+id/home_dept_enter"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:paddingStart="24dp"
-                    android:paddingEnd="24dp"
-                    android:paddingTop="12dp"
-                    android:paddingBottom="12dp"
-                    android:background="@drawable/qm_bg_btn_enter_dark"
-                    android:text="@string/home_room_enter_with_arrow"
-                    android:textColor="@color/qm_enter_label"
-                    android:textSize="16sp"
-                    android:textStyle="bold" />
+                    android:textSize="12sp" />
             </LinearLayout>
         </LinearLayout>
 
@@ -125,16 +139,16 @@
                 android:layout_height="wrap_content"
                 android:text="@string/home_dept_empty_title"
                 android:textColor="@color/qm_ink"
-                android:textSize="18sp"
+                android:textSize="15sp"
                 android:textStyle="bold" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="4dp"
                 android:text="@string/home_dept_empty_support"
                 android:textColor="@color/qm_muted"
-                android:textSize="14sp" />
+                android:textSize="12sp" />
         </LinearLayout>
 
         <LinearLayout

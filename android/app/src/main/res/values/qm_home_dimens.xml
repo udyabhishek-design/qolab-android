@@ -1,36 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- ═══ Home V1 sizing (v1.5.19/20 visual refinement — spacious premium scale) ═══ -->
-    <dimen name="qm_home_page_pad">24dp</dimen>
-    <dimen name="qm_home_section_gap">34dp</dimen>
-    <dimen name="qm_home_section_title">20sp</dimen>
-    <dimen name="qm_home_greeting_name">34sp</dimen>
-    <dimen name="qm_home_greeting_date">15sp</dimen>
-    <dimen name="qm_home_greeting_support">15sp</dimen>
-    <dimen name="qm_home_card_radius">28dp</dimen>
-    <dimen name="qm_home_card_pad">22dp</dimen>
-    <dimen name="qm_home_meeting_height">204dp</dimen>
+    <!-- ═══ Home V1 sizing (v1.5.21 one-viewport composition) ═══
+         Composed for ~780dp usable height (G32-class): header+greeting ~140dp,
+         meeting 88dp, rooms 150dp, department 118dp, continue 92dp, today 64dp,
+         section gaps 14dp — totals ≈ 740dp with the fixed bottom nav. -->
+    <dimen name="qm_home_page_pad">16dp</dimen>
+    <dimen name="qm_home_section_gap">14dp</dimen>
+    <dimen name="qm_home_section_title">15sp</dimen>
+    <dimen name="qm_home_greeting_name">24sp</dimen>
+    <dimen name="qm_home_greeting_date">12sp</dimen>
+    <dimen name="qm_home_greeting_support">12sp</dimen>
+    <dimen name="qm_home_card_radius">18dp</dimen>
+    <dimen name="qm_home_card_pad">12dp</dimen>
+    <dimen name="qm_home_meeting_height">88dp</dimen>
+    <dimen name="qm_home_meeting_icon">36dp</dimen>
     <!-- Responsive 3-column Social Rooms grid: card width is an equal weight
          share of the row (computed from available screen width — no
          device-width hardcoding); fixed height keeps all cards equal. -->
-    <dimen name="qm_home_room_card_height">252dp</dimen>
-    <dimen name="qm_home_room_gap">10dp</dimen>
-    <dimen name="qm_home_room_card_pad">14dp</dimen>
-    <dimen name="qm_home_room_text_name">19sp</dimen>
-    <dimen name="qm_home_room_text_online">12sp</dimen>
-    <dimen name="qm_home_room_text_desc">12sp</dimen>
-    <dimen name="qm_home_dept_height">208dp</dimen>
-    <dimen name="qm_home_continue_height">148dp</dimen>
-    <dimen name="qm_home_today_strip_pad">18dp</dimen>
-    <dimen name="qm_home_bottom_nav_height">72dp</dimen>
-    <dimen name="qm_home_ask_drytis_diameter">64dp</dimen>
-    <dimen name="qm_home_avatar_size">34dp</dimen>
-    <dimen name="qm_home_avatar_overlap">8dp</dimen>
-    <dimen name="qm_home_skeleton_corner">10dp</dimen>
+    <dimen name="qm_home_room_card_height">150dp</dimen>
+    <dimen name="qm_home_room_gap">8dp</dimen>
+    <dimen name="qm_home_room_card_pad">10dp</dimen>
+    <dimen name="qm_home_room_text_name">14sp</dimen>
+    <dimen name="qm_home_room_text_online">10sp</dimen>
+    <dimen name="qm_home_room_text_desc">10sp</dimen>
+    <dimen name="qm_home_dept_height">118dp</dimen>
+    <dimen name="qm_home_continue_height">92dp</dimen>
+    <dimen name="qm_home_today_strip_pad">10dp</dimen>
+    <dimen name="qm_home_bottom_nav_height">60dp</dimen>
+    <dimen name="qm_home_ask_drytis_diameter">54dp</dimen>
+    <dimen name="qm_home_avatar_size">22dp</dimen>
+    <dimen name="qm_home_avatar_overlap">6dp</dimen>
+    <dimen name="qm_home_skeleton_corner">8dp</dimen>
     <!-- circular room-card action -->
-    <dimen name="qm_home_room_arrow_circle">40dp</dimen>
-    <dimen name="qm_home_room_arrow_icon">16dp</dimen>
+    <dimen name="qm_home_room_arrow_circle">30dp</dimen>
+    <dimen name="qm_home_room_arrow_icon">12dp</dimen>
     <!-- content bottom pad is computed at runtime (nav height + insets)
          and overridden on the scroll container; this is the fallback -->
-    <dimen name="qm_home_content_bottom_pad">110dp</dimen>
+    <dimen name="qm_home_content_bottom_pad">88dp</dimen>
 </resources>

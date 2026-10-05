@@ -526,6 +526,10 @@ public class HomeActivity extends AppCompatActivity {
 
     private void renderRooms() {
         List<HomeDataClient.Room> rooms = data.socialRooms;
+        // The skeleton row is a SIBLING of the data row — always retire it
+        // once data (or an empty/error state) resolves. This was the cause
+        // of the 3 permanent blank beige cards under Social Rooms.
+        hide(roomsSkeletonRow);
         roomsRow.removeAllViews();
         if (rooms == null || rooms.isEmpty()) {
             show(roomsEmpty);

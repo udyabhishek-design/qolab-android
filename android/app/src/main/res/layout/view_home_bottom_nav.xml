@@ -26,8 +26,8 @@
 
             <ImageView
                 android:id="@+id/home_nav_home_icon"
-                android:layout_width="26dp"
-                android:layout_height="26dp"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
                 android:src="@drawable/qm_ic_home" />
 
             <TextView
@@ -36,7 +36,7 @@
                 android:layout_marginTop="3dp"
                 android:text="@string/home_nav_home"
                 android:textColor="@color/qm_nav_selected"
-                android:textSize="11sp" />
+                android:textSize="9sp" />
         </LinearLayout>
 
         <LinearLayout
@@ -49,8 +49,8 @@
 
             <ImageView
                 android:id="@+id/home_nav_office_icon"
-                android:layout_width="26dp"
-                android:layout_height="26dp"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
                 android:src="@drawable/qm_ic_office" />
 
             <TextView
@@ -59,7 +59,7 @@
                 android:layout_marginTop="3dp"
                 android:text="@string/home_nav_office"
                 android:textColor="@color/qm_nav_unselected"
-                android:textSize="11sp" />
+                android:textSize="9sp" />
         </LinearLayout>
 
         <!-- Ask Drytis — larger circular wine focal point -->
@@ -76,8 +76,8 @@
                 android:background="@drawable/qm_bg_ask_drytis">
 
                 <ImageView
-                    android:layout_width="26dp"
-                    android:layout_height="26dp"
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
                     android:layout_gravity="center"
                     android:src="@drawable/qm_ic_sparkle"
                     android:contentDescription="@string/home_nav_cd_ask_drytis" />
@@ -90,7 +90,7 @@
                 android:layout_marginBottom="1dp"
                 android:text="@string/home_nav_ask_drytis"
                 android:textColor="@color/qm_nav_unselected"
-                android:textSize="10sp" />
+                android:textSize="9sp" />
         </FrameLayout>
 
         <LinearLayout
@@ -103,8 +103,8 @@
 
             <ImageView
                 android:id="@+id/home_nav_chat_icon"
-                android:layout_width="26dp"
-                android:layout_height="26dp"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
                 android:src="@drawable/qm_ic_chat"
                 android:contentDescription="@string/home_nav_chat" />
 
@@ -114,7 +114,7 @@
                 android:layout_marginTop="3dp"
                 android:text="@string/home_nav_chat"
                 android:textColor="@color/qm_nav_unselected"
-                android:textSize="11sp" />
+                android:textSize="9sp" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>
