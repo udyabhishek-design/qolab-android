@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Development in-app updater (dev builds only) -->
+<resources>
+    <string name="dev_update_menu_check">Check for Development Update</string>
+    <string name="dev_update_checking">Checking for Development update…</string>
+    <string name="dev_update_check_failed">Could not check for updates right now.</string>
+    <string name="dev_update_up_to_date">You are on the latest Development build.</string>
+    <string name="dev_update_available_title">Development update available</string>
+    <string name="dev_update_available_msg">v%1$s</string>
+    <string name="dev_update_action_update">Update</string>
+    <string name="dev_update_action_later">Later</string>
+    <string name="dev_update_download_title">Downloading update…</string>
+    <string name="dev_update_download_progress">%1$d KB / %2$d KB</string>
+    <string name="dev_update_download_failed">Download failed. Please try again.</string>
+    <string name="dev_update_invalid_title">Update rejected</string>
+    <string name="dev_update_invalid_msg">The downloaded file is not a valid Qolab update (%1$s). It was deleted for your safety.</string>
+    <string name="dev_update_permission_title">Allow app installs</string>
+    <string name="dev_update_permission_msg">To install Development updates, Android needs permission for Qolab to install apps from this source. This only affects Development builds. Tap “Open settings”, enable “Allow from this source”, then come back and tap Update again.</string>
+    <string name="dev_update_permission_open_settings">Open settings</string>
+</resources>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- DEVELOPMENT build only: required so Android's package installer can be
+     launched from this app for in-app APK updates. This overlay is merged ONLY
+     into the debug (Development) build variant — release/production builds
+     never declare the permission. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+</manifest>

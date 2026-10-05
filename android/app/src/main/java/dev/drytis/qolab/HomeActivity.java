@@ -81,6 +81,9 @@ public class HomeActivity extends AppCompatActivity {
     private HomeDataClient.HomeData data;
     private volatile boolean fetching = false;
 
+    /** v1.5.25: Development-only in-app updater (null-safe; inert in release). */
+    private dev.drytis.qolab.devupdate.DevUpdateController devUpdater;
+
     /** DEBUG-only diagnostics for the new (v1.5.15) architecture:
      *  the authenticated WebView transport fetches Home data. Booleans and
      *  counts only — never cookie values, tokens, credentials, or body
@@ -144,6 +147,11 @@ public class HomeActivity extends AppCompatActivity {
 
         renderGreeting();
 
+        // v1.5.25: Development-only in-app updater (guard-checked inside;
+        // no-op in release builds). Async — never blocks Home startup.
+        devUpdater = new dev.drytis.qolab.devupdate.DevUpdateController(this);
+        devUpdater.maybeCheckOnStartup();
+
         if (data == null) {
             loadHome();
         }
@@ -159,6 +167,13 @@ public class HomeActivity extends AppCompatActivity {
         if (data == null && !fetching) {
             loadHome();
         }
+        if (devUpdater != null) devUpdater.onResume();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (devUpdater != null) devUpdater.onDestroy();
     }
 
     // ------------------------------------------------------------------
@@ -338,6 +353,18 @@ public class HomeActivity extends AppCompatActivity {
 
         // DEBUG-only: Home fetch diagnostics (names/booleans only)
         if (BuildConfig.DEBUG) {
+            // v1.5.25: manual Development update check (dev builds only)
+            TextView upd = new TextView(this);
+            upd.setText(R.string.dev_update_menu_check);
+            upd.setTextColor(0xFF7A756D);
+            upd.setTextSize(13);
+            upd.setPadding(0, pad / 2, 0, pad / 2);
+            box.addView(upd);
+            upd.setOnClickListener(v -> {
+                sheet.dismiss();
+                if (devUpdater != null) devUpdater.checkNow();
+            });
+
             TextView diag = new TextView(this);
             diag.setText(R.string.home_diag_title);
             diag.setTextColor(0xFF7A756D);
