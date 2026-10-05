@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Office — fixed bottom navigation: Home / Office / [Ask Drytis focal] / Chat -->
+<FrameLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_gravity="bottom"
+    android:background="@color/qm_canvas">
+
+    <LinearLayout
+        android:id="@+id/office_bottom_nav"
+        android:layout_width="match_parent"
+        android:layout_height="@dimen/qm_home_bottom_nav_height"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp">
+
+        <LinearLayout
+            android:id="@+id/office_nav_home"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <ImageView
+                android:id="@+id/office_nav_home_icon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/qm_ic_home" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="@string/office_nav_home"
+                android:textColor="@color/qm_nav_unselected"
+                android:textSize="9sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/office_nav_office"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <ImageView
+                android:id="@+id/office_nav_office_icon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/qm_ic_office" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="@string/office_nav_office"
+                android:textColor="@color/qm_wine"
+                android:textSize="9sp" />
+        </LinearLayout>
+
+        <!-- Ask Drytis — larger circular wine focal point -->
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1">
+
+            <FrameLayout
+                android:id="@+id/office_nav_ask_drytis"
+                android:layout_width="@dimen/qm_home_ask_drytis_diameter"
+                android:layout_height="@dimen/qm_home_ask_drytis_diameter"
+                android:layout_gravity="center"
+                android:background="@drawable/qm_bg_ask_drytis">
+
+                <ImageView
+                    android:layout_width="22dp"
+                    android:layout_height="22dp"
+                    android:layout_gravity="center"
+                    android:src="@drawable/qm_ic_sparkle"
+                    android:contentDescription="@string/office_nav_cd_ask_drytis" />
+            </FrameLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|center_horizontal"
+                android:layout_marginBottom="1dp"
+                android:text="@string/office_nav_ask_drytis"
+                android:textColor="@color/qm_nav_unselected"
+                android:textSize="9sp" />
+        </FrameLayout>
+
+        <LinearLayout
+            android:id="@+id/office_nav_chat"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1"
+            android:orientation="vertical"
+            android:gravity="center">
+
+            <ImageView
+                android:id="@+id/office_nav_chat_icon"
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:src="@drawable/qm_ic_chat"
+                android:contentDescription="@string/office_nav_chat" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="3dp"
+                android:text="@string/office_nav_chat"
+                android:textColor="@color/qm_nav_unselected"
+                android:textSize="9sp" />
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

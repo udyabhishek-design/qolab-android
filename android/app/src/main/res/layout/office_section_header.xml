@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Office — header: wordmark + red dot (left), notification bell with badge
+     + user avatar/initials (right) -->
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="center_vertical">
+
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:text="@string/home_wordmark"
+        android:textColor="@color/qm_ink"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:letterSpacing="-0.02"
+        android:contentDescription="@string/home_cd_wordmark_red_dot" />
+
+    <View
+        android:layout_width="9dp"
+        android:layout_height="9dp"
+        android:layout_marginStart="5dp"
+        android:layout_marginEnd="16dp"
+        android:background="@drawable/qm_bg_red_dot" />
+
+    <FrameLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginEnd="10dp">
+
+        <ImageButton
+            android:id="@+id/office_btn_notifications"
+            android:layout_width="44dp"
+            android:layout_height="44dp"
+            android:src="@drawable/qm_ic_notifications"
+            android:scaleType="center"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/home_cd_notifications" />
+
+        <View
+            android:id="@+id/office_notification_badge"
+            android:layout_width="11dp"
+            android:layout_height="11dp"
+            android:layout_gravity="top|end"
+            android:layout_marginTop="7dp"
+            android:layout_marginEnd="7dp"
+            android:background="@drawable/qm_bg_red_dot"
+            android:visibility="gone"
+            android:contentDescription="@string/home_cd_notification_badge" />
+    </FrameLayout>
+
+    <TextView
+        android:id="@+id/office_avatar"
+        android:layout_width="38dp"
+        android:layout_height="38dp"
+        android:gravity="center"
+        android:textColor="#FFFFFF"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:contentDescription="@string/home_cd_avatar" />
+</LinearLayout>

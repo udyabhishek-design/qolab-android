@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ═══ Office screen (V1) ═══ -->
+    <string name="office_title">Office</string>
+    <string name="office_support">Rooms, people and everything your team works on.</string>
+    <string name="office_create_room">+ Create Room</string>
+    <string name="office_social_rooms">Social Rooms</string>
+    <string name="office_department_rooms">Department Rooms</string>
+    <string name="office_people_around">People Around</string>
+    <string name="office_quick_access">Quick Access</string>
+    <string name="office_see_all">See all ›</string>
+    <string name="office_people_online">Online</string>
+    <string name="office_people_meeting">In a meeting</string>
+    <string name="office_people_offline">Offline</string>
+    <string name="office_count_unavailable">—</string>
+    <string name="office_people_note">Live presence counts aren\'t available in the app yet.</string>
+    <string name="office_cd_avatar">Your profile</string>
+    <string name="office_nav_home">Home</string>
+    <string name="office_nav_office">Office</string>
+    <string name="office_nav_ask_drytis">Ask Drytis</string>
+    <string name="office_nav_chat">Chat</string>
+    <string name="office_nav_cd_ask_drytis">Ask Drytis</string>
+</resources>

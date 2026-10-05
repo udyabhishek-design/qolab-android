@@ -270,7 +270,8 @@ public class HomeActivity extends AppCompatActivity {
         });
 
         navHome.setOnClickListener(v -> smoothScrollToTop());
-        navOffice.setOnClickListener(v -> showComingSoon(getString(R.string.home_nav_office)));
+        navOffice.setOnClickListener(v ->
+                startActivity(new Intent(this, OfficeActivity.class)));
         navChat.setOnClickListener(v -> showComingSoon(getString(R.string.home_nav_chat)));
         navAskDrytis.setOnClickListener(v ->
                 showComingSoon(getString(R.string.home_nav_ask_drytis)));
@@ -716,11 +717,21 @@ public class HomeActivity extends AppCompatActivity {
         return sb.toString();
     }
 
+    /** Public alias for other native screens (Office V1). */
+    public static String initialsOf(String name) {
+        return initials(name);
+    }
+
     private static int avatarColor(String name) {
         int[] palette = {0xFF2148C0, 0xFF8B1E2D, 0xFF14532D, 0xFF6B21A8, 0xFFB45309, 0xFF0E7490};
         if (name == null || name.isEmpty()) return palette[0];
         return palette[Math.abs(name.hashCode()) % palette.length];
-        }
+    }
+
+    /** Public alias for other native screens (Office V1). */
+    public static int avatarColorOf(String name) {
+        return avatarColor(name);
+    }
 
     private String overflowText(int shown, int total) {
         int extra = total - shown;

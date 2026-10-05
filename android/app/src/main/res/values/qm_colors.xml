@@ -52,6 +52,8 @@
     <color name="qm_card_border">#EAE4D6</color>
     <!-- Peach icon-tile text (Today Updates) -->
     <color name="qm_peach_text">#B4432A</color>
+    <!-- Soft blue Quick Access tile text (Tasks) -->
+    <color name="qm_quick_blue_text">#2C5AA8</color>
     <color name="qm_skeleton">#ECE7DA</color>
     <color name="qm_white_text">#FFFFFF</color>
     <!-- Yellow-card ink is regular ink; yellow itself comes from qm_yellow -->
