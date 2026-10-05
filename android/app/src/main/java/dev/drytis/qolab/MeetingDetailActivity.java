@@ -200,15 +200,26 @@ public class MeetingDetailActivity extends AppCompatActivity {
     private void renderActions() {
         if (detail == null) return;
         String status = detail.status;
+        // v1.5.35 rejoin: the backend keeps can_join == policy::view true for
+        // ended meetings, and start-or-join-session CREATES A NEW OCCURRENCE
+        // (same session_key) when the series has ended — that is the web's
+        // re-entry path, so ended is joinable here as "Start Again".
+        // Cancelled stays permanently non-joinable (hard 422 backend-side).
         boolean joinable = detail.canJoin
-                && ("live".equals(status) || "scheduled".equals(status));
+                && ("live".equals(status) || "scheduled".equals(status)
+                    || "ended".equals(status));
         if (!joinable) {
             vis(actionArea, false);
             return;
         }
         vis(actionArea, true);
-        actionPrimary.setText("live".equals(status)
-                ? R.string.md_action_join : R.string.md_action_start);
+        if ("live".equals(status)) {
+            actionPrimary.setText(R.string.md_action_join);
+        } else if ("ended".equals(status)) {
+            actionPrimary.setText(R.string.md_action_start_again);
+        } else {
+            actionPrimary.setText(R.string.md_action_start);
+        }
         vis(actionCopy, detail.meetingUrl != null && !detail.meetingUrl.isEmpty());
     }
 
@@ -222,8 +233,43 @@ public class MeetingDetailActivity extends AppCompatActivity {
             routeToLogin();
             return;
         }
-        transport.postJson("/meetings/" + meetingId + "/join-token", "{}", r ->
-                runOnUiThread(() -> {
+        // v1.5.35: mirror the WEB rejoin flow — POST start-or-join-session
+        // FIRST. The backend resolves the occurrence (reuses the live/scheduled
+        // one; for an ENDED series it creates a NEW occurrence with the same
+        // session_key). Only then mint a join token for the RESOLVED id.
+        transport.postJson("/meetings/" + meetingId + "/start-or-join-session",
+                "{}", r -> runOnUiThread(() -> {
+                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
+                            || r.status == 401) {
+                        joining = false;
+                        routeToLogin();
+                        return;
+                    }
+                    long resolvedId = RoomDataClient.parseStartOrJoin(r.body);
+                    if (r.status != 200 || resolvedId <= 0) {
+                        // 422 = cancelled series / policy refusal — refresh so
+                        // the screen reflects the server's actual state.
+                        joining = false;
+                        loadDetail();
+                        android.widget.Toast.makeText(this,
+                                R.string.md_join_failed,
+                                android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    requestJoinToken(resolvedId);
+                }));
+    }
+
+    /** Mints the LiveKit token for the occurrence start-or-join resolved to. */
+    private void requestJoinToken(long resolvedMeetingId) {
+        QolabWebViewTransport transport = QolabWebViewTransport.get();
+        if (transport == null) {
+            joining = false;
+            routeToLogin();
+            return;
+        }
+        transport.postJson("/meetings/" + resolvedMeetingId + "/join-token",
+                "{}", r -> runOnUiThread(() -> {
                     joining = false;
                     if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
                             || r.status == 401) {
@@ -241,7 +287,7 @@ public class MeetingDetailActivity extends AppCompatActivity {
                     Intent i = new Intent(this, LiveRoomActivity.class);
                     i.putExtra(LiveRoomActivity.EXTRA_TOKEN, jt.token);
                     i.putExtra(LiveRoomActivity.EXTRA_SERVER_URL, jt.url);
-                    i.putExtra(LiveRoomActivity.EXTRA_MEETING_ID, meetingId);
+                    i.putExtra(LiveRoomActivity.EXTRA_MEETING_ID, resolvedMeetingId);
                     i.putExtra(LiveRoomActivity.EXTRA_MEETING_TITLE,
                             detail.title != null ? detail.title : "");
                     startActivity(i);

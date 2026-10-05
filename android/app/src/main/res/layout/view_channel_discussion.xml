@@ -1,0 +1,112 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shared channel discussion surface (v1.5.35): message feed + skeleton +
+     composer. Used by The Lobby AND the Department Room Chat tab — ONE
+     implementation over the existing /chat/channels/{id}/messages contract. -->
+<merge xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:parentTag="android.widget.LinearLayout">
+
+    <ScrollView
+        android:id="@+id/channel_messages_scroll"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:fillViewport="true"
+        android:scrollbars="none"
+        android:overScrollMode="never">
+
+        <LinearLayout
+            android:id="@+id/channel_messages_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingStart="@dimen/qm_room_page_pad"
+            android:paddingEnd="@dimen/qm_room_page_pad"
+            android:paddingTop="@dimen/qm_room_section_gap" />
+    </ScrollView>
+
+    <View
+        android:id="@+id/channel_skeleton"
+        android:layout_width="match_parent"
+        android:layout_height="120dp"
+        android:layout_marginStart="@dimen/qm_room_page_pad"
+        android:layout_marginEnd="@dimen/qm_room_page_pad"
+        android:layout_marginTop="@dimen/qm_room_section_gap"
+        android:background="@drawable/qm_bg_skeleton"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/channel_error"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/qm_room_page_pad"
+        android:layout_marginTop="@dimen/qm_room_section_gap"
+        android:text="@string/room_error"
+        android:textColor="@color/qm_ink"
+        android:textSize="15sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <TextView
+        android:id="@+id/channel_retry"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/qm_room_page_pad"
+        android:layout_marginTop="10dp"
+        android:padding="6dp"
+        android:text="@string/room_retry"
+        android:textColor="@color/qm_wine"
+        android:textSize="13sp"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <!-- Composer -->
+    <LinearLayout
+        android:id="@+id/channel_composer"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="@dimen/qm_room_page_pad"
+        android:paddingEnd="@dimen/qm_room_page_pad"
+        android:paddingTop="8dp"
+        android:paddingBottom="10dp">
+
+        <EditText
+            android:id="@+id/channel_composer_input"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minHeight="46dp"
+            android:background="@drawable/qm_bg_room_card"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:paddingTop="10dp"
+            android:paddingBottom="10dp"
+            android:hint="@string/channel_composer_hint"
+            android:textColorHint="@color/qm_muted"
+            android:textColor="@color/qm_ink"
+            android:textSize="14sp"
+            android:inputType="textCapSentences|textMultiLine"
+            android:maxLines="4"
+            android:imeOptions="actionSend" />
+
+        <TextView
+            android:id="@+id/channel_composer_send"
+            android:layout_width="wrap_content"
+            android:layout_height="46dp"
+            android:layout_marginStart="8dp"
+            android:gravity="center"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:background="@drawable/qm_bg_room_tabs"
+            android:text="@string/lobby_composer_send"
+            android:textColor="@color/qm_wine"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:enabled="false"
+            android:alpha="0.45" />
+    </LinearLayout>
+</merge>

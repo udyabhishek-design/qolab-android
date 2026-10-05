@@ -44,9 +44,13 @@ public class LobbyWiringTest {
 
     @Test
     public void lobbyUsesExistingEndpointsOnly() throws Exception {
+        // v1.5.35: messaging lives in the SHARED ChannelDiscussionView; the
+        // Lobby delegates to it and keeps only the members fetch.
         String src = read(JAVA + "/LobbyActivity.java");
-        assertTrue(src.contains("transport.getJson(\"/chat/channels/\" + channelId + \"/messages"));
-        assertTrue(src.contains("transport.postJson(\"/chat/channels/\" + channelId + \"/messages\""));
+        String shared = read(JAVA + "/ChannelDiscussionView.java");
+        assertTrue(src.contains("new ChannelDiscussionView(this, channelId"));
+        assertTrue(shared.contains("transport.getJson(\"/chat/channels/\" + channelId + \"/messages"));
+        assertTrue(shared.contains("transport.postJson(\"/chat/channels/\" + channelId + \"/messages\""));
         assertTrue(src.contains("transport.getJson(\"/office/rooms/\" + roomSlug"));
     }
 
@@ -59,14 +63,14 @@ public class LobbyWiringTest {
 
     @Test
     public void composerNeverSendsEmptyBody() throws Exception {
-        String src = read(JAVA + "/LobbyActivity.java");
+        String src = read(JAVA + "/ChannelDiscussionView.java");
         assertTrue(src.contains("if (text.isEmpty()) return;"));
         assertTrue(src.contains("payload.put(\"body\", text)"));
     }
 
     @Test
     public void threadsOpenNativelyOnlyWhenRepliesExist() throws Exception {
-        String src = read(JAVA + "/LobbyActivity.java");
+        String src = read(JAVA + "/ChannelDiscussionView.java");
         assertTrue(src.contains("if (!m.replies.isEmpty())"));
         assertTrue(src.contains("openThread(m)"));
     }

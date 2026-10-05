@@ -6,6 +6,8 @@
     <string name="room_cd_avatar">Your avatar</string>
 
     <string name="room_tab_overview">Overview</string>
+    <!-- v1.5.35: room discussion tab (existing channel messaging contract) -->
+    <string name="room_tab_chat">Chat</string>
     <string name="room_tab_meetings">Meetings</string>
     <string name="room_tab_tasks">Tasks</string>
 

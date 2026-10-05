@@ -14,4 +14,7 @@
     <string name="lobby_member_member">Member</string>
     <string name="lobby_title_default">The Lobby</string>
     <string name="lobby_thread_heading">Thread</string>
+    <!-- v1.5.35: shared channel discussion (Lobby + Department Room Chat) -->
+    <string name="channel_composer_hint">Message…</string>
+    <string name="lobby_composer_hint_room">Message the room…</string>
 </resources>

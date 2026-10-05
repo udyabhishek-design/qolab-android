@@ -21,6 +21,9 @@
     <!-- Meeting Details actions (v1.5.33) -->
     <string name="md_action_join">Join Meeting</string>
     <string name="md_action_start">Start Meeting</string>
+    <!-- v1.5.35: ended series — backend start-or-join-session creates a NEW
+         occurrence (same session_key) on re-entry. -->
+    <string name="md_action_start_again">Start Again</string>
     <string name="md_action_copy_link">Copy Link</string>
     <string name="md_link_copied">Meeting link copied</string>
     <string name="md_join_failed">Couldn\'t join the meeting. Please try again.</string>

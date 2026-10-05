@@ -1,24 +1,21 @@
 package dev.drytis.qolab;
 
 import android.content.Intent;
+import java.util.List;
+import java.util.Locale;
+import java.util.List;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
-import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.graphics.drawable.GradientDrawable;
 
-import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 
-import org.json.JSONObject;
 
-import java.util.List;
-import java.util.Locale;
 
 /**
  * v1.5.30 — The Lobby: native social room (Discussion | Members).
@@ -55,19 +52,11 @@ public class LobbyActivity extends AppCompatActivity {
     private TextView tabDiscussion, tabMembers;
     private View discussionPane, membersPane;
 
-    // discussion
-    private LinearLayout messagesList;
-    private ScrollView messagesScroll;
-    private View skeleton, errorView, retryView, sendBtn;
-    private EditText composerInput;
-    private boolean sending = false;
-
     // members
     private LinearLayout membersAvatars, membersList;
     private TextView membersCount;
     private View membersSkeleton;
 
-    private List<LobbyDataClient.LobbyMessage> messages;
     private List<RoomDataClient.Member> members;
     private boolean membersLoaded;
 
@@ -96,8 +85,20 @@ public class LobbyActivity extends AppCompatActivity {
         avatar.setBackground(g);
 
         showTab(0);
-        loadDiscussion();
+        // v1.5.35: discussion feed/composer/thread now come from the SHARED
+        // ChannelDiscussionView (same component as the Department Room Chat
+        // tab) — one messaging implementation over the channel contract.
+        discussion = new ChannelDiscussionView(this, channelId,
+                findViewById(R.id.lobby_discussion_pane), () -> {
+                    startActivity(new Intent(this, MainActivity.class)
+                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                    finish();
+                });
+        discussion.load();
     }
+
+    /** v1.5.35 shared discussion surface (feed + composer + threads). */
+    private ChannelDiscussionView discussion;
 
     private void bindViews() {
         titleView = findViewById(R.id.lobby_title);
@@ -113,24 +114,6 @@ public class LobbyActivity extends AppCompatActivity {
         tabMembers.setOnClickListener(v -> {
             showTab(1);
             if (!membersLoaded) loadMembers();
-        });
-
-        messagesList = findViewById(R.id.lobby_messages_list);
-        messagesScroll = findViewById(R.id.lobby_messages_scroll);
-        skeleton = findViewById(R.id.lobby_skeleton);
-        errorView = findViewById(R.id.lobby_error);
-        retryView = findViewById(R.id.lobby_retry);
-        composerInput = findViewById(R.id.lobby_composer_input);
-        sendBtn = findViewById(R.id.lobby_composer_send);
-        sendBtn.setOnClickListener(v -> attemptSend());
-        composerInput.addTextChangedListener(new android.text.TextWatcher() {
-            public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
-            public void onTextChanged(CharSequence s, int a, int b, int c) {}
-            public void afterTextChanged(android.text.Editable s) {
-                boolean canSend = s.toString().trim().length() > 0 && !sending;
-                sendBtn.setEnabled(canSend);
-                sendBtn.setAlpha(canSend ? 1f : 0.45f);
-            }
         });
 
         membersAvatars = findViewById(R.id.lobby_members_avatars);
@@ -150,154 +133,6 @@ public class LobbyActivity extends AppCompatActivity {
         tabMembers.setTextColor(getColor(idx == 1 ? R.color.qm_cream_on_wine : R.color.qm_muted));
         discussionPane.setVisibility(idx == 0 ? View.VISIBLE : View.GONE);
         membersPane.setVisibility(idx == 1 ? View.VISIBLE : View.GONE);
-    }
-
-    // ------------------------------------------------------------------
-    // Discussion
-    // ------------------------------------------------------------------
-
-    private void loadDiscussion() {
-        skeleton.setVisibility(View.VISIBLE);
-        errorView.setVisibility(View.GONE);
-        retryView.setVisibility(View.GONE);
-        transport.getJson("/chat/channels/" + channelId + "/messages?per_page=50", r -> {
-            runOnUiThread(() -> {
-                skeleton.setVisibility(View.GONE);
-                Log.d(TAG, "messages status=" + r.status + " bodyLen="
-                        + (r.body == null ? -1 : r.body.length()));
-                if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
-                        || r.status == 401) {
-                    startActivity(new Intent(this, MainActivity.class)
-                            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
-                    finish();
-                    return;
-                }
-                if (r.status != 200 || r.body == null) {
-                    showError();
-                    return;
-                }
-                messages = LobbyDataClient.parseMessages(r.body);
-                if (messages == null) {
-                    showError();
-                    return;
-                }
-                renderMessages();
-            });
-        });
-    }
-
-    private void showError() {
-        errorView.setVisibility(View.VISIBLE);
-        retryView.setVisibility(View.VISIBLE);
-        retryView.setOnClickListener(v -> loadDiscussion());
-    }
-
-    private void renderMessages() {
-        messagesList.removeAllViews();
-        if (messages.isEmpty()) {
-            TextView empty = new TextView(this);
-            empty.setText(R.string.lobby_discussion_empty);
-            empty.setTextColor(getColor(R.color.qm_muted));
-            empty.setTextSize(13);
-            empty.setPadding(0, dp(12), 0, dp(12));
-            messagesList.addView(empty);
-            return;
-        }
-        for (LobbyDataClient.LobbyMessage m : messages) {
-            messagesList.addView(messageRow(m, true));
-        }
-        messagesScroll.post(() -> messagesScroll.fullScroll(ScrollView.FOCUS_DOWN));
-    }
-
-    /** Message card; interactive (opens thread) only when replies exist. */
-    private View messageRow(LobbyDataClient.LobbyMessage m, boolean interactive) {
-        View card = getLayoutInflater().inflate(R.layout.view_lobby_message, messagesList, false);
-        ((TextView) card.findViewById(R.id.lobby_msg_sender))
-                .setText(m.senderName != null ? m.senderName : "");
-        String when = RoomFormat.formatIsoDate(m.createdAtIso);
-        ((TextView) card.findViewById(R.id.lobby_msg_when)).setText(when != null ? when : "");
-        ((TextView) card.findViewById(R.id.lobby_msg_body))
-                .setText(m.body != null ? m.body : "");
-        TextView thread = card.findViewById(R.id.lobby_msg_thread);
-        if (!m.replies.isEmpty()) {
-            thread.setVisibility(View.VISIBLE);
-            thread.setText(m.replies.size() == 1
-                    ? getString(R.string.lobby_thread_one_reply)
-                    : String.format(Locale.getDefault(),
-                        getString(R.string.lobby_thread_replies), m.replies.size()));
-            if (interactive) card.setOnClickListener(v -> openThread(m));
-        }
-        return card;
-    }
-
-    /** Native thread panel: parent message + its actual replies. */
-    private void openThread(LobbyDataClient.LobbyMessage parent) {
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        int pad = dp(16);
-        panel.setPadding(pad, pad, pad, pad);
-
-        TextView heading = new TextView(this);
-        heading.setText(R.string.lobby_thread_heading);
-        heading.setTextColor(getColor(R.color.qm_ink));
-        heading.setTextSize(16);
-        heading.setTypeface(null, android.graphics.Typeface.BOLD);
-        heading.setPadding(0, 0, 0, dp(10));
-        panel.addView(heading);
-
-        panel.addView(messageRow(parent, false));
-        for (LobbyDataClient.LobbyMessage r : parent.replies) {
-            panel.addView(messageRow(r, false));
-        }
-
-        ScrollView scroller = new ScrollView(this);
-        scroller.addView(panel);
-        new AlertDialog.Builder(this)
-                .setView(scroller)
-                .setPositiveButton(android.R.string.ok, null)
-                .show();
-    }
-
-    // ------------------------------------------------------------------
-    // Composer (existing POST contract)
-    // ------------------------------------------------------------------
-
-    private void attemptSend() {
-        if (sending) return;
-        String text = composerInput.getText().toString().trim();
-        if (text.isEmpty()) return; // body-or-attachment rule: never post empty
-        sending = true;
-        sendBtn.setEnabled(false);
-        sendBtn.setAlpha(0.45f);
-        try {
-            JSONObject payload = new JSONObject();
-            payload.put("body", text);
-            transport.postJson("/chat/channels/" + channelId + "/messages",
-                    payload.toString(), r -> runOnUiThread(() -> {
-                        sending = false;
-                        sendBtn.setEnabled(true);
-                        sendBtn.setAlpha(1f);
-                        Log.d(TAG, "send status=" + r.status);
-                        if (r.status == 201 || r.status == 200) {
-                            composerInput.setText("");
-                            loadDiscussion(); // refetch: message + replies arrive together
-                        } else if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
-                                || r.status == 401) {
-                            startActivity(new Intent(this, MainActivity.class)
-                                    .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
-                            finish();
-                        } else {
-                            android.widget.Toast.makeText(this, R.string.lobby_send_failed,
-                                    android.widget.Toast.LENGTH_SHORT).show();
-                        }
-                    }));
-        } catch (Exception e) {
-            sending = false;
-            sendBtn.setEnabled(true);
-            sendBtn.setAlpha(1f);
-            android.widget.Toast.makeText(this, R.string.lobby_send_failed,
-                    android.widget.Toast.LENGTH_SHORT).show();
-        }
     }
 
     // ------------------------------------------------------------------

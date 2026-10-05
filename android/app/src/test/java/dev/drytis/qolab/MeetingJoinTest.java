@@ -113,11 +113,14 @@ public class MeetingJoinTest {
         String src = new String(Files.readAllBytes(
                 APP.resolve("java/dev/drytis/qolab/MeetingDetailActivity.java")),
                 StandardCharsets.UTF_8);
-        // actions gated on detail.canJoin AND status scheduled|live only
+        // v1.5.35: actions gated on detail.canJoin AND status
+        // scheduled|live|ended (ended is re-enterable via a NEW occurrence
+        // the backend creates through start-or-join-session — same as web).
         assertTrue(src.contains("detail.canJoin"));
-        assertTrue(src.contains("\"live\".equals(status) || \"scheduled\".equals(status)"));
-        // join goes through the existing endpoint only
-        assertTrue(src.contains("postJson(\"/meetings/\" + meetingId + \"/join-token\""));
+        assertTrue(src.contains("\"ended\".equals(status)"));
+        // join goes through the existing endpoints only
+        assertTrue(src.contains("/start-or-join-session"));
+        assertTrue(src.contains("postJson(\"/meetings/\" + resolvedMeetingId + \"/join-token\""));
     }
 
     @Test
