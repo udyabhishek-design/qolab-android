@@ -31,6 +31,26 @@ public class CreateMeetingFormTest {
     }
 
     @Test
+    public void canonicalTimezoneResolvesLegacyAliases() {
+        assertEquals("Asia/Kolkata", CreateMeetingForm.canonicalTimezoneId("Asia/Calcutta"));
+        assertEquals("Asia/Kolkata", CreateMeetingForm.canonicalTimezoneId("Asia/Kolkata"));
+        assertEquals("Asia/Ho_Chi_Minh", CreateMeetingForm.canonicalTimezoneId("Asia/Saigon"));
+        assertEquals("UTC", CreateMeetingForm.canonicalTimezoneId("UTC"));
+    }
+
+    @Test
+    public void displayTimezoneNeverShowsLegacyAlias() {
+        String label = CreateMeetingForm.displayTimezone("Asia/Calcutta");
+        assertNotNull(label);
+        assertTrue("must not expose legacy alias: " + label,
+                !label.contains("Calcutta"));
+        String kolkata = CreateMeetingForm.displayTimezone("Asia/Kolkata");
+        assertNotNull(kolkata);
+        assertTrue("Kolkata/Calcutta must display identically: " + label + " vs " + kolkata,
+                label.equals(kolkata));
+    }
+
+    @Test
     public void payloadMatchesWebClientShape() throws Exception {
         List<Long> ids = Arrays.asList(13L, 1L);
         String json = CreateMeetingForm.buildPayload(

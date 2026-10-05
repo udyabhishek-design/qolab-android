@@ -92,16 +92,31 @@ public class CreateMeetingSheet {
         progress = content.findViewById(R.id.cm_progress);
         participantsList = content.findViewById(R.id.cm_participants_list);
 
-        timezoneView.setText(CreateMeetingForm.deviceTimezone());
+        timezoneView.setText(CreateMeetingForm.displayTimezone(
+                CreateMeetingForm.deviceTimezone()));
+
+        // Editing a field clears any visible validation error (local or
+        // server 422); it reappears only if the next submit fails again.
+        android.text.TextWatcher clearErr = new android.text.TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void onTextChanged(CharSequence s, int a, int b, int c) {}
+            @Override public void afterTextChanged(android.text.Editable s) {
+                clearError();
+            }
+        };
+        titleInput.addTextChangedListener(clearErr);
+        descriptionInput.addTextChangedListener(clearErr);
 
         int[] today = CreateMeetingForm.defaultPickerDate();
         datePick.setOnClickListener(v -> new DatePickerDialog(activity, (dp, y, m, d) -> {
             year = y; month = m + 1; day = d;
             datePick.setText(humanDate(y, m + 1, d));
+            clearError();
         }, today[0], today[1] - 1, today[2]).show());
         timePick.setOnClickListener(v -> new TimePickerDialog(activity, (tp, h, min) -> {
             hour = h; minute = min;
             timePick.setText(humanTime(h, min));
+            clearError();
         }, 9, 0, false).show());
 
         renderParticipants();
@@ -186,7 +201,9 @@ public class CreateMeetingSheet {
 
     private void submit(boolean instant) {
         if (submitting) return;
-        String title = titleInput.getText().toString();
+        // Always read CURRENT visible values; trim before local validation so
+        // the checked value and the payload value are identical.
+        String title = titleInput.getText().toString().trim();
         boolean hasDate = year != null, hasTime = hour != null;
 
         if (instant) {
@@ -256,6 +273,14 @@ public class CreateMeetingSheet {
     private void showError(String msg) {
         errorView.setText(msg);
         errorView.setVisibility(View.VISIBLE);
+    }
+
+    /** Hides the visible error line (called when the user edits any field). */
+    private void clearError() {
+        if (errorView != null) {
+            errorView.setText(null);
+            errorView.setVisibility(View.GONE);
+        }
     }
 
     private String humanRole(String role) {

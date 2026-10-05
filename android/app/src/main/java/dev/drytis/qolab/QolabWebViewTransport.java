@@ -219,7 +219,11 @@ public final class QolabWebViewTransport {
                         "if(xsrf)h['X-XSRF-TOKEN']=xsrf;" +
                         "fetch(" + jsonString(url) + "," +
                         "{method:'POST',credentials:'same-origin',headers:h," +
-                        "body:JSON.stringify(" + jsonString(jsonBody == null ? "{}" : jsonBody) + ")})" +
+                        // jsonString() already emits a JS string literal of the
+                        // serialized payload; JSON.stringify() around it would
+                        // DOUBLE-encode (string scalar, not object) and the
+                        // server would see no fields. Send the string as-is.
+                        "body:" + jsonString(jsonBody == null ? "{}" : jsonBody) + "})" +
                         ".then(function(r){r.text().then(function(t){" +
                         "window['" + key + "']=JSON.stringify({s:r.status,b:t});}," +
                         "function(){window['" + key + "']=JSON.stringify({s:r.status,b:''});});})" +
@@ -414,12 +418,20 @@ public final class QolabWebViewTransport {
         }
     }
 
-    /** JSON string literal for a URL we already validated (no untrusted input). */
-    private static String jsonString(String s) {
+    /** JSON string literal for a URL we already validated (no untrusted input).
+     *  Emits non-ASCII and control chars as \\uXXXX escapes — a previous
+     *  version silently DROPPED every char outside 0x20–0x7F. */
+    static String jsonString(String s) {  // package-private: JVM-testable
         StringBuilder sb = new StringBuilder("\"");
-        for (char c : s.toCharArray()) {
-            if (c == '"' || c == '\\') sb.append('\\');
-            if (c >= 0x20 && c < 0x7f) sb.append(c);
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c == '"' || c == '\\') {
+                sb.append('\\').append(c);
+            } else if (c >= 0x20 && c < 0x7f) {
+                sb.append(c);
+            } else {
+                sb.append(String.format("\\u%04x", (int) c));
+            }
         }
         return sb.append('"').toString();
     }

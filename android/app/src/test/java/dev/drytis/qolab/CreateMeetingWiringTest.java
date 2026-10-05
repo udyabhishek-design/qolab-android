@@ -63,6 +63,27 @@ public class CreateMeetingWiringTest {
     }
 
     @Test
+    public void errorClearsWhenUserEditsFields() throws Exception {
+        String src = read(JAVA + "/CreateMeetingSheet.java");
+        // v1.5.32: a visible validation error (local or server 422) must be
+        // cleared when the user edits/corrects any field — never stuck on
+        // screen after the field becomes valid.
+        assertTrue(src.contains("addTextChangedListener"));
+        assertTrue(src.contains("clearError()"));
+        // Title must be read from the CURRENT visible input at submit time.
+        assertTrue(src.contains("titleInput.getText().toString().trim()"));
+    }
+
+    @Test
+    public void timezoneShownFriendlyNotLegacyAlias() throws Exception {
+        String src = read(JAVA + "/CreateMeetingSheet.java");
+        // Display label goes through displayTimezone(); raw device id
+        // (which can be the legacy Asia/Calcutta alias) never reaches the UI.
+        assertTrue(src.contains("CreateMeetingForm.displayTimezone("));
+        assertTrue(!src.contains("timezoneView.setText(CreateMeetingForm.deviceTimezone())"));
+    }
+
+    @Test
     public void startNowUsesContractInstantMode() throws Exception {
         String src = read(JAVA + "/CreateMeetingSheet.java");
         assertTrue(src.contains("submit(true)"));

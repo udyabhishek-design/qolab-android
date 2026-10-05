@@ -36,9 +36,69 @@ public final class CreateMeetingForm {
                 year, month1based, day, hour, minute);
     }
 
-    /** Device IANA timezone id, e.g. "Asia/Kolkata". */
+    /**
+     * Device IANA timezone id, e.g. "Asia/Kolkata". Uses java.time
+     * normalization so legacy aliases some devices report (Asia/Calcutta,
+     * Asia/Saigon, …) are canonicalized to their current IANA names.
+     */
     public static String deviceTimezone() {
-        return TimeZone.getDefault().getID();
+        return canonicalTimezoneId(TimeZone.getDefault().getID());
+    }
+
+    /** Deprecated IANA ids → their current canonical names (IANA backward
+     *  list subset actually seen on Android devices; ZoneId.of().getId()
+     *  does NOT canonicalize these, so map them explicitly). */
+    private static final java.util.Map<String, String> TZ_ALIAS;
+    static {
+        java.util.Map<String, String> m = new java.util.HashMap<>();
+        m.put("Asia/Calcutta", "Asia/Kolkata");
+        m.put("Asia/Saigon", "Asia/Ho_Chi_Minh");
+        m.put("Asia/Katmandu", "Asia/Kathmandu");
+        m.put("Asia/Chungking", "Asia/Chongqing");
+        m.put("Asia/Ujung_Pandang", "Asia/Makassar");
+        m.put("Europe/Kiev", "Europe/Kyiv");
+        m.put("Atlantic/Faeroe", "Atlantic/Faroe");
+        m.put("Pacific/Enderbury", "Pacific/Kanton");
+        m.put("US/Pacific-New", "America/Los_Angeles");
+        m.put("Canada/East-Saskatchewan", "America/Regina");
+        TZ_ALIAS = java.util.Collections.unmodifiableMap(m);
+    }
+
+    /** "Asia/Calcutta" → "Asia/Kolkata" (IANA deprecated alias resolution). */
+    public static String canonicalTimezoneId(String id) {
+        if (id == null || id.isEmpty()) return id;
+        String mapped = TZ_ALIAS.get(id);
+        if (mapped != null) return mapped;
+        try {
+            return java.time.ZoneId.of(id).getId();
+        } catch (Exception e) {
+            return id; // custom ids like "GMT+05:30" pass through unchanged
+        }
+    }
+
+    /**
+     * User-facing timezone label, e.g. "India Standard Time (IST)". Never
+     * shows the wire value or a legacy alias; falls back to the id itself
+     * when the platform has no display name.
+     */
+    public static String displayTimezone(String ianaId) {
+        String canonical = canonicalTimezoneId(ianaId);
+        try {
+            TimeZone tz = TimeZone.getTimeZone(canonical);
+            String longName = tz.getDisplayName(false, TimeZone.LONG, Locale.getDefault());
+            if (longName == null || longName.isEmpty()
+                    || longName.startsWith("GMT")) {
+                return canonical;
+            }
+            String abbrev = tz.getDisplayName(false, TimeZone.SHORT, Locale.US);
+            if (abbrev == null || abbrev.isEmpty()
+                    || abbrev.startsWith("GMT") || abbrev.equals(canonical)) {
+                return longName;
+            }
+            return longName + " (" + abbrev + ")";
+        } catch (Exception e) {
+            return canonical;
+        }
     }
 
     /** Local validation BEFORE submit; null when the form may be sent. */
