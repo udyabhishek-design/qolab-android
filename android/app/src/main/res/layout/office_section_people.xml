@@ -12,7 +12,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/qm_home_section_gap"
+        android:layout_marginTop="@dimen/qm_office_section_gap"
         android:orientation="horizontal"
         android:gravity="center_vertical">
 
@@ -49,8 +49,9 @@
             android:layout_weight="1"
             android:layout_marginEnd="5dp"
             android:orientation="vertical"
+            android:minHeight="@dimen/qm_office_people_card_min"
             android:background="@drawable/qm_bg_tile_mint"
-            android:padding="12dp">
+            android:padding="16dp">
 
             <View
                 android:layout_width="10dp"
@@ -63,7 +64,7 @@
                 android:layout_marginTop="8dp"
                 android:text="@string/office_people_online"
                 android:textColor="@color/qm_mint_text"
-                android:textSize="12sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -74,7 +75,7 @@
                 android:text="@string/office_count_unavailable"
                 android:textColor="@color/qm_mint_text"
                 android:alpha="0.75"
-                android:textSize="11sp" />
+                android:textSize="24sp" />
         </LinearLayout>
 
         <!-- In a meeting — soft lavender -->
@@ -86,8 +87,9 @@
             android:layout_marginStart="5dp"
             android:layout_marginEnd="5dp"
             android:orientation="vertical"
+            android:minHeight="@dimen/qm_office_people_card_min"
             android:background="@drawable/qm_bg_tile_lavender"
-            android:padding="12dp">
+            android:padding="16dp">
 
             <View
                 android:layout_width="10dp"
@@ -100,7 +102,7 @@
                 android:layout_marginTop="8dp"
                 android:text="@string/office_people_meeting"
                 android:textColor="@color/qm_lavender_text"
-                android:textSize="12sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -111,7 +113,7 @@
                 android:text="@string/office_count_unavailable"
                 android:textColor="@color/qm_lavender_text"
                 android:alpha="0.75"
-                android:textSize="11sp" />
+                android:textSize="24sp" />
         </LinearLayout>
 
         <!-- Offline — soft red/peach -->
@@ -122,8 +124,9 @@
             android:layout_weight="1"
             android:layout_marginStart="5dp"
             android:orientation="vertical"
+            android:minHeight="@dimen/qm_office_people_card_min"
             android:background="@drawable/qm_bg_tile_peach"
-            android:padding="12dp">
+            android:padding="16dp">
 
             <View
                 android:layout_width="10dp"
@@ -136,7 +139,7 @@
                 android:layout_marginTop="8dp"
                 android:text="@string/office_people_offline"
                 android:textColor="@color/qm_peach_text"
-                android:textSize="12sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
 
             <TextView
@@ -147,7 +150,7 @@
                 android:text="@string/office_count_unavailable"
                 android:textColor="@color/qm_peach_text"
                 android:alpha="0.75"
-                android:textSize="11sp" />
+                android:textSize="24sp" />
         </LinearLayout>
     </LinearLayout>
 

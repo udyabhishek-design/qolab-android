@@ -11,7 +11,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:layout_marginTop="@dimen/qm_home_section_gap"
+        android:layout_marginTop="@dimen/qm_office_section_gap"
         android:text="@string/office_quick_access"
         android:textColor="@color/qm_ink"
         android:textSize="@dimen/qm_home_section_title"
@@ -26,17 +26,17 @@
         <LinearLayout
             android:id="@+id/office_quick_meetings"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="@dimen/qm_office_quick_tile_height"
             android:layout_weight="1"
             android:layout_marginEnd="5dp"
             android:orientation="vertical"
             android:gravity="center_horizontal"
             android:background="@drawable/qm_bg_tile_quick_yellow"
-            android:padding="12dp">
+            android:padding="16dp">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="@dimen/qm_office_quick_icon"
+                android:layout_height="@dimen/qm_office_quick_icon"
                 android:src="@drawable/qm_ic_calendar"
                 android:importantForAccessibility="no"
                 xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -48,25 +48,25 @@
                 android:layout_marginTop="6dp"
                 android:text="@string/home_menu_meetings"
                 android:textColor="@color/qm_ink"
-                android:textSize="11sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/office_quick_tasks"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="@dimen/qm_office_quick_tile_height"
             android:layout_weight="1"
             android:layout_marginStart="5dp"
             android:layout_marginEnd="5dp"
             android:orientation="vertical"
             android:gravity="center_horizontal"
             android:background="@drawable/qm_bg_tile_quick_blue"
-            android:padding="12dp">
+            android:padding="16dp">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="@dimen/qm_office_quick_icon"
+                android:layout_height="@dimen/qm_office_quick_icon"
                 android:src="@drawable/qm_ic_tasks"
                 android:importantForAccessibility="no"
                 xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -78,25 +78,25 @@
                 android:layout_marginTop="6dp"
                 android:text="@string/home_menu_tasks"
                 android:textColor="@color/qm_quick_blue_text"
-                android:textSize="11sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/office_quick_tickets"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="@dimen/qm_office_quick_tile_height"
             android:layout_weight="1"
             android:layout_marginStart="5dp"
             android:layout_marginEnd="5dp"
             android:orientation="vertical"
             android:gravity="center_horizontal"
             android:background="@drawable/qm_bg_tile_quick_mint"
-            android:padding="12dp">
+            android:padding="16dp">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="@dimen/qm_office_quick_icon"
+                android:layout_height="@dimen/qm_office_quick_icon"
                 android:src="@drawable/qm_ic_tasks"
                 android:importantForAccessibility="no"
                 xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -108,24 +108,24 @@
                 android:layout_marginTop="6dp"
                 android:text="@string/home_menu_tickets"
                 android:textColor="@color/qm_mint_text"
-                android:textSize="11sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
 
         <LinearLayout
             android:id="@+id/office_quick_directory"
             android:layout_width="0dp"
-            android:layout_height="wrap_content"
+            android:layout_height="@dimen/qm_office_quick_tile_height"
             android:layout_weight="1"
             android:layout_marginStart="5dp"
             android:orientation="vertical"
             android:gravity="center_horizontal"
             android:background="@drawable/qm_bg_tile_quick_lavender"
-            android:padding="12dp">
+            android:padding="16dp">
 
             <ImageView
-                android:layout_width="22dp"
-                android:layout_height="22dp"
+                android:layout_width="@dimen/qm_office_quick_icon"
+                android:layout_height="@dimen/qm_office_quick_icon"
                 android:src="@drawable/qm_ic_menu"
                 android:importantForAccessibility="no"
                 xmlns:app="http://schemas.android.com/apk/res-auto"
@@ -137,7 +137,7 @@
                 android:layout_marginTop="6dp"
                 android:text="@string/home_menu_directory"
                 android:textColor="@color/qm_lavender_text"
-                android:textSize="11sp"
+                android:textSize="13sp"
                 android:textStyle="bold" />
         </LinearLayout>
     </LinearLayout>

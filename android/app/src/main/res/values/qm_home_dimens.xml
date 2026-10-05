@@ -7,6 +7,14 @@
     <dimen name="qm_home_page_pad">16dp</dimen>
     <!-- modest v1.5.22 balance bump: content ends nearer the fixed nav -->
     <dimen name="qm_home_section_gap">20dp</dimen>
+    <!-- Office-only vertical rhythm (v1.5.26): slightly more generous than
+         Home so the page uses the viewport naturally. -->
+    <dimen name="qm_office_section_gap">28dp</dimen>
+    <dimen name="qm_office_dept_height">138dp</dimen>
+    <dimen name="qm_office_dept_avatar">32dp</dimen>
+    <dimen name="qm_office_people_card_min">116dp</dimen>
+    <dimen name="qm_office_quick_tile_height">112dp</dimen>
+    <dimen name="qm_office_quick_icon">30dp</dimen>
     <dimen name="qm_home_section_title">15sp</dimen>
     <dimen name="qm_home_greeting_name">24sp</dimen>
     <dimen name="qm_home_greeting_date">12sp</dimen>

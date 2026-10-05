@@ -222,6 +222,10 @@ public class OfficeActivity extends AppCompatActivity {
 
     private void renderAll() {
         hide(roomsSkeletonRow, deptSkeleton, roomsRetry, deptRetry);
+        // v1.5.26: showLoading() hides the data containers — they MUST be
+        // made visible again here or the rendered cards stay GONE
+        // (root cause of "Social Rooms heading with no room cards").
+        show(roomsRow, deptCard);
 
         // header
         String name = data.userName;
@@ -242,11 +246,13 @@ public class OfficeActivity extends AppCompatActivity {
         hide(roomsSkeletonRow);
         roomsRow.removeAllViews();
         if (rooms == null || rooms.isEmpty()) {
+            hide(roomsRow);
             show(roomsEmpty);
             roomsEmpty.setText(R.string.home_rooms_empty);
             return;
         }
         hide(roomsEmpty);
+        show(roomsRow);
         Collections.sort(rooms, (a, b) ->
                 Integer.compare(RoomThemeStyle.preferredOrder(a.roomTheme, a.roomSlug),
                         RoomThemeStyle.preferredOrder(b.roomTheme, b.roomSlug)));
