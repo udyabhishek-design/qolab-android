@@ -2,6 +2,7 @@ package dev.drytis.qolab;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.View;
 import android.widget.ImageButton;
 import android.widget.ImageView;
@@ -54,9 +55,28 @@ public class OfficeActivity extends AppCompatActivity {
         bindViews();
         applyInsets();
         bindActions();
+        stampDevVersion();
+        Log.d(TAG, "onCreate build=" + BuildConfig.VERSION_NAME + "/" + BuildConfig.VERSION_CODE);
         if (data == null) {
             showLoading();
             loadOffice();
+        }
+    }
+
+    /**
+     * v1.5.27: on-screen DEVELOPMENT version stamp (debug builds only).
+     * Physical G32 evidence showed the v1.5.25 'no room cards' symptom
+     * while the shipped v1.5.26 binary provably contains the visibility
+     * fix (dex-verified) — the stamp makes the executing binary version
+     * directly observable on the device screen.
+     */
+    private void stampDevVersion() {
+        if (!BuildConfig.DEBUG) return;
+        TextView stamp = findViewById(R.id.office_dev_stamp);
+        if (stamp != null) {
+            stamp.setText("DEV " + BuildConfig.VERSION_NAME
+                    + " (" + BuildConfig.VERSION_CODE + ")");
+            stamp.setVisibility(View.VISIBLE);
         }
     }
 
@@ -165,19 +185,27 @@ public class OfficeActivity extends AppCompatActivity {
         }
         transport.getJson("/mobile/home", r -> runOnUiThread(() -> {
             fetching = false;
+            Log.d(TAG, "transport result status=" + r.status
+                    + " bodyLen=" + (r.body == null ? "null" : r.body.length())
+                    + " errCat=" + r.errorCategory);
             if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD || r.status == 401) {
+                Log.d(TAG, "routing to login (transport dead / 401)");
                 routeToLogin();
                 return;
             }
             if (r.status == QolabWebViewTransport.Result.STATUS_IO || r.body == null) {
+                Log.d(TAG, "showError path: IO or null body");
                 showError();
                 return;
             }
             HomeDataClient.HomeData parsed = HomeDataClient.parse(r.body);
             if (parsed == null) {
+                Log.d(TAG, "showError path: parse returned null");
                 showError();
                 return;
             }
+            Log.d(TAG, "parse ok: rooms=" + (parsed.socialRooms == null ? -1 : parsed.socialRooms.size())
+                    + " dept=" + (parsed.departmentRoom == null ? "null" : parsed.departmentRoom.name));
             data = parsed;
             renderAll();
         }));
@@ -249,10 +277,13 @@ public class OfficeActivity extends AppCompatActivity {
             hide(roomsRow);
             show(roomsEmpty);
             roomsEmpty.setText(R.string.home_rooms_empty);
+            Log.d(TAG, "renderRooms: EMPTY state (rooms="
+                    + (rooms == null ? "null" : rooms.size()) + ")");
             return;
         }
         hide(roomsEmpty);
         show(roomsRow);
+        roomsEmpty.setText(R.string.home_rooms_empty);
         Collections.sort(rooms, (a, b) ->
                 Integer.compare(RoomThemeStyle.preferredOrder(a.roomTheme, a.roomSlug),
                         RoomThemeStyle.preferredOrder(b.roomTheme, b.roomSlug)));
@@ -268,6 +299,8 @@ public class OfficeActivity extends AppCompatActivity {
             card.setLayoutParams(lp);
             roomsRow.addView(card);
         }
+        Log.d(TAG, "renderRooms: rendered " + roomsRow.getChildCount() + " cards"
+                + (roomsRow.getVisibility() == View.VISIBLE ? ", row VISIBLE" : ", row INVISIBLE/GONE"));
     }
 
     private View inflateRoomCard(HomeDataClient.Room room) {

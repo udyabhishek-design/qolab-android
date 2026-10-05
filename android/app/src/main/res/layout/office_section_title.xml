@@ -51,4 +51,16 @@
             android:textSize="12sp"
             android:textStyle="bold" />
     </LinearLayout>
+
+    <!-- v1.5.27: debug-only version stamp (made visible by
+         OfficeActivity.stampDevVersion() in DEBUG builds only) -->
+    <TextView
+        android:id="@+id/office_dev_stamp"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="end"
+        android:paddingEnd="2dp"
+        android:textColor="@color/qm_muted"
+        android:textSize="10sp"
+        android:visibility="gone" />
 </LinearLayout>
