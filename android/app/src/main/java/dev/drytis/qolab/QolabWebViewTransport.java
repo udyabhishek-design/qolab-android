@@ -225,7 +225,9 @@ public final class QolabWebViewTransport {
                     // still terminates the request.
                     main.postDelayed(poll[0], POLL_INTERVAL_MS);
                 };
-                main.postDelayed(poll[0], POLL_INTERVAL_MS);
+                // v1.5.41 PERFORMANCE: first sample immediately, then every
+                // POLL_INTERVAL_MS (was: always a full interval late).
+                poll[0].run();
             } catch (Exception e) {
                 cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
             }
@@ -348,14 +350,16 @@ public final class QolabWebViewTransport {
                     }
                     main.postDelayed(poll[0], POLL_INTERVAL_MS);
                 };
-                main.postDelayed(poll[0], POLL_INTERVAL_MS);
+                // v1.5.41 PERFORMANCE: first sample immediately, then every
+                // POLL_INTERVAL_MS (was: always a full interval late).
+                poll[0].run();
             } catch (Exception e) {
                 cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
             }
         });
     }
 
-    private static final long POLL_INTERVAL_MS = 250;
+    private static final long POLL_INTERVAL_MS = 60;
 
     /**
      * v1.5.35: the single re-POST after a 419-triggered CSRF refresh. Runs
@@ -367,6 +371,11 @@ public final class QolabWebViewTransport {
         // one-retry contract; the recursion is bounded because a second 419
         // would need another CSRF rotation within the same request.
         postJson(path, jsonBody, cb);
+    }
+
+    /** Test seam for the poll cadence (v1.5.41 latency work). */
+    static long pollIntervalMsForTest() {
+        return POLL_INTERVAL_MS;
     }
 
     private static final AtomicLong SEQ = new AtomicLong();

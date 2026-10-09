@@ -33,6 +33,13 @@ public final class ChatRealtime {
      *  event JSON for message.sent; null for the generic notification case. */
     public interface Listener {
         void onChatEvent(long channelId, String eventName, String data);
+
+        /**
+         * v1.5.41: the realtime socket (re)established its connection and
+         * re-subscribed. Screens may reload to catch messages missed while
+         * offline (id-dedupe makes the overlap safe). Main thread.
+         */
+        default void onRealtimeConnected() {}
     }
 
     private static volatile ChatRealtime instance;
@@ -66,13 +73,19 @@ public final class ChatRealtime {
         instance = fake;
     }
 
-    public void configure(long userId, String appOrigin) {
+    public synchronized void configure(long userId, String appOrigin) {
         boolean first = this.myUserId == 0;
         this.myUserId = userId;
         this.origin = appOrigin;
         if (first && client == null) {
             connect();
         }
+    }
+
+    /** v1.5.41: re-arm entry from screens — reset the abandoned-client
+     *  limiter so a fresh start() after a long outage can reconnect. */
+    public synchronized void resetForRetry() {
+        reArmCount = 0;
     }
 
     private synchronized void connect() {
@@ -94,9 +107,22 @@ public final class ChatRealtime {
                     // connection_established fired; ensure the user channel
                     // is subscribed whenever we know the user.
                     ensureUserChannel();
+                    // v1.5.41: forward the reconnect so screens can refresh
+                    // and catch anything missed while offline (dedupe by
+                    // message id makes the overlap safe).
+                    notifyConnected();
                 }
                 // Disconnection: poll/retry paths handle recovery; nothing
                 // to tear down here (listeners stay registered).
+            }
+
+            @Override
+            public void onReconnectAbandoned() {
+                // v1.5.41: bounded reconnect gave up (long outage). Re-arm
+                // once after a pause; the screens' network-recovery path
+                // (ConnectivityWatcher) also re-arms via configure(). No
+                // unbounded loop: abandoned re-arms themselves are capped.
+                scheduleReArm();
             }
         });
         client.connect();
@@ -187,6 +213,39 @@ public final class ChatRealtime {
             client.subscribePrivate("user." + myUserId);
         }
     }
+
+    /** v1.5.41: fan out a realtime (re)connection to every registered
+     *  listener so screens refresh and catch missed messages. Main thread. */
+    private void notifyConnected() {
+        List<Listener> all = new ArrayList<>();
+        synchronized (this) {
+            for (List<Listener> ls : channelListeners.values()) all.addAll(ls);
+        }
+        for (Listener l : all) {
+            try { l.onRealtimeConnected(); } catch (Exception ignored) { }
+        }
+    }
+
+    /** v1.5.41: the client exhausted its bounded reconnects (very long
+     *  outage). Tear it down and re-open ONE fresh client after a pause —
+     *  this resets the backoff and re-authenticates every channel without
+     *  an infinite loop (abandoned re-arms capped at REARM_LIMIT). */
+    private void scheduleReArm() {
+        synchronized (this) {
+            if (closed) return;
+            reArmCount++;
+            if (reArmCount > REARM_LIMIT) return;
+            if (client != null) {
+                try { client.shutdown(); } catch (Exception ignored) { }
+                client = null;
+            }
+        }
+        main.postDelayed(this::connect, REARM_DELAY_MS);
+    }
+
+    private int reArmCount = 0;
+    private static final int REARM_LIMIT = 4;
+    private static final long REARM_DELAY_MS = 30_000L;
 
     // ── Screen API ────────────────────────────────────────────────────
 

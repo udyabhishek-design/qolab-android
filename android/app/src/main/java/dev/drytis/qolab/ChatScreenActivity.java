@@ -60,6 +60,9 @@ public class ChatScreenActivity extends AppCompatActivity {
     private final List<ChatDataClient.ChatMessage> messages = new ArrayList<>();
     private volatile boolean loading = false;
     private volatile boolean sending = false;
+
+    /** v1.5.41: automatic network recovery handle. */
+    private Object netWatcher;
     /** True once the user has scrolled at least one screen up. */
     private boolean userScrolledUp = false;
 
@@ -75,6 +78,26 @@ public class ChatScreenActivity extends AppCompatActivity {
             if (!userScrolledUp) scrollToBottom();
             markRead(m.id);
         });
+    };
+
+    /** v1.5.41: wraps `realtime` and adds reconnect handling — the socket
+     *  came back after an outage, so refresh history once to pick up any
+     *  messages missed while offline. containsMessage(id) dedupe makes the
+     *  overlap with realtime delivery safe (no duplicate rows). */
+    private final ChatRealtime.Listener realtimeHub =
+            new ChatRealtime.Listener() {
+        @Override
+        public void onChatEvent(long chanId, String eventName, String data) {
+            realtime.onChatEvent(chanId, eventName, data);
+        }
+
+        @Override
+        public void onRealtimeConnected() {
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (!loading) loadHistory();
+            });
+        }
     };
 
     // ── lifecycle ─────────────────────────────────────────────────────
@@ -128,6 +151,16 @@ public class ChatScreenActivity extends AppCompatActivity {
         });
 
         applyInsets();
+
+        // v1.5.41: automatic network recovery — connectivity returning
+        // reloads the conversation history, catching anything missed while
+        // offline (the realtime socket reconnects on its own backoff;
+        // loadHistory's id-dedupe guarantees no duplicate messages appear
+        // even if both the realtime event and this refresh deliver).
+        netWatcher = ConnectivityWatcher.register(this, () -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (!loading) loadHistory();
+        }));
     }
 
     @Override
@@ -135,13 +168,13 @@ public class ChatScreenActivity extends AppCompatActivity {
         super.onStart();
         ChatRealtime rt = ChatRealtime.get();
         rt.configure(myUserId, origin());
-        rt.listen(String.valueOf(channelId), realtime);
+        rt.listen(String.valueOf(channelId), realtimeHub);
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        ChatRealtime.get().release(String.valueOf(channelId), realtime);
+        ChatRealtime.get().release(String.valueOf(channelId), realtimeHub);
     }
 
     private String origin() {
@@ -386,5 +419,13 @@ public class ChatScreenActivity extends AppCompatActivity {
     protected void onResume() {
         super.onResume();
         loadHistory();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // v1.5.41: stop watching connectivity.
+        ConnectivityWatcher.unregister(this, netWatcher);
+        netWatcher = null;
     }
 }

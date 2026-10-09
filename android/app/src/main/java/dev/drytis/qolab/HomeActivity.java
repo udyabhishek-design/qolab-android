@@ -83,6 +83,34 @@ public class HomeActivity extends AppCompatActivity {
     private HomeDataClient.HomeData data;
     private volatile boolean fetching = false;
 
+    /** v1.5.41: session-scoped in-memory Home cache — KEYED BY USER so one
+     *  Member's data is NEVER shown to another Member. In-memory only
+     *  (cleared on process death and logout); survives warm activity
+     *  restarts and navigation between native screens. Used for instant
+     *  first paint; ALWAYS followed by a fresh fetch (stale-while-
+     *  revalidate), so data is at most one navigation old and live. */
+    private static HomeDataClient.HomeData cachedData;
+    private static long cachedForUserId = Long.MIN_VALUE;
+
+    /** v1.5.41: automatic network recovery (ConnectivityWatcher). */
+    private Object netWatcher;
+
+    /** v1.5.41: timeline for the DEBUG diagnostics panel (performance). */
+    volatile long tCreateStartMs, tFirstContentMs, tDataMs;
+
+    /** Fresh-fetch threshold for background refresh on resume (10 min). */
+    private static final long STALE_MS = 10L * 60 * 1_000_000_000L; // ns
+    /** Wall-clock of the last successful fetch (System.nanoTime). */
+    private volatile long lastFetchNs = Long.MIN_VALUE;
+
+    private long cachedUserId() {
+        return data != null ? data.userId : Long.MIN_VALUE;
+    }
+
+    private static long cachedForUserIdOf(HomeDataClient.HomeData d) {
+        return d != null ? d.userId : Long.MIN_VALUE;
+    }
+
     /** v1.5.25: Development-only in-app updater (null-safe; inert in release). */
     private dev.drytis.qolab.devupdate.DevUpdateController devUpdater;
 
@@ -108,6 +136,19 @@ public class HomeActivity extends AppCompatActivity {
         volatile String loginReason;
         volatile String transportErrorCategory;
         volatile boolean transportAlive = true;
+        /** v1.5.41 timeline, copied from the activity at fetch time. */
+        volatile long tFirstContentMs, tDataMs, tCreateStartMs;
+
+        void captureTimeline(long create, long first, long data) {
+            tCreateStartMs = create; tFirstContentMs = first; tDataMs = data;
+        }
+
+        private String timelineLabel() {
+            if (tFirstContentMs > 0) return (tFirstContentMs - tCreateStartMs) + " ms"
+                    + ", onCreate→data "
+                    + (tDataMs > 0 ? (tDataMs - tCreateStartMs) + " ms" : "n/a");
+            return "n/a (cache)";
+        }
 
         String render() {
             return "Home request diagnostics (WebView transport)\n"
@@ -118,6 +159,9 @@ public class HomeActivity extends AppCompatActivity {
                             ? "transport dead" : httpStatus == QolabWebViewTransport.Result.STATUS_IO
                             ? "IO failure" : String.valueOf(httpStatus)) + "\n"
                     + "• response time: " + durationMs + " ms\n"
+                    + "• v1.5.41 timeline: onCreate→content "
+                    + timelineLabel()
+                    + "\n"
                     + "• body received: " + (payloadReceived ? "Yes" : "No")
                     + (bodyLength >= 0 ? " (length " + bodyLength + ")" : "") + "\n"
                     + "• parse attempted: " + (parseAttempted ? "Yes" : "No") + "\n"
@@ -138,6 +182,7 @@ public class HomeActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
+        tCreateStartMs = android.os.SystemClock.elapsedRealtime();
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_home);
 
@@ -154,7 +199,29 @@ public class HomeActivity extends AppCompatActivity {
         devUpdater = new dev.drytis.qolab.devupdate.DevUpdateController(this);
         devUpdater.maybeCheckOnStartup();
 
+        // v1.5.41: automatic network recovery — when connectivity returns
+        // while Home is showing an error state (or never loaded), reload
+        // without waiting for a manual Retry tap. Bounded: fires only on
+        // the system "network available" edge; the single-flight fetching
+        // flag prevents duplicate requests.
+        netWatcher = ConnectivityWatcher.register(this, () -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (data == null && !fetching) {
+                loadHome();
+            }
+        }));
+
         if (data == null) {
+            // v1.5.41 PERFORMANCE: if THIS user already has session-scoped
+            // cached Home data (warm activity restart / navigation back),
+            // render it instantly and refresh in the background — no
+            // skeleton phase at all. The fresh fetch still runs (live data
+            // guaranteed); cache is never shown across users.
+            if (cachedData != null && cachedForUserIdOf(cachedData) == cachedUserId()) {
+                this.data = cachedData;
+                renderAll(-1);
+                tFirstContentMs = android.os.SystemClock.elapsedRealtime();
+            }
             loadHome();
         }
     }
@@ -168,6 +235,10 @@ public class HomeActivity extends AppCompatActivity {
         }
         if (data == null && !fetching) {
             loadHome();
+        } else if (data != null && !fetching && System.nanoTime() - lastFetchNs > STALE_MS) {
+            // v1.5.41: returning after a long pause (hours) — refresh in
+            // the background without a skeleton; the cached render stays up.
+            loadHome();
         }
         if (devUpdater != null) devUpdater.onResume();
     }
@@ -176,6 +247,9 @@ public class HomeActivity extends AppCompatActivity {
     protected void onDestroy() {
         super.onDestroy();
         if (devUpdater != null) devUpdater.onDestroy();
+        // v1.5.41: stop watching connectivity.
+        ConnectivityWatcher.unregister(this, netWatcher);
+        netWatcher = null;
     }
 
     // ------------------------------------------------------------------
@@ -376,6 +450,7 @@ public class HomeActivity extends AppCompatActivity {
             box.addView(diag);
             diag.setOnClickListener(v -> {
                 sheet.dismiss();
+                lastDiag.captureTimeline(tCreateStartMs, tFirstContentMs, tDataMs);
                 android.app.AlertDialog d = new android.app.AlertDialog.Builder(HomeActivity.this)
                         .setTitle(R.string.home_diag_title)
                         .setMessage(lastDiag.render())
@@ -402,7 +477,10 @@ public class HomeActivity extends AppCompatActivity {
     private void loadHome() {
         if (fetching) return;
         fetching = true;
-        showLoading();
+        // v1.5.41 PERFORMANCE: only run the skeleton phase when there is
+        // nothing to show. With cached/stale data up, a background refresh
+        // keeps the current content (no skeleton flash, no empty states).
+        if (data == null) showLoading();
         lastDiag.loginTransition = false;
         lastDiag.loginReason = null;
         // v1.5.15 (Architecture B): Home data comes from the AUTHENTICATED
@@ -505,6 +583,14 @@ public class HomeActivity extends AppCompatActivity {
             // request before renderAll was a second way Home could stay
             // skeleton forever.
             this.data = data;
+            // v1.5.41: session-scoped cache (per-USER; in-memory only).
+            if (data.userId != 0) {
+                cachedData = data;
+                cachedForUserId = data.userId;
+            }
+            lastFetchNs = System.nanoTime();
+            if (tDataMs == 0) tDataMs = android.os.SystemClock.elapsedRealtime();
+            if (tFirstContentMs == 0) tFirstContentMs = tDataMs;
             lastDiag.renderExecuted = true;
             lastDiag.skeletonsCleared = true;
             renderAll(-1);
@@ -524,6 +610,11 @@ public class HomeActivity extends AppCompatActivity {
 
 
     private void routeToLogin() {
+        // v1.5.41: leaving the session — drop the per-user Home cache so a
+        // different Member can NEVER see this user's cached data.
+        cachedData = null;
+        cachedForUserId = Long.MIN_VALUE;
+        ChatRealtime.get().shutdown();
         Intent i = new Intent(this, LoginActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         startActivity(i);

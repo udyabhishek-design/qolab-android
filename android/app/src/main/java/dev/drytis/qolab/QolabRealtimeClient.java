@@ -47,6 +47,13 @@ public final class QolabRealtimeClient {
 
         /** Connection state changed (connected/disconnected). Main thread. */
         void onStateChanged(boolean connected);
+
+        /**
+         * v1.5.41: reconnect attempts exhausted (bounded backoff gave up).
+         * The host should surface a retryable state; the next
+         * configure()/resume re-arms the client. Default no-op.
+         */
+        default void onReconnectAbandoned() {}
     }
 
     public interface AuthCallback {
@@ -132,6 +139,9 @@ public final class QolabRealtimeClient {
     // ── Client ────────────────────────────────────────────────────────
 
     private static final int MAX_LISTENED_CHANNELS = 120;
+
+    /** v1.5.41: reconnect backoff cap (1,2,4,8s) — ~10 minutes total. */
+    private static final int MAX_RECONNECT_ATTEMPTS = 128;
 
     private final OkHttpClient http;
     private final String wsUrl;
@@ -285,6 +295,13 @@ public final class QolabRealtimeClient {
     private void scheduleReconnect() {
         if (closed) return;
         reconnectAttempt++;
+        if (reconnectAttempt > MAX_RECONNECT_ATTEMPTS) {
+            // v1.5.41: bounded — stop looping after ~10 min of failures
+            // (attempts at 1,2,4,8s×cap). The owning screen's resume /
+            // network-recovery path re-arms the socket by re-configuring.
+            listener.onReconnectAbandoned();
+            return;
+        }
         long delay = reconnectDelayMs(reconnectAttempt);
         main().postDelayed(this::openSocket, delay);
     }
@@ -314,11 +331,24 @@ public final class QolabRealtimeClient {
         listener.authorize(fChannel, auth -> {
             if (closed) return;
             if (auth == null) {
-                // Authorization failed (403/transport dead) — do not retry
-                // in a loop; drop the pending entry silently.
+                // v1.5.41: authorization failed (transport dead / network
+                // outage). Drop the pending entry but RETRY a bounded number
+                // of times — a single dead auth moment used to silently
+                // lose a channel until full reconnect.
                 pendingAuth.remove(fChannel);
+                Integer fails = authFails.get(fChannel);
+                int n = fails == null ? 1 : fails + 1;
+                if (n <= MAX_AUTH_ATTEMPTS) {
+                    authFails.put(fChannel, n);
+                    main().postDelayed(() -> {
+                        if (closed) return;
+                        // re-enter only if still wanted and still not up
+                        if (!subscribed.containsKey(fChannel)) subscribe(fChannel);
+                    }, AUTH_RETRY_DELAY_MS * n);
+                }
                 return;
             }
+            authFails.remove(fChannel);
             Boolean stillWanted = pendingAuth.get(fChannel);
             if (stillWanted == null) return;
             if (sink != null) {
@@ -326,6 +356,10 @@ public final class QolabRealtimeClient {
             }
         });
     }
+
+    private final Map<String, Integer> authFails = new HashMap<>();
+    private static final int MAX_AUTH_ATTEMPTS = 3;
+    private static final long AUTH_RETRY_DELAY_MS = 2_000L;
 
     /** Unsubscribe + forget. Main thread. Idempotent. */
     public synchronized void unsubscribePrivate(String logicalName) {
@@ -348,6 +382,7 @@ public final class QolabRealtimeClient {
         wanted.addAll(pendingAuth.keySet());
         subscribed.clear();
         pendingAuth.clear();
+        authFails.clear();
         for (String ch : wanted) {
             subscribe(ch);
         }
@@ -369,6 +404,7 @@ public final class QolabRealtimeClient {
         main().removeCallbacksAndMessages(null);
         subscribed.clear();
         pendingAuth.clear();
+        authFails.clear();
         if (sink != null) {
             sink.close(1000, "shutdown");
             sink = null;
@@ -399,6 +435,10 @@ public final class QolabRealtimeClient {
 
     Map<String, Boolean> testPending() {
         return pendingAuth;
+    }
+
+    static int maxReconnectAttemptsForTest() {
+        return MAX_RECONNECT_ATTEMPTS;
     }
 
     void testResetReconnects() {

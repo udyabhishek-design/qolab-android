@@ -199,26 +199,96 @@ class LiveRoomActivity : AppCompatActivity() {
 
     private fun renderControls() {
         controlBar.removeAllViews()
-        controlBar.addView(chip(if (micOn) R.string.live_mic_on else R.string.live_mic_off) { toggleMic() })
-        controlBar.addView(chip(if (camOn) R.string.live_cam_on else R.string.live_cam_off) { toggleCam() })
-        controlBar.addView(chip(R.string.live_people) { togglePeople() })
-        controlBar.addView(chip(R.string.live_leave) { leave() })
+        // v1.5.41: call-style circular toolbar. Icon = ACTUAL LiveKit track
+        // state (micOn/camOn are synced from TrackPublication.isMuted via
+        // syncTrackState()), so the visuals can never drift from reality.
+        controlBar.addView(roundCtrl(
+            if (micOn) R.drawable.qm_ic_mic else R.drawable.qm_ic_mic_off,
+            if (micOn) CtrlStyle.ACTIVE else CtrlStyle.INACTIVE,
+            getString(if (micOn) R.string.live_mic_on else R.string.live_mic_off)
+        ) { toggleMic() })
+        controlBar.addView(roundCtrl(
+            if (camOn) R.drawable.qm_ic_videocam else R.drawable.qm_ic_videocam_off,
+            if (camOn) CtrlStyle.ACTIVE else CtrlStyle.INACTIVE,
+            getString(if (camOn) R.string.live_cam_on else R.string.live_cam_off)
+        ) { toggleCam() })
+        controlBar.addView(roundCtrl(
+            R.drawable.qm_ic_people, CtrlStyle.ACTIVE,
+            getString(R.string.live_people)
+        ) { togglePeople() })
+        controlBar.addView(roundCtrl(
+            R.drawable.qm_ic_call_end, CtrlStyle.LEAVE,
+            getString(R.string.live_leave)
+        ) { leave() })
     }
 
-    private fun chip(labelRes: Int, onClick: (View) -> Unit): View =
-        TextView(this).apply {
-            setText(labelRes)
-            setTextColor(getColor(R.color.qm_cream_on_wine))
-            textSize = 13f
-            gravity = Gravity.CENTER
-            setPadding(dp(14), dp(10), dp(14), dp(10))
-            setBackgroundResource(R.drawable.qm_live_control_chip)
+    /** Visual style of a circular meeting control. */
+    private enum class CtrlStyle { ACTIVE, INACTIVE, LEAVE }
+
+    /**
+     * v1.5.41: circular touch-friendly control (52dp) with pressed
+     * feedback and a content description for accessibility.
+     *  ACTIVE   — white circle, dark icon (mic/camera ON)
+     *  INACTIVE — translucent circle, white slashed icon (mic/camera OFF)
+     *  LEAVE    — red circle, white hang-up icon
+     */
+    private fun roundCtrl(
+        iconRes: Int,
+        style: CtrlStyle,
+        desc: String,
+        onClick: (View) -> Unit
+    ): View =
+        android.widget.ImageButton(this).apply {
+            setImageResource(iconRes)
+            val ink = 0xFF1A1A1A.toInt()
+            when (style) {
+                CtrlStyle.ACTIVE -> {
+                    background = ctrlRipple(0xFFFFFFFF.toInt())
+                    setColorFilter(ink)
+                }
+                CtrlStyle.INACTIVE -> {
+                    background = ctrlRipple(0x33FFFFFF.toInt(), border = true)
+                    setColorFilter(0xFFFFFFFF.toInt())
+                }
+                CtrlStyle.LEAVE -> {
+                    background = ctrlRipple(0xFFE4202E.toInt())
+                    setColorFilter(0xFFFFFFFF.toInt())
+                }
+            }
+            contentDescription = desc
             setOnClickListener { onClick(this) }
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply { setMargins(dp(6), 0, dp(6), 0) }
+            layoutParams = LinearLayout.LayoutParams(dp(52), dp(52)).apply {
+                setMargins(dp(10), 0, dp(10), 0)
+            }
         }
+
+    private fun ctrlRipple(fill: Int, border: Boolean = false): android.graphics.drawable.RippleDrawable {
+        val shape = android.graphics.drawable.GradientDrawable().apply {
+            shape = android.graphics.drawable.GradientDrawable.OVAL
+            setColor(fill)
+            if (border) setStroke(dp(1), 0x66FFFFFF.toInt())
+        }
+        val mask = android.graphics.drawable.ShapeDrawable(android.graphics.drawable.shapes.OvalShape()).apply {
+            paint.color = -1
+        }
+        return android.graphics.drawable.RippleDrawable(
+            android.content.res.ColorStateList.valueOf(0x33888888.toInt()), shape, mask)
+    }
+
+    /**
+     * v1.5.41: pull the TRUE mute/publish state from the LiveKit track
+     * publications and re-render the toolbar icons. Called after connect,
+     * on toggles, and on RoomEvent TrackMuted/Unmuted (including remote
+     * or server-driven changes).
+     */
+    private fun syncTrackState() {
+        val local = room?.localParticipant ?: return
+        runOnUiThread {
+            micOn = local.isMicrophoneEnabled
+            camOn = local.isCameraEnabled
+            renderControls()
+        }
+    }
 
     // ── LiveKit ───────────────────────────────────────────────────────
 
@@ -244,8 +314,9 @@ class LiveRoomActivity : AppCompatActivity() {
                     connecting.visibility = View.GONE
                     publishDefaults()
                     refreshPeople()
-                }
-            } catch (e: Exception) {
+                    // v1.5.41: toolbar icons start from real track state
+                    syncTrackState()
+                }            } catch (e: Exception) {
                 runOnUiThread {
                     Toast.makeText(
                         this@LiveRoomActivity,
@@ -268,6 +339,20 @@ class LiveRoomActivity : AppCompatActivity() {
             is RoomEvent.ParticipantConnected,
             is RoomEvent.ParticipantDisconnected,
             is RoomEvent.ActiveSpeakersChanged -> refreshPeople()
+            is RoomEvent.TrackMuted -> {
+                // v1.5.41: track state changed (local toggle, remote, or
+                // server) — icons follow the actual track state.
+                if (ev.participant is io.livekit.android.room.participant.LocalParticipant) {
+                    syncTrackState()
+                }
+                refreshPeople()
+            }
+            is RoomEvent.TrackUnmuted -> {
+                if (ev.participant is io.livekit.android.room.participant.LocalParticipant) {
+                    syncTrackState()
+                }
+                refreshPeople()
+            }
             is RoomEvent.Disconnected -> {
                 if (!leaving) {
                     Toast.makeText(this, R.string.live_disconnected, Toast.LENGTH_LONG).show()
@@ -283,7 +368,7 @@ class LiveRoomActivity : AppCompatActivity() {
         scope.launch {
             try {
                 local.setMicrophoneEnabled(true)
-                runOnUiThread { micOn = true; renderControls() }
+                runOnUiThread { syncTrackState() }
             } catch (_: Exception) { }
             attachLocalPreview()
         }
@@ -339,7 +424,9 @@ class LiveRoomActivity : AppCompatActivity() {
         scope.launch {
             try {
                 local.setMicrophoneEnabled(target)
-                runOnUiThread { micOn = target; renderControls() }
+                // v1.5.41: derive the icon from actual track state — the
+                // UI can never drift from what LiveKit is really doing.
+                syncTrackState()
             } catch (_: Exception) { }
         }
     }
@@ -350,11 +437,8 @@ class LiveRoomActivity : AppCompatActivity() {
         scope.launch {
             try {
                 local.setCameraEnabled(target)
-                runOnUiThread {
-                    camOn = target
-                    renderControls()
-                    if (target) attachLocalPreview()
-                }
+                syncTrackState()
+                if (target) attachLocalPreview()
             } catch (_: Exception) { }
         }
     }

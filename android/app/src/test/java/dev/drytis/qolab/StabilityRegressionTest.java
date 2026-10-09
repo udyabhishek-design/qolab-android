@@ -73,8 +73,13 @@ public class StabilityRegressionTest {
         // Each verb has the reschedule inside poll[0] AND the initial kick
         // post — 2 sites x 2 verbs.
         int javaReschedules = count(src, "main.postDelayed(poll[0], POLL_INTERVAL_MS);");
+        // v1.5.41 PERFORMANCE: the LOOP-START call in each verb became an
+        // immediate first sample (poll[0].run()) to cut one poll interval
+        // of pure latency per request; the in-loop reschedule sites (2, one
+        // per verb) still guarantee Java-driven continuation.
+        int immediateFirstSamples = count(src, "poll[0].run();");
         assertTrue("both getJson and postJson must reschedule from Java (found "
-                + javaReschedules + ")", javaReschedules == 4);
+                + javaReschedules + ")", javaReschedules == 2 && immediateFirstSamples == 2);
         // A result must be delivered even if the WebView callback never runs:
         // the deadline check sits in the Java runnable before evaluate.
         int deadlineChecks = count(src, "elapsedRealtime() >= deadline");

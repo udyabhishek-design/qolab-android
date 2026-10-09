@@ -73,6 +73,12 @@ public class ChatListActivity extends AppCompatActivity {
     private String lastQuery = "";
     private ChatDataClient.ChatFilter filter = ChatDataClient.ChatFilter.ALL;
 
+    /** v1.5.41: automatic network recovery handle. */
+    private Object netWatcher;
+    /** v1.5.41: last successful list load (ns) — drives resume refresh. */
+    private volatile long lastLoadNs = Long.MIN_VALUE;
+    private static final long STALE_MS = 2L * 60 * 1_000_000_000L; // 2 min
+
     /** Pastel card palette (mockup). */
     private static final int[] PASTELS = {
             0xFFDDEBD8, 0xFFF7E8B0, 0xFFE4DDF2, 0xFFF8E0D2, 0xFFD9E4F5 };
@@ -81,6 +87,24 @@ public class ChatListActivity extends AppCompatActivity {
         // Any message/notification activity → refresh list data (single
         // flight; keeps unread counts and ordering current).
         load(false);
+    };
+
+    /** v1.5.41: socket (re)connected — reload once to catch messages
+     *  missed while offline (id-dedupe elsewhere makes overlap safe). */
+    private final ChatRealtime.Listener realtimeHub =
+            new ChatRealtime.Listener() {
+        @Override
+        public void onChatEvent(long channelId, String eventName, String data) {
+            realtime.onChatEvent(channelId, eventName, data);
+        }
+
+        @Override
+        public void onRealtimeConnected() {
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed()) return;
+                if (!fetching) load(false);
+            });
+        }
     };
 
     // ── lifecycle ─────────────────────────────────────────────────────
@@ -151,7 +175,23 @@ public class ChatListActivity extends AppCompatActivity {
         // Floating compose → Create Group (existing native flow).
         findViewById(R.id.chat_fab).setOnClickListener(v -> showCreateGroupSheet());
 
+        // v1.5.41: automatic network recovery — connectivity returning
+        // while Chat is showing its error state (or loaded stale) reloads
+        // without a manual Retry tap. Single-flight fetching flag guards
+        // duplicate requests; bounded (fires only on the network-available
+        // edge, not a loop). Retry button stays available regardless.
+        netWatcher = ConnectivityWatcher.register(this, () -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (!fetching && (conversations.isEmpty() || errorVisible())) {
+                load(false);
+            }
+        }));
+
         applyInsets();
+    }
+
+    private boolean errorVisible() {
+        return chatErrorBox != null && chatErrorBox.getVisibility() == View.VISIBLE;
     }
 
     @Override
@@ -159,21 +199,34 @@ public class ChatListActivity extends AppCompatActivity {
         super.onStart();
         ChatRealtime rt = ChatRealtime.get();
         rt.configure(myUserId, origin());
-        rt.listen("user", realtime);
+        rt.listen("user", realtimeHub);
     }
 
     @Override
     protected void onStop() {
         super.onStop();
-        ChatRealtime.get().release("user", realtime);
+        ChatRealtime.get().release("user", realtimeHub);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
         // Refresh on every resume (returning from a conversation may have
-        // changed unread counts). Single-flight prevents duplicates.
-        load(false);
+        // changed unread counts). Single-flight prevents duplicates; after
+        // a network outage the realtime socket has reconnected on its own
+        // backoff and this refresh picks up any missed messages.
+        if (!fetching && (conversations.isEmpty()
+                || System.nanoTime() - lastLoadNs > STALE_MS)) {
+            load(false);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // v1.5.41: stop watching connectivity.
+        ConnectivityWatcher.unregister(this, netWatcher);
+        netWatcher = null;
     }
 
     private String origin() {
@@ -239,6 +292,7 @@ public class ChatListActivity extends AppCompatActivity {
             }
             conversations = parsed.conversations;
             employees = parsed.employees;
+            lastLoadNs = System.nanoTime();
             renderList();
             // Non-blocking extras: latest announcement + precise unread
             // counts (both best-effort; the list already renders).
