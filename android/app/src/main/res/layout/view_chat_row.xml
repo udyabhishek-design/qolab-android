@@ -1,70 +1,95 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One conversation row: avatar circle (initials) + name + preview line
-     (members · relative time) + unread badge. -->
+<!-- v1.5.40 — One conversation card (approved mockup): pastel rounded
+     card, avatar circle with initials, name + honest preview line,
+     timestamp + unread badge on the right edge. The card background is
+     set at runtime from the pastel palette (stable per channel id). -->
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/chat_row_card"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="horizontal"
-    android:gravity="center_vertical"
-    android:background="?attr/selectableItemBackground"
-    android:paddingStart="@dimen/qm_room_page_pad"
-    android:paddingEnd="@dimen/qm_room_page_pad"
-    android:paddingTop="8dp"
-    android:paddingBottom="8dp">
-
-    <TextView
-        android:id="@+id/chat_row_avatar"
-        android:layout_width="42dp"
-        android:layout_height="42dp"
-        android:gravity="center"
-        android:textColor="#FFFFFF"
-        android:textSize="14sp"
-        android:textStyle="bold"
-        android:contentDescription="@string/home_cd_avatar" />
+    android:orientation="vertical"
+    android:layout_marginBottom="8dp"
+    android:paddingStart="12dp"
+    android:paddingEnd="12dp"
+    android:paddingTop="10dp"
+    android:paddingBottom="10dp">
 
     <LinearLayout
-        android:layout_width="0dp"
+        android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_weight="1"
-        android:layout_marginStart="12dp"
-        android:orientation="vertical">
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
 
         <TextView
-            android:id="@+id/chat_row_name"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:textColor="@color/qm_ink"
-            android:textSize="15sp"
-            android:textStyle="bold" />
+            android:id="@+id/chat_row_avatar"
+            android:layout_width="42dp"
+            android:layout_height="42dp"
+            android:gravity="center"
+            android:textColor="#FFFFFF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:contentDescription="@string/home_cd_avatar" />
 
-        <TextView
-            android:id="@+id/chat_row_preview"
-            android:layout_width="match_parent"
+        <LinearLayout
+            android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:maxLines="1"
-            android:ellipsize="end"
-            android:textColor="@color/qm_muted"
-            android:textSize="12sp" />
+            android:layout_weight="1"
+            android:layout_marginStart="12dp"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/chat_row_name"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/qm_ink"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/chat_row_preview"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:maxLines="1"
+                android:ellipsize="end"
+                android:textColor="@color/qm_muted"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:orientation="vertical"
+            android:gravity="end">
+
+            <TextView
+                android:id="@+id/chat_row_time"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/qm_muted"
+                android:textSize="11sp"
+                android:maxLines="1" />
+
+            <TextView
+                android:id="@+id/chat_row_unread"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:minWidth="20dp"
+                android:gravity="center"
+                android:paddingStart="6dp"
+                android:paddingEnd="6dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:background="@drawable/qm_bg_red_dot"
+                android:textColor="#FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold"
+                android:visibility="gone" />
+        </LinearLayout>
     </LinearLayout>
-
-    <TextView
-        android:id="@+id/chat_row_unread"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:layout_marginStart="8dp"
-        android:minWidth="20dp"
-        android:gravity="center"
-        android:paddingStart="6dp"
-        android:paddingEnd="6dp"
-        android:paddingTop="2dp"
-        android:paddingBottom="2dp"
-        android:background="@drawable/qm_bg_red_dot"
-        android:textColor="#FFFFFF"
-        android:textSize="11sp"
-        android:textStyle="bold"
-        android:visibility="gone" />
 </LinearLayout>

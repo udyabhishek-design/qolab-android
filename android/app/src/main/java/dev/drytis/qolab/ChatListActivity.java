@@ -34,12 +34,21 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * v1.5.39 — Native Chat: conversation list.
+ * v1.5.40 — Native Chat: conversation list (approved mockup UI).
  *
- * Data: GET /chat (existing Inertia endpoint, rooms excluded by the
- * backend). Realtime: private-user.{me} notifications refresh unread
- * badges and preview times without a refetch. Search filters locally on
- * the loaded list (the backend list is one page and small).
+ * Qolab wordmark + heading + subtitle → search action → filter chips
+ * (All | DMs | Groups | Announcements) → yellow Announcements banner
+ * (latest real announcement from GET /announcements; hidden when none
+ * are published) → Pinned (official company channels — the backend has
+ * no per-user pin flag, so this is the honest deterministic rule) and
+ * Recent sections → pastel conversation cards (stable color per
+ * channel id) with timestamps and unread badges → floating compose FAB
+ * (Create Group).
+ *
+ * Data: GET /chat + GET /announcements + GET /chat/unread-counts
+ * (existing endpoints only; real data only — nothing hardcoded).
+ * Realtime: private-user.{me} notifications refresh the list (single
+ * flight) so unread badges and ordering stay current.
  *
  * No Social Rooms, no Department Rooms — they are NOT part of the Chat
  * payload (getUserChannels includeRooms=false) and never rendered here.
@@ -52,12 +61,21 @@ public class ChatListActivity extends AppCompatActivity {
     private ScrollView chatScroll;
     private View chatSkeleton, chatErrorBox, chatEmpty;
     private EditText searchField;
+    private TextView filterAll, filterDms, filterGroups, filterAnnouncements;
+    private LinearLayout announcementBanner;
 
     private List<ChatDataClient.Conversation> conversations = new ArrayList<>();
     private List<ChatDataClient.Employee> employees = new ArrayList<>();
+    private ChatDataClient.Announcement latestAnnouncement;
+    private java.util.Map<Long, Integer> unreadCounts;
     private volatile boolean fetching = false;
     private long myUserId;
     private String lastQuery = "";
+    private ChatDataClient.ChatFilter filter = ChatDataClient.ChatFilter.ALL;
+
+    /** Pastel card palette (mockup). */
+    private static final int[] PASTELS = {
+            0xFFDDEBD8, 0xFFF7E8B0, 0xFFE4DDF2, 0xFFF8E0D2, 0xFFD9E4F5 };
 
     private final ChatRealtime.Listener realtime = (channelId, event, data) -> {
         // Any message/notification activity → refresh list data (single
@@ -75,10 +93,30 @@ public class ChatListActivity extends AppCompatActivity {
 
         myUserId = getIntent().getLongExtra(EXTRA_MY_USER_ID, 0);
 
-        ImageButton back = findViewById(R.id.chat_btn_back);
-        back.setOnClickListener(v -> finish());
         ImageButton newGroup = findViewById(R.id.chat_btn_new_group);
         newGroup.setOnClickListener(v -> showCreateGroupSheet());
+        ImageButton searchBtn = findViewById(R.id.chat_btn_search);
+        searchBtn.setOnClickListener(v -> {
+            // v1.5.40: search is an ACTION (mockup) — reveal + focus field.
+            if (searchField.getVisibility() != View.VISIBLE) {
+                searchField.setVisibility(View.VISIBLE);
+                searchField.requestFocus();
+                android.view.inputmethod.InputMethodManager imm =
+                        (android.view.inputmethod.InputMethodManager)
+                                getSystemService(INPUT_METHOD_SERVICE);
+                if (imm != null) {
+                    imm.showSoftInput(searchField,
+                            android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT);
+                }
+            } else {
+                searchField.setVisibility(View.GONE);
+                if (!lastQuery.isEmpty()) {
+                    lastQuery = "";
+                    searchField.setText("");
+                    renderList();
+                }
+            }
+        });
 
         chatList = findViewById(R.id.chat_list);
         chatScroll = findViewById(R.id.chat_list_scroll);
@@ -86,6 +124,17 @@ public class ChatListActivity extends AppCompatActivity {
         chatErrorBox = findViewById(R.id.chat_error_box);
         chatEmpty = findViewById(R.id.chat_empty);
         searchField = findViewById(R.id.chat_search);
+        filterAll = findViewById(R.id.chat_filter_all);
+        filterDms = findViewById(R.id.chat_filter_dms);
+        filterGroups = findViewById(R.id.chat_filter_groups);
+        filterAnnouncements = findViewById(R.id.chat_filter_announcements);
+        announcementBanner = findViewById(R.id.chat_announcement_banner);
+
+        filterAll.setOnClickListener(v -> selectFilter(ChatDataClient.ChatFilter.ALL));
+        filterDms.setOnClickListener(v -> selectFilter(ChatDataClient.ChatFilter.DMS));
+        filterGroups.setOnClickListener(v -> selectFilter(ChatDataClient.ChatFilter.GROUPS));
+        filterAnnouncements.setOnClickListener(
+                v -> selectFilter(ChatDataClient.ChatFilter.ANNOUNCEMENTS));
 
         findViewById(R.id.chat_retry).setOnClickListener(v -> load(true));
         searchField.addTextChangedListener(new TextWatcher() {
@@ -98,6 +147,9 @@ public class ChatListActivity extends AppCompatActivity {
                 renderList();
             }
         });
+
+        // Floating compose → Create Group (existing native flow).
+        findViewById(R.id.chat_fab).setOnClickListener(v -> showCreateGroupSheet());
 
         applyInsets();
     }
@@ -150,10 +202,12 @@ public class ChatListActivity extends AppCompatActivity {
         if (fetching) return;
         QolabWebViewTransport transport = QolabWebViewTransport.get();
         if (transport == null || !transport.isAlive()) {
-            QolabWebViewTransport.rehydrate(this, origin(), valid -> {
-                if (valid) load(false);
-                else routeToLogin();
-            });
+            // v1.5.40: verify with the server before logging out — a dead
+            // transport is not proof of expiry.
+            SessionGate.requireValidSession(this, origin(),
+                    () -> runOnUiThread(() -> load(false)),
+                    this::routeToLogin,
+                    () -> runOnUiThread(this::showError));
             return;
         }
         fetching = true;
@@ -161,8 +215,16 @@ public class ChatListActivity extends AppCompatActivity {
         transport.getJson("/chat", r -> runOnUiThread(() -> {
             fetching = false;
             if (isFinishing() || isDestroyed()) return;
-            if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD || r.status == 401) {
-                routeToLogin();
+            if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+                // v1.5.40: verify before logout (SessionGate).
+                SessionGate.requireValidSession(this, origin(),
+                        () -> runOnUiThread(() -> load(false)),
+                        this::routeToLogin,
+                        () -> runOnUiThread(this::showError));
+                return;
+            }
+            if (r.status == 401) {
+                routeToLogin(); // server-proven expiry (JSON Accept → 401)
                 return;
             }
             if (r.status < 200 || r.status >= 300 || r.body == null) {
@@ -178,6 +240,44 @@ public class ChatListActivity extends AppCompatActivity {
             conversations = parsed.conversations;
             employees = parsed.employees;
             renderList();
+            // Non-blocking extras: latest announcement + precise unread
+            // counts (both best-effort; the list already renders).
+            fetchAnnouncement();
+            fetchUnreadCounts();
+        }));
+    }
+
+    /** Best-effort latest published announcement for the yellow banner. */
+    private void fetchAnnouncement() {
+        QolabWebViewTransport transport = QolabWebViewTransport.get();
+        if (transport == null || !transport.isAlive()) return;
+        transport.getJson("/announcements", r -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (r.status != 200 || r.body == null) {
+                latestAnnouncement = null; // honest: banner hidden
+                renderBanner();
+                return;
+            }
+            JSONObject page = RoomDataClient.extractInertiaPage(r.body);
+            List<ChatDataClient.Announcement> list =
+                    ChatDataClient.parseAnnouncements(page);
+            latestAnnouncement = list.isEmpty() ? null : list.get(0);
+            renderBanner();
+        }));
+    }
+
+    /** Best-effort per-channel unread counts (GET /chat/unread-counts). */
+    private void fetchUnreadCounts() {
+        QolabWebViewTransport transport = QolabWebViewTransport.get();
+        if (transport == null || !transport.isAlive()) return;
+        transport.getJson("/chat/unread-counts", r -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (r.status != 200 || r.body == null) return;
+            java.util.Map<Long, Integer> map = ChatDataClient.parseUnreadCounts(r.body);
+            if (map != null) {
+                unreadCounts = map;
+                renderList();
+            }
         }));
     }
 
@@ -202,21 +302,78 @@ public class ChatListActivity extends AppCompatActivity {
         chatErrorBox.setVisibility(View.VISIBLE);
     }
 
+    // ── filters + banner ──────────────────────────────────────────────
+
+    private void selectFilter(ChatDataClient.ChatFilter f) {
+        if (filter == f) return;
+        filter = f;
+        renderFilterChips();
+        renderList();
+    }
+
+    private void renderFilterChips() {
+        setChip(filterAll, filter == ChatDataClient.ChatFilter.ALL);
+        setChip(filterDms, filter == ChatDataClient.ChatFilter.DMS);
+        setChip(filterGroups, filter == ChatDataClient.ChatFilter.GROUPS);
+        setChip(filterAnnouncements, filter == ChatDataClient.ChatFilter.ANNOUNCEMENTS);
+    }
+
+    private void setChip(TextView chip, boolean active) {
+        chip.setBackgroundResource(active
+                ? R.drawable.qm_bg_filter_active
+                : R.drawable.qm_bg_filter_idle);
+        chip.setTextColor(active ? 0xFFFFFFFF
+                : getColor(R.color.qm_ink));
+        chip.setTypeface(active ? Typeface.create(chip.getTypeface(), Typeface.BOLD)
+                : Typeface.create(chip.getTypeface(), Typeface.NORMAL));
+    }
+
+    /** Yellow Announcements banner — only when a real announcement exists. */
+    private void renderBanner() {
+        if (announcementBanner == null) return;
+        if (latestAnnouncement == null) {
+            announcementBanner.setVisibility(View.GONE);
+            return;
+        }
+        announcementBanner.setVisibility(View.VISIBLE);
+        TextView title = findViewById(R.id.chat_banner_title);
+        TextView meta = findViewById(R.id.chat_banner_meta);
+        title.setText(latestAnnouncement.title != null
+                ? latestAnnouncement.title : "");
+        String when = relativeTime(latestAnnouncement.publishedAtIso);
+        String by = latestAnnouncement.creatorName != null
+                ? latestAnnouncement.creatorName : "";
+        meta.setText(when != null
+                ? getString(R.string.chat_announcements_latest, when, by)
+                : by);
+        announcementBanner.setOnClickListener(v -> openAnnouncements());
+    }
+
+    private void openAnnouncements() {
+        // Route through the existing authenticated WebView shell at the
+        // real Announcements page (no native announcements screen exists).
+        Intent i = new Intent(this, MainActivity.class);
+        i.putExtra("qolab_start_path", "/announcements");
+        i.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        startActivity(i);
+    }
+
     // ── rendering ─────────────────────────────────────────────────────
 
     private void renderList() {
         chatSkeleton.setVisibility(View.GONE);
         chatErrorBox.setVisibility(View.GONE);
+        renderFilterChips();
 
         List<ChatDataClient.Conversation> filtered = new ArrayList<>();
-        if (lastQuery.isEmpty()) {
-            filtered.addAll(conversations);
-        } else {
-            for (ChatDataClient.Conversation c : conversations) {
-                if (c.name != null && c.name.toLowerCase(Locale.US).contains(lastQuery)) {
-                    filtered.add(c);
-                }
+        for (ChatDataClient.Conversation c : conversations) {
+            if (!ChatDataClient.matchesFilter(c, filter)) continue;
+            if (!lastQuery.isEmpty()
+                    && (c.name == null
+                    || !c.name.toLowerCase(Locale.US).contains(lastQuery))) {
+                continue;
             }
+            filtered.add(c);
         }
 
         if (conversations.isEmpty()) {
@@ -234,17 +391,79 @@ public class ChatListActivity extends AppCompatActivity {
         }
         chatEmpty.setVisibility(View.GONE);
         chatList.removeAllViews();
+
+        List<ChatDataClient.Conversation> pinned = new ArrayList<>();
+        List<ChatDataClient.Conversation> recent = new ArrayList<>();
         for (ChatDataClient.Conversation c : filtered) {
-            chatList.addView(inflateRow(c));
+            if (ChatDataClient.isPinned(c)) pinned.add(c);
+            else recent.add(c);
         }
+
+        if (!pinned.isEmpty()) {
+            chatList.addView(sectionHeader(R.string.chat_section_pinned, true));
+            for (ChatDataClient.Conversation c : pinned) {
+                chatList.addView(inflateRow(c));
+            }
+        }
+        if (!recent.isEmpty()) {
+            chatList.addView(sectionHeader(R.string.chat_section_recent, false));
+            for (ChatDataClient.Conversation c : recent) {
+                chatList.addView(inflateRow(c));
+            }
+        }
+        if (pinned.isEmpty() && recent.isEmpty()) {
+            // filtered nonempty guaranteed above; safety net only
+            chatEmpty.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private View sectionHeader(int labelRes, boolean pinned) {
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.setGravity(Gravity.CENTER_VERTICAL);
+        int pad = dp(2);
+        header.setPadding(pad, dp(8), pad, dp(6));
+
+        if (pinned) {
+            android.widget.ImageView pin = new android.widget.ImageView(this);
+            pin.setImageResource(R.drawable.qm_ic_pin);
+            pin.setBackgroundResource(R.drawable.qm_bg_pin_circle);
+            int s = dp(18);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(s, s);
+            lp.rightMargin = dp(6);
+            pin.setLayoutParams(lp);
+            header.addView(pin);
+        }
+        TextView label = new TextView(this);
+        label.setText(labelRes);
+        label.setTextColor(getColor(R.color.qm_ink));
+        label.setTextSize(13);
+        label.setTypeface(label.getTypeface(), Typeface.BOLD);
+        header.addView(label);
+        return header;
     }
 
     private View inflateRow(ChatDataClient.Conversation c) {
         View row = getLayoutInflater().inflate(R.layout.view_chat_row, chatList, false);
+        View card = row.findViewById(R.id.chat_row_card);
         TextView avatar = row.findViewById(R.id.chat_row_avatar);
         TextView name = row.findViewById(R.id.chat_row_name);
         TextView preview = row.findViewById(R.id.chat_row_preview);
+        TextView time = row.findViewById(R.id.chat_row_time);
         TextView unread = row.findViewById(R.id.chat_row_unread);
+
+        // Pastel card background (stable per channel id, mockup palette).
+        int pastel = PASTELS[ChatDataClient.pastelIndexFor(c.id, PASTELS.length)];
+        GradientDrawable cardBg = new GradientDrawable();
+        cardBg.setShape(GradientDrawable.RECTANGLE);
+        cardBg.setCornerRadius(dp(16));
+        cardBg.setColor(pastel);
+        card.setBackground(cardBg);
+        row.setClickable(true);
+        row.setFocusable(true);
+        row.setForeground(null);
+        card.setClickable(true);
+        card.setFocusable(true);
 
         avatar.setText(HomeActivity.initialsOf(c.name));
         GradientDrawable circle = new GradientDrawable();
@@ -255,8 +474,13 @@ public class ChatListActivity extends AppCompatActivity {
         name.setText(c.name);
         preview.setText(previewLine(c));
 
-        if (c.unreadCount > 0) {
-            unread.setText(String.format(Locale.US, "%d", c.unreadCount));
+        // Timestamp (mockup): short relative time or weekday-time.
+        String rel = relativeTime(c.lastMessageAt);
+        time.setText(rel != null ? rel : "");
+
+        int unreadCount = unreadCountOf(c);
+        if (unreadCount > 0) {
+            unread.setText(String.format(Locale.US, "%d", unreadCount));
             unread.setVisibility(View.VISIBLE);
             name.setTypeface(name.getTypeface(), Typeface.BOLD);
         } else {
@@ -265,6 +489,15 @@ public class ChatListActivity extends AppCompatActivity {
 
         row.setOnClickListener(v -> openConversation(c));
         return row;
+    }
+
+    /** Channel unread: prefer the fresh unread-counts map, else payload. */
+    private int unreadCountOf(ChatDataClient.Conversation c) {
+        if (unreadCounts != null) {
+            Integer v = unreadCounts.get(c.id);
+            if (v != null) return v;
+        }
+        return c.unreadCount;
     }
 
     /** Honest preview: member count + relative activity (the payload has
@@ -298,6 +531,10 @@ public class ChatListActivity extends AppCompatActivity {
         i.putExtra(ChatScreenActivity.EXTRA_CHANNEL_TYPE, c.type);
         i.putExtra(ChatScreenActivity.EXTRA_MY_USER_ID, myUserId);
         startActivity(i);
+    }
+
+    private int dp(int v) {
+        return Math.round(v * getResources().getDisplayMetrics().density);
     }
 
     // ── create group sheet ────────────────────────────────────────────

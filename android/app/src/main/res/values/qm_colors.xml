@@ -65,4 +65,11 @@
     <color name="qm_nav_unselected">#7A756D</color>
     <!-- Warm white navigation container -->
     <color name="qm_nav_bg">#FFFDF8</color>
+
+    <!-- ═══ Chat v1.5.40 pastel card palette (mockup) ═══ -->
+    <color name="qm_chat_pastel_mint">#DDEBD8</color>
+    <color name="qm_chat_pastel_yellow">#F7E8B0</color>
+    <color name="qm_chat_pastel_lavender">#E4DDF2</color>
+    <color name="qm_chat_pastel_peach">#F8E0D2</color>
+    <color name="qm_chat_pastel_blue">#D9E4F5</color>
 </resources>

@@ -412,27 +412,32 @@ public class HomeActivity extends AppCompatActivity {
         QolabWebViewTransport transport = QolabWebViewTransport.get();
         lastDiag.transportAlive = transport != null && transport.isAlive();
         if (transport == null || !transport.isAlive()) {
-            // v1.5.35 stability: cold start after process death — the
-            // persisted session cookie may still be valid. Rehydrate the
-            // transport from it (server proves/invalidates the session)
-            // instead of instantly bouncing to Login (which expired every
-            // cookie = forced manual re-login on every restart).
-            lastDiag.loginReason = "transport gone → rehydrating session";
+            // v1.5.40: cold start after process death — the persisted
+            // session cookie may still be valid. The SessionGate rechecks
+            // with the SERVER (bounded retries, transient network errors
+            // are NEVER treated as session expiry). Only a proven /login
+            // landing routes to native Login; a dead network shows the
+            // retryable error state instead of destroying the session.
+            lastDiag.loginReason = "transport gone → verifying session (SessionGate)";
             lastDiag.loginTransition = false;
             fetching = false;
             String origin = BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", "");
-            QolabWebViewTransport.rehydrate(getApplicationContext(), origin, valid -> {
-                runOnUiThread(() -> {
-                    if (valid) {
+            SessionGate.requireValidSession(getApplicationContext(), origin,
+                    () -> runOnUiThread(() -> {
                         fetching = false;
                         loadHome(); // transport adopted — retry deterministically
-                    } else {
-                        lastDiag.loginReason = "session expired → Login";
+                    }),
+                    () -> runOnUiThread(() -> {
+                        lastDiag.loginReason = "session expired (server-proven) → Login";
                         lastDiag.loginTransition = true;
                         routeToLogin();
-                    }
-                });
-            });
+                    }),
+                    () -> runOnUiThread(() -> {
+                        // Network unavailable for the whole recheck window:
+                        // keep the cookie, show the retryable error state.
+                        lastDiag.loginReason = "network unavailable → error state";
+                        showError();
+                    }));
             return;
         }
         long t0 = android.os.SystemClock.elapsedRealtime();
@@ -447,14 +452,29 @@ public class HomeActivity extends AppCompatActivity {
             lastDiag.parseOk = false;
             fetching = false;
             if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
-                lastDiag.loginReason = "transport dead → Login";
-                lastDiag.loginTransition = true;
-                routeToLogin();
+                // v1.5.40: a dead transport is NOT proof of session expiry
+                // (renderer kill, memory pressure). Verify with the server
+                // via the SessionGate before ever showing Login.
+                lastDiag.loginReason = "transport dead → verifying session (SessionGate)";
+                SessionGate.requireValidSession(getApplicationContext(),
+                        BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", ""),
+                        () -> runOnUiThread(() -> loadHome()),
+                        () -> runOnUiThread(() -> {
+                            lastDiag.loginReason =
+                                    "session expired (server-proven) → Login";
+                            lastDiag.loginTransition = true;
+                            routeToLogin();
+                        }),
+                        () -> runOnUiThread(() -> showError()));
                 return;
             }
             if (r.status == 401) {
-                // Genuine session loss inside the browser context itself.
-                // Route to Login — NO Java cookie reconstruction.
+                // Genuine session loss INSIDE the browser context itself:
+                // the server answered 401 to an authenticated request with
+                // Accept: application/json (verified live — unauthenticated
+                // requests to protected routes return 401, not a redirect,
+                // when the transport's Accept header is set). This is the
+                // server PROVING expiry; routing to Login is honest.
                 lastDiag.loginReason = "401 from WebView transport → Login";
                 lastDiag.loginTransition = true;
                 routeToLogin();

@@ -45,9 +45,11 @@ public class LobbyWiringTest {
     @Test
     public void lobbyUsesExistingEndpointsOnly() throws Exception {
         String src = read(JAVA + "/LobbyActivity.java");
-        assertTrue(src.contains("transport.getJson(\"/chat/channels/\" + channelId + \"/messages"));
-        assertTrue(src.contains("transport.postJson(\"/chat/channels/\" + channelId + \"/messages\""));
-        assertTrue(src.contains("transport.getJson(\"/office/rooms/\" + roomSlug"));
+        // v1.5.40: transport captured at use-time (local var t) — the
+        // ENDPOINTS are the contract, not the variable name.
+        assertTrue(src.contains("getJson(\"/chat/channels/\" + channelId + \"/messages"));
+        assertTrue(src.contains("postJson(\"/chat/channels/\" + channelId + \"/messages\""));
+        assertTrue(src.contains("getJson(\"/office/rooms/\" + roomSlug"));
     }
 
     @Test

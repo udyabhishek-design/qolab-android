@@ -65,6 +65,12 @@ public class RoomActivity extends AppCompatActivity {
     private String roomName;
     private RoomPage page;
     private volatile boolean fetching;
+
+    /** v1.5.40: transport origin for the SessionGate recheck. */
+    private String appOrigin() {
+        return BuildConfig.QOLAB_ORIGIN != null ? BuildConfig.QOLAB_ORIGIN
+                : "https://workpulse-gbpedt.drytis.dev";
+    }
     /** v1.5.38: guards the create→join chain against double taps. */
     private volatile boolean entering;
     private boolean overviewRendered, meetingsRendered, tasksRendered;
@@ -203,16 +209,28 @@ public class RoomActivity extends AppCompatActivity {
         entering = true;
         QolabWebViewTransport transport = QolabWebViewTransport.get();
         if (transport == null) {
+            // v1.5.40: verify with the server before logging out.
             entering = false;
-            routeToLogin();
+            SessionGate.requireValidSession(this, appOrigin(),
+                    () -> runOnUiThread(() -> enterMeeting(meetingId)),
+                    this::routeToLogin,
+                    null);
             return;
         }
         transport.postJson("/meetings/" + meetingId + "/start-or-join-session",
                 "{}", r -> runOnUiThread(() -> {
-                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
-                            || r.status == 401) {
+                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+                        // v1.5.40: verify before logout (SessionGate).
                         entering = false;
-                        routeToLogin();
+                        SessionGate.requireValidSession(this, appOrigin(),
+                                () -> runOnUiThread(() -> enterMeeting(meetingId)),
+                                this::routeToLogin,
+                                null);
+                        return;
+                    }
+                    if (r.status == 401) {
+                        entering = false;
+                        routeToLogin(); // server-proven expiry
                         return;
                     }
                     long resolvedId = RoomDataClient.parseStartOrJoin(r.body);
@@ -233,15 +251,24 @@ public class RoomActivity extends AppCompatActivity {
         QolabWebViewTransport transport = QolabWebViewTransport.get();
         if (transport == null) {
             entering = false;
-            routeToLogin();
+            SessionGate.requireValidSession(this, appOrigin(),
+                    () -> runOnUiThread(() -> requestJoinToken(resolvedMeetingId)),
+                    this::routeToLogin,
+                    null);
             return;
         }
         transport.postJson("/meetings/" + resolvedMeetingId + "/join-token",
                 "{}", r -> runOnUiThread(() -> {
                     entering = false;
-                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
-                            || r.status == 401) {
-                        routeToLogin();
+                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+                        SessionGate.requireValidSession(this, appOrigin(),
+                                () -> runOnUiThread(() -> requestJoinToken(resolvedMeetingId)),
+                                this::routeToLogin,
+                                null);
+                        return;
+                    }
+                    if (r.status == 401) {
+                        routeToLogin(); // server-proven expiry
                         return;
                     }
                     RoomDataClient.JoinToken jt = RoomDataClient.parseJoinToken(r.body);
@@ -306,15 +333,26 @@ public class RoomActivity extends AppCompatActivity {
         QolabWebViewTransport transport = QolabWebViewTransport.get();
         if (transport == null) {
             fetching = false;
-            routeToLogin();
+            SessionGate.requireValidSession(this, appOrigin(),
+                    () -> runOnUiThread(this::loadRoom),
+                    this::routeToLogin,
+                    null);
             return;
         }
         transport.getJson("/office/rooms/" + roomSlug, r -> runOnUiThread(() -> {
             fetching = false;
             Log.d(TAG, "room page status=" + r.status
                     + " bodyLen=" + (r.body == null ? -1 : r.body.length()));
-            if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD || r.status == 401) {
-                routeToLogin();
+            if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+                // v1.5.40: verify before logout (SessionGate).
+                SessionGate.requireValidSession(this, appOrigin(),
+                        () -> runOnUiThread(this::loadRoom),
+                        this::routeToLogin,
+                        null);
+                return;
+            }
+            if (r.status == 401) {
+                routeToLogin(); // server-proven expiry
                 return;
             }
             if (r.status != 200 || r.body == null) {

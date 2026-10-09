@@ -31,4 +31,22 @@
     <string name="chat_preview_two">2 members · %1$s</string>
     <string name="chat_active_recent">Active %1$s</string>
     <string name="chat_say_hello">Say hello</string>
+    <!-- ═══ v1.5.40 mockup UI ═══ -->
+    <string name="chat_subtitle">Message your people</string>
+    <string name="chat_wordmark">Qolab</string>
+    <string name="chat_filter_all">All</string>
+    <string name="chat_filter_dms">DMs</string>
+    <string name="chat_filter_groups">Groups</string>
+    <string name="chat_filter_announcements">Announcements</string>
+    <string name="chat_search_action">Search</string>
+    <string name="chat_cd_search">Search conversations</string>
+    <string name="chat_cd_compose">New conversation</string>
+    <string name="chat_cd_pin">Pinned</string>
+    <string name="chat_section_pinned">Pinned</string>
+    <string name="chat_section_recent">Recent</string>
+    <string name="chat_announcements_banner">Announcements</string>
+    <string name="chat_announcements_latest">%1$s · %2$s</string>
+    <string name="chat_announcements_empty">Company updates will appear here</string>
+    <string name="chat_announcements_open">Open announcements</string>
+    <string name="chat_offline">You’re offline — check your connection.</string>
 </resources>

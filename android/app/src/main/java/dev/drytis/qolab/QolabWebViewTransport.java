@@ -432,7 +432,27 @@ public final class QolabWebViewTransport {
      * thread.
      */
     public interface RehydrateCallback {
+        /**
+         * v1.5.40: sessionValid now carries THREE states.
+         *   true  — server proved the session (adopted).
+         *   false — server PROVED the session is gone: the dashboard load
+         *           landed on /login (a genuine redirect), or no persisted
+         *           *-session cookie exists at all. Routing to Login is the
+         *           honest response.
+         *           THIS IS NOT REPORTED for transient transport failures.
+         */
         void onResult(boolean sessionValid);
+
+        /**
+         * v1.5.40: rehydration could not DETERMINE session validity —
+         * main-frame network error, timeout, or a redirect that neither
+         * proved nor disproved the session. The session cookie is kept
+         * intact; callers must retry or show a temporary error, NEVER
+         * route to Login (which would expire a possibly-valid cookie).
+         */
+        default void onTransientFailure(String category) {
+            onResult(false);
+        }
     }
 
     /** Lets the rehydrate() timeout runnable trigger the client's settle(). */
@@ -482,13 +502,28 @@ public final class QolabWebViewTransport {
                     MAIN().removeCallbacks(timeout);
                     if (valid) {
                         adopt(wv, o);
+                        cb.onResult(true);
                     } else {
                         try { wv.destroy(); } catch (Exception ignored) { }
+                        // v1.5.40: only /login is PROOF the session is gone.
+                        // Network errors / timeouts are TRANSIENT — the
+                        // cookie stays; the caller retries or shows a
+                        // temporary error instead of forcing a logout.
+                        RehydrateOutcome outcome = classifyRehydrateFailure(
+                                failureCategory, loginLanding);
+                        if (outcome == RehydrateOutcome.PROVEN_INVALID) {
+                            cb.onResult(false);
+                        } else {
+                            cb.onTransientFailure(
+                                    failureCategory == null ? "timeout" : failureCategory);
+                        }
                     }
-                    cb.onResult(valid);
                 }
             };
-            final Runnable timeout = () -> client.settle(false);
+            final Runnable timeout = () -> {
+                if (client.failureCategory == null) client.failureCategory = "timeout";
+                client.settle(false);
+            };
             client.attach(timeout);
             wv.setWebViewClient(client);
             MAIN().postDelayed(timeout, 15_000);
@@ -496,10 +531,40 @@ public final class QolabWebViewTransport {
         });
     }
 
+    /** Outcome of one rehydrate failure — PROVEN_INVALID vs TRANSIENT. */
+    public enum RehydrateOutcome {
+        /** Server landed the dashboard load on /login — session is gone. */
+        PROVEN_INVALID,
+        /** Main-frame network error / timeout — validity unknown. */
+        TRANSIENT
+    }
+
+    /**
+     * v1.5.40: classify a rehydrate failure. Static, JVM-testable.
+     * The old code treated EVERY failure (onReceivedError, 15 s timeout)
+     * as "session invalid", so a cold start during a network hiccup (or a
+     * slow dashboard render) routed to LoginActivity — whose onCreate
+     * EXPIRED the persisted session cookie. A still-valid session was
+     * destroyed by a transient blip. Only a confirmed /login landing is
+     * PROVEN_INVALID; everything else keeps the cookie and retries.
+     */
+    static RehydrateOutcome classifyRehydrateFailure(String failureCategory,
+                                                     boolean landedOnLogin) {
+        if (landedOnLogin) return RehydrateOutcome.PROVEN_INVALID;
+        if (failureCategory == null) return RehydrateOutcome.PROVEN_INVALID;
+        return RehydrateOutcome.TRANSIENT;
+    }
+
     /** WebViewClient that lets the rehydrate() timeout trigger settle(). */
     abstract static class RehydrateWebViewClient
             extends android.webkit.WebViewClient implements RehydrateClient {
         Runnable timeout;
+
+        /** v1.5.40: true when the server explicitly parked us on /login. */
+        boolean loginLanding = false;
+        /** v1.5.40: why the attempt failed ("network-error"|"timeout"|null
+         *  when the failure WAS the /login landing itself). */
+        String failureCategory = null;
 
         void attach(Runnable timeout) { this.timeout = timeout; }
 
@@ -508,6 +573,7 @@ public final class QolabWebViewTransport {
             // The server keeps a logged-in user away from /login; only an
             // expired session ends up parked there.
             if (url != null && url.contains("/login")) {
+                loginLanding = true;
                 settle(false);
                 return;
             }
@@ -523,6 +589,9 @@ public final class QolabWebViewTransport {
                                     android.webkit.WebResourceRequest req,
                                     android.webkit.WebResourceError err) {
             if (req.isForMainFrame()) {
+                // v1.5.40: a network error says NOTHING about the session.
+                // Mark transient — the caller retries, the cookie survives.
+                failureCategory = "network-error";
                 settle(false);
             }
         }

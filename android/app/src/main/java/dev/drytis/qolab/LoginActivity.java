@@ -75,32 +75,15 @@ public class LoginActivity extends AppCompatActivity {
             appHost = null;
         }
 
-        // Clean stale session state so the MainActivity gate can't bounce
-        // back mid-expiry: if we're showing native Login, any *-session
-        // cookie present is expired/invalid. v1.5.2: ALSO expire XSRF-TOKEN
-        // — a cross-run STALE XSRF value is exactly what paired with a fresh
-        // session to produce the device 419 (see XsrfFreshness javadoc).
-        // Cookie NAMES only logged.
-        try {
-            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
-            String existing = cm.getCookie(appOrigin);
-            if (existing != null) {
-                boolean hadSession = false;
-                for (String part : existing.split(";")) {
-                    String name = part.split("=", 2)[0].trim();
-                    if (name.toLowerCase().endsWith("session")
-                            || name.equals("XSRF-TOKEN")) {
-                        cm.setCookie(appOrigin + "/", AuthNavRules.expireCookieValue(name));
-                        hadSession = true;
-                    }
-                }
-                if (hadSession) {
-                    cm.flush();
-                    android.util.Log.i(TAG, "cleared stale session cookie on native login");
-                }
-            }
-        } catch (Exception ignored) {
-        }
+        // v1.5.40: the blanket onCreate cookie expiry is GONE. It was the
+        // amplifier of the cold-start logout bug: any accidental landing
+        // here (e.g. a transient network failure misread as an expired
+        // session) DESTROYED a possibly-valid persisted session and forced
+        // a manual re-login. Stale cookies are now cleared at the ONLY
+        // moment it is provably safe: attemptSignIn, right before the
+        // user submits fresh credentials (clearStaleCookiesForSignIn()).
+        // The MainActivity gate still expires session cookies when the
+        // WEB APP ITSELF redirects to /login (server-confirmed logout).
 
         // v1.4.11: DEBUG-only access to the previous session's logout trace
         // (LogoutTrace is static, so it survives the activity transition).
@@ -277,6 +260,37 @@ public class LoginActivity extends AppCompatActivity {
         target.setVisibility(View.VISIBLE);
     }
 
+    /**
+     * v1.5.40 (relocated from onCreate): expire *-session and XSRF-TOKEN
+     * cookies immediately before a real sign-in submission. Keeps the
+     * v1.5.2 rationale (a cross-run STALE XSRF value paired with a fresh
+     * session caused a device 419) while ensuring a transient landing on
+     * this screen can no longer destroy a valid persisted session.
+     * Cookie NAMES only logged.
+     */
+    private void clearStaleCookiesForSignIn() {
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            String existing = cm.getCookie(appOrigin);
+            if (existing != null) {
+                boolean hadSession = false;
+                for (String part : existing.split(";")) {
+                    String name = part.split("=", 2)[0].trim();
+                    if (name.toLowerCase().endsWith("session")
+                            || name.equals("XSRF-TOKEN")) {
+                        cm.setCookie(appOrigin + "/", AuthNavRules.expireCookieValue(name));
+                        hadSession = true;
+                    }
+                }
+                if (hadSession) {
+                    cm.flush();
+                    android.util.Log.i(TAG, "cleared stale cookies before sign-in submit");
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     // ── Submit ──────────────────────────────────────────────────────
 
     private void attemptSignIn() {
@@ -284,6 +298,14 @@ public class LoginActivity extends AppCompatActivity {
         hideKeyboard();
         formError.setVisibility(View.GONE);
         if (!validate()) return;
+
+        // v1.5.40 (moved from onCreate): clear stale *-session + XSRF
+        // cookies ONLY when the user is actually submitting fresh
+        // credentials — this is the one moment a present cookie is
+        // provably stale. Clearing on every onCreate (the old behavior)
+        // destroyed valid persisted sessions whenever an activity
+        // misrouted here on a transient failure (cold-start bug).
+        clearStaleCookiesForSignIn();
 
         setSubmitting(true);
         final String email = emailInput.getText().toString().trim();

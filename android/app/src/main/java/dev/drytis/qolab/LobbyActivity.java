@@ -71,7 +71,11 @@ public class LobbyActivity extends AppCompatActivity {
     private List<RoomDataClient.Member> members;
     private boolean membersLoaded;
 
-    private final QolabWebViewTransport transport = QolabWebViewTransport.get();
+    /** v1.5.40: transport origin for the SessionGate recheck. */
+    private String appOrigin() {
+        return BuildConfig.QOLAB_ORIGIN != null ? BuildConfig.QOLAB_ORIGIN
+                : "https://workpulse-gbpedt.drytis.dev";
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -160,13 +164,38 @@ public class LobbyActivity extends AppCompatActivity {
         skeleton.setVisibility(View.VISIBLE);
         errorView.setVisibility(View.GONE);
         retryView.setVisibility(View.GONE);
-        transport.getJson("/chat/channels/" + channelId + "/messages?per_page=50", r -> {
+        // v1.5.40: capture at use-time; a field-init capture was the
+        // v1.5.35 intermittent-failure class.
+        final QolabWebViewTransport t = QolabWebViewTransport.get();
+        if (t == null || !t.isAlive()) {
+            SessionGate.requireValidSession(this, appOrigin(),
+                    () -> runOnUiThread(this::loadDiscussion),
+                    () -> runOnUiThread(() -> {
+                        startActivity(new Intent(LobbyActivity.this, MainActivity.class)
+                                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                        finish();
+                    }),
+                    () -> runOnUiThread(this::showError));
+            return;
+        }
+        t.getJson("/chat/channels/" + channelId + "/messages?per_page=50", r -> {
             runOnUiThread(() -> {
                 skeleton.setVisibility(View.GONE);
                 Log.d(TAG, "messages status=" + r.status + " bodyLen="
                         + (r.body == null ? -1 : r.body.length()));
-                if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
-                        || r.status == 401) {
+                if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+                    // v1.5.40: verify before bouncing (SessionGate).
+                    SessionGate.requireValidSession(this, appOrigin(),
+                            () -> runOnUiThread(this::loadDiscussion),
+                            () -> runOnUiThread(() -> {
+                                startActivity(new Intent(LobbyActivity.this, MainActivity.class)
+                                        .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                                finish();
+                            }),
+                            () -> runOnUiThread(this::showError));
+                    return;
+                }
+                if (r.status == 401) {
                     startActivity(new Intent(this, MainActivity.class)
                             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
                     finish();
@@ -269,10 +298,21 @@ public class LobbyActivity extends AppCompatActivity {
         sending = true;
         sendBtn.setEnabled(false);
         sendBtn.setAlpha(0.45f);
+        // v1.5.40: capture at use-time (field-init capture was a known
+        // intermittent-failure source — v1.5.35 CreateMeetingSheet fix).
+        QolabWebViewTransport t = QolabWebViewTransport.get();
+        if (t == null || !t.isAlive()) {
+            sending = false;
+            sendBtn.setEnabled(true);
+            sendBtn.setAlpha(1f);
+            android.widget.Toast.makeText(this, R.string.lobby_send_failed,
+                    android.widget.Toast.LENGTH_SHORT).show();
+            return;
+        }
         try {
             JSONObject payload = new JSONObject();
             payload.put("body", text);
-            transport.postJson("/chat/channels/" + channelId + "/messages",
+            t.postJson("/chat/channels/" + channelId + "/messages",
                     payload.toString(), r -> runOnUiThread(() -> {
                         sending = false;
                         sendBtn.setEnabled(true);
@@ -281,8 +321,27 @@ public class LobbyActivity extends AppCompatActivity {
                         if (r.status == 201 || r.status == 200) {
                             composerInput.setText("");
                             loadDiscussion(); // refetch: message + replies arrive together
-                        } else if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
-                                || r.status == 401) {
+                        } else if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+                            // v1.5.40: verify before bouncing; keep text on transient.
+                            SessionGate.requireValidSession(this, appOrigin(),
+                                    () -> runOnUiThread(() -> {
+                                        sendBtn.setEnabled(true);
+                                        sendBtn.setAlpha(1f);
+                                        sending = false;
+                                    }),
+                                    () -> runOnUiThread(() -> {
+                                        startActivity(new Intent(LobbyActivity.this, MainActivity.class)
+                                                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
+                                        finish();
+                                    }),
+                                    () -> runOnUiThread(() -> {
+                                        sendBtn.setEnabled(true);
+                                        sendBtn.setAlpha(1f);
+                                        sending = false;
+                                        android.widget.Toast.makeText(this, R.string.lobby_send_failed,
+                                                android.widget.Toast.LENGTH_SHORT).show();
+                                    }));
+                        } else if (r.status == 401) {
                             startActivity(new Intent(this, MainActivity.class)
                                     .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP));
                             finish();
@@ -306,7 +365,13 @@ public class LobbyActivity extends AppCompatActivity {
 
     private void loadMembers() {
         membersSkeleton.setVisibility(View.VISIBLE);
-        transport.getJson("/office/rooms/" + roomSlug, r -> runOnUiThread(() -> {
+        QolabWebViewTransport t = QolabWebViewTransport.get(); // use-time capture
+        if (t == null || !t.isAlive()) {
+            membersSkeleton.setVisibility(View.GONE);
+            renderMembersError();
+            return;
+        }
+        t.getJson("/office/rooms/" + roomSlug, r -> runOnUiThread(() -> {
             membersSkeleton.setVisibility(View.GONE);
             Log.d(TAG, "members page status=" + r.status);
             if (r.status != 200 || r.body == null) {

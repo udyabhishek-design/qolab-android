@@ -48,6 +48,12 @@ public class OfficeActivity extends AppCompatActivity {
     private HomeDataClient.HomeData data;
     private volatile boolean fetching;
 
+    /** v1.5.40: transport origin for the SessionGate recheck. */
+    private String appOrigin() {
+        return BuildConfig.QOLAB_ORIGIN != null ? BuildConfig.QOLAB_ORIGIN
+                : "https://workpulse-gbpedt.drytis.dev";
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -161,8 +167,12 @@ public class OfficeActivity extends AppCompatActivity {
         fetching = true;
         QolabWebViewTransport transport = QolabWebViewTransport.get();
         if (transport == null) {
+            // v1.5.40: verify with the server before logging out.
             fetching = false;
-            routeToLogin();
+            SessionGate.requireValidSession(this, appOrigin(),
+                    () -> runOnUiThread(this::loadOffice),
+                    this::routeToLogin,
+                    this::showError);
             return;
         }
         transport.getJson("/mobile/home", r -> runOnUiThread(() -> {
@@ -170,8 +180,16 @@ public class OfficeActivity extends AppCompatActivity {
             Log.d(TAG, "transport result status=" + r.status
                     + " bodyLen=" + (r.body == null ? "null" : r.body.length())
                     + " errCat=" + r.errorCategory);
-            if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD || r.status == 401) {
-                Log.d(TAG, "routing to login (transport dead / 401)");
+            if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+                Log.d(TAG, "transport dead → verifying session (SessionGate)");
+                SessionGate.requireValidSession(this, appOrigin(),
+                        () -> runOnUiThread(this::loadOffice),
+                        this::routeToLogin,
+                        this::showError);
+                return;
+            }
+            if (r.status == 401) {
+                Log.d(TAG, "routing to login (401, server-proven)");
                 routeToLogin();
                 return;
             }

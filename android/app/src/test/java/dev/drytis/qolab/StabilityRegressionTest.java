@@ -51,8 +51,14 @@ public class StabilityRegressionTest {
     @Test
     public void homeRehydratesInsteadOfInstantLogoutBounce() throws Exception {
         String src = read("app/src/main/java/dev/drytis/qolab/HomeActivity.java");
+        // v1.5.40: rehydration now flows through the SessionGate
+        // (proof-before-logout). The gate itself must drive rehydrate and
+        // Home must use the gate rather than bouncing straight to Login.
         assertTrue("cold start must attempt session rehydration first",
-                src.contains("QolabWebViewTransport.rehydrate("));
+                src.contains("SessionGate.requireValidSession"));
+        assertTrue("the gate must drive the transport rehydrate",
+                read("app/src/main/java/dev/drytis/qolab/SessionGate.java")
+                        .contains("QolabWebViewTransport.rehydrate("));
         assertTrue("failed rehydration must route to Login honestly",
                 src.contains("routeToLogin()"));
     }

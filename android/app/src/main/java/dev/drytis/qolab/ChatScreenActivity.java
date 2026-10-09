@@ -171,16 +171,22 @@ public class ChatScreenActivity extends AppCompatActivity {
         if (loading || channelId <= 0) return;
         QolabWebViewTransport transport = QolabWebViewTransport.get();
         if (transport == null || !transport.isAlive()) {
-            QolabWebViewTransport.rehydrate(this, origin(), valid -> {
-                if (valid) loadHistory();
-                else {
-                    Intent i = new Intent(this, LoginActivity.class);
-                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
-                            | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-                    startActivity(i);
-                    finish();
-                }
-            });
+            // v1.5.40: verify the session with the server before ever
+            // showing Login (SessionGate — transient failures keep the
+            // cookie and surface an error instead).
+            SessionGate.requireValidSession(this, origin(),
+                    () -> runOnUiThread(this::loadHistory),
+                    () -> runOnUiThread(() -> {
+                        Intent i = new Intent(this, LoginActivity.class);
+                        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                        startActivity(i);
+                        finish();
+                    }),
+                    () -> runOnUiThread(() -> {
+                        skeleton.setVisibility(View.GONE);
+                        errorBox.setVisibility(View.VISIBLE);
+                    }));
             return;
         }
         loading = true;
@@ -189,8 +195,24 @@ public class ChatScreenActivity extends AppCompatActivity {
                 r -> runOnUiThread(() -> {
                     loading = false;
                     if (isFinishing() || isDestroyed()) return;
-                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
-                            || r.status == 401) {
+                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+                        // v1.5.40: verify before logout.
+                        SessionGate.requireValidSession(this, origin(),
+                                () -> runOnUiThread(this::loadHistory),
+                                () -> runOnUiThread(() -> {
+                                    Intent i = new Intent(this, LoginActivity.class);
+                                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                                            | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+                                    startActivity(i);
+                                    finish();
+                                }),
+                                () -> runOnUiThread(() -> {
+                                    skeleton.setVisibility(View.GONE);
+                                    errorBox.setVisibility(View.VISIBLE);
+                                }));
+                        return;
+                    }
+                    if (r.status == 401) {
                         Intent i = new Intent(this, LoginActivity.class);
                         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                                 | Intent.FLAG_ACTIVITY_CLEAR_TASK);

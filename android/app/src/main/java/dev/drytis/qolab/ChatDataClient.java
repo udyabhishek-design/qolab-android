@@ -79,6 +79,54 @@ public final class ChatDataClient {
         }
     }
 
+    /**
+     * v1.5.40 — one published announcement (GET /announcements Inertia props,
+     * existing endpoint; unauthenticated JSON requests → 401, authenticated →
+     * the Inertia page JSON for XHR). Announcements are a SEPARATE module
+     * from chat channels — the banner surfaces the latest one honestly and
+     * never invents content.
+     */
+    public static final class Announcement {
+        public final long id;
+        public final String title;
+        public final String priority;      // urgent|high|normal|low
+        public final String publishedAtIso;
+        public final String creatorName;
+
+        Announcement(long id, String title, String priority,
+                     String publishedAtIso, String creatorName) {
+            this.id = id;
+            this.title = title;
+            this.priority = priority;
+            this.publishedAtIso = publishedAtIso;
+            this.creatorName = creatorName;
+        }
+    }
+
+    /** Parse props.announcements.data[] (AnnouncementService::formatAnnouncement). */
+    static List<Announcement> parseAnnouncements(JSONObject page) {
+        List<Announcement> out = new ArrayList<>();
+        if (page == null) return out;
+        JSONObject props = page.optJSONObject("props");
+        if (props == null) return out;
+        JSONObject announcements = props.optJSONObject("announcements");
+        if (announcements == null) return out;
+        JSONArray data = announcements.optJSONArray("data");
+        if (data == null) return out;
+        for (int i = 0; i < data.length(); i++) {
+            JSONObject a = data.optJSONObject(i);
+            if (a == null) continue;
+            JSONObject creator = a.optJSONObject("creator");
+            out.add(new Announcement(
+                    a.optLong("id", 0),
+                    a.optString("title", null),
+                    a.optString("priority", null),
+                    a.optString("published_at", null),
+                    creator != null ? creator.optString("name", null) : null));
+        }
+        return out;
+    }
+
     /** Inertia props from GET /chat (or /chat/channels/{id}). */
     public static final class ChatIndex {
         public final List<Conversation> conversations; // sorted: most recent first
@@ -326,6 +374,46 @@ public final class ChatDataClient {
             long tb = parseIsoMillis(b.lastMessageAt);
             return Long.compare(tb, ta);
         });
+    }
+
+    // ── v1.5.40 mockup UI classification (pure, JVM-tested) ──────────
+
+    /** UI filter chips. */
+    public enum ChatFilter { ALL, DMS, GROUPS, ANNOUNCEMENTS }
+
+    /**
+     * Filter selection for a conversation. DMS: dm=true. GROUPS: type
+     * group. ANNOUNCEMENTS: the company-wide official channel (type
+     * company — the backend's seeded 'announcements' channel; no per-user
+     * pin flag exists server-side). ALL: everything.
+     */
+    public static boolean matchesFilter(Conversation c, ChatFilter f) {
+        if (c == null) return false;
+        switch (f) {
+            case DMS: return c.dm;
+            case GROUPS: return "group".equals(c.type);
+            case ANNOUNCEMENTS: return "company".equals(c.type);
+            case ALL:
+            default: return true;
+        }
+    }
+
+    /**
+     * "Pinned" section membership. The backend has NO per-user pin flag
+     * (no pinned column on channels/channel_members — verified), so the
+     * honest deterministic rule is: official company-wide channels
+     * (type=company, is_official — 'general' / 'announcements') sit on
+     * top as pinned. No invented data: non-official channels are Recent.
+     */
+    public static boolean isPinned(Conversation c) {
+        return c != null && "company".equals(c.type);
+    }
+
+    /** Pastel card color for a conversation (stable by id, mockup palette). */
+    public static int pastelIndexFor(long id, int paletteSize) {
+        if (paletteSize <= 0) return 0;
+        long v = ((id % paletteSize) + paletteSize) % paletteSize;
+        return (int) v;
     }
 
     /** ISO-8601 (backend toISOString) → epoch millis; 0 when absent/bad. */
