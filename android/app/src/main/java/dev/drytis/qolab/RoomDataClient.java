@@ -469,4 +469,33 @@ public final class RoomDataClient {
             return 0;
         }
     }
+
+    /**
+     * v1.5.38: the meeting-create endpoint responds 302 →
+     * /office/rooms/{slug}?tab=meetings&filter=…&meeting={id}. The transport
+     * follows the redirect (fetch semantics) and now exposes the FINAL URL;
+     * this recovers the created meeting id from its query string. 0 when the
+     * URL is missing the parameter or malformed — callers treat 0 as
+     * "no id" and never navigate to LiveKit with it.
+     */
+    public static long meetingIdFromFinalUrl(String finalUrl) {
+        if (finalUrl == null) return 0;
+        try {
+            int q = finalUrl.indexOf('?');
+            if (q < 0) return 0;
+            for (String pair : finalUrl.substring(q + 1).split("&")) {
+                int eq = pair.indexOf('=');
+                if (eq <= 0) continue;
+                if ("meeting".equals(pair.substring(0, eq))) {
+                    String v = java.net.URLDecoder.decode(
+                            pair.substring(eq + 1), "UTF-8");
+                    long id = Long.parseLong(v.trim());
+                    return id > 0 ? id : 0;
+                }
+            }
+        } catch (Exception e) {
+            // fall through
+        }
+        return 0;
+    }
 }

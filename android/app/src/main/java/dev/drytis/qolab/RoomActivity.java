@@ -65,6 +65,8 @@ public class RoomActivity extends AppCompatActivity {
     private String roomName;
     private RoomPage page;
     private volatile boolean fetching;
+    /** v1.5.38: guards the create→join chain against double taps. */
+    private volatile boolean entering;
     private boolean overviewRendered, meetingsRendered, tasksRendered;
 
     @Override
@@ -90,6 +92,16 @@ public class RoomActivity extends AppCompatActivity {
 
         showTab(0);
         loadRoom();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        // v1.5.38: returning from LiveRoomActivity (Leave) — reset the join
+        // guard and refresh so status changes (live→ended, new occurrences)
+        // are reflected immediately. Meetings tab stays where the user was.
+        if (entering) entering = false;
+        if (roomSlug != null && page != null) loadRoom();
     }
 
     private void bindViews() {
@@ -161,9 +173,93 @@ public class RoomActivity extends AppCompatActivity {
                 this::onMeetingCreated).show();
     }
 
-    /** After a successful create: refetch so Upcoming + Meetings reflect it. */
-    private void onMeetingCreated() {
+    /**
+     * After a confirmed create.
+     * Scheduled: refetch so Upcoming + Meetings reflect it (unchanged).
+     * Instant (v1.5.38): chain DIRECTLY into the existing join flow for the
+     * newly created meeting — start-or-join-session → join-token →
+     * LiveRoomActivity — so Start-now enters the meeting without a second
+     * Join tap. Reuses the same endpoint sequence as
+     * MeetingDetailActivity.startOrJoin(); no LiveKit logic is duplicated —
+     * LiveRoomActivity remains the single owner of the connection.
+     */
+    private void onMeetingCreated(long createdMeetingId, boolean instant) {
+        if (instant && createdMeetingId > 0) {
+            enterMeeting(createdMeetingId);
+            return;
+        }
         loadRoom();
+    }
+
+    /** v1.5.38: contextual row Join/Start action — identical chain. */
+    private void enterMeetingFromRow(long meetingId) {
+        enterMeeting(meetingId);
+    }
+
+    /** Shared join chain used by both Start-now-after-create and the row
+     *  Join/Start action. Mirrors MeetingDetailActivity's verified flow. */
+    private void enterMeeting(long meetingId) {
+        if (entering) return; // double-tap / lifecycle guard
+        entering = true;
+        QolabWebViewTransport transport = QolabWebViewTransport.get();
+        if (transport == null) {
+            entering = false;
+            routeToLogin();
+            return;
+        }
+        transport.postJson("/meetings/" + meetingId + "/start-or-join-session",
+                "{}", r -> runOnUiThread(() -> {
+                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
+                            || r.status == 401) {
+                        entering = false;
+                        routeToLogin();
+                        return;
+                    }
+                    long resolvedId = RoomDataClient.parseStartOrJoin(r.body);
+                    if (r.status != 200 || resolvedId <= 0) {
+                        entering = false;
+                        loadRoom(); // reflect server truth
+                        android.widget.Toast.makeText(this,
+                                R.string.md_join_failed,
+                                android.widget.Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    requestJoinToken(resolvedId);
+                }));
+    }
+
+    /** Second half of the chain: mint token → open LiveRoomActivity. */
+    private void requestJoinToken(long resolvedMeetingId) {
+        QolabWebViewTransport transport = QolabWebViewTransport.get();
+        if (transport == null) {
+            entering = false;
+            routeToLogin();
+            return;
+        }
+        transport.postJson("/meetings/" + resolvedMeetingId + "/join-token",
+                "{}", r -> runOnUiThread(() -> {
+                    entering = false;
+                    if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
+                            || r.status == 401) {
+                        routeToLogin();
+                        return;
+                    }
+                    RoomDataClient.JoinToken jt = RoomDataClient.parseJoinToken(r.body);
+                    if (r.status != 200 || jt == null) {
+                        android.widget.Toast.makeText(this,
+                                R.string.md_join_failed,
+                                android.widget.Toast.LENGTH_LONG).show();
+                        loadRoom();
+                        return;
+                    }
+                    Intent i = new Intent(this, LiveRoomActivity.class);
+                    i.putExtra(LiveRoomActivity.EXTRA_TOKEN, jt.token);
+                    i.putExtra(LiveRoomActivity.EXTRA_SERVER_URL, jt.url);
+                    i.putExtra(LiveRoomActivity.EXTRA_MEETING_ID, resolvedMeetingId);
+                    startActivity(i);
+                    // list refreshes on return (onResume refetch via loadRoom)
+                    loadRoom();
+                }));
     }
 
     private void showComingSoon() {
@@ -465,9 +561,11 @@ public class RoomActivity extends AppCompatActivity {
             if ("live".equals(m.status)) {
                 enterAction.setVisibility(View.VISIBLE);
                 enterAction.setText(R.string.room_meeting_join);
+                enterAction.setOnClickListener(v -> enterMeetingFromRow(m.id));
             } else if ("scheduled".equals(m.status)) {
                 enterAction.setVisibility(View.VISIBLE);
                 enterAction.setText(R.string.room_meeting_start);
+                enterAction.setOnClickListener(v -> enterMeetingFromRow(m.id));
             } else {
                 enterAction.setVisibility(View.GONE);
             }

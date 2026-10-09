@@ -46,11 +46,21 @@ public final class QolabWebViewTransport {
         public final int status;                          // HTTP status or the codes above
         public final String body;                         // response body (parse downstream)
         public final String errorCategory;                // null on success
+        /** v1.5.38: FINAL URL after redirects (fetch semantics). Null/empty
+         *  when unknown or on IO failure. Lets callers recover route params
+         *  the server encoded into a redirect — e.g. the meeting id from
+         *  POST /office/rooms/{id}/meetings → 302 ?…&meeting={id}. */
+        public final String finalUrl;
 
         Result(int status, String body, String errorCategory) {
+            this(status, body, errorCategory, null);
+        }
+
+        Result(int status, String body, String errorCategory, String finalUrl) {
             this.status = status;
             this.body = body;
             this.errorCategory = errorCategory;
+            this.finalUrl = finalUrl;
         }
     }
 
@@ -263,10 +273,15 @@ public final class QolabWebViewTransport {
                         // server would see no fields. Send the string as-is.
                         "body:" + jsonString(jsonBody == null ? "{}" : jsonBody) + "})" +
                         ".then(function(r){r.text().then(function(t){" +
-                        "window['" + key + "']=JSON.stringify({s:r.status,b:t});}," +
-                        "function(){window['" + key + "']=JSON.stringify({s:r.status,b:''});});})" +
-                        ".catch(function(e){window['" + key + "']=JSON.stringify({s:-1,b:''});});" +
-                        "}catch(e){window['" + key + "']=JSON.stringify({s:-1,b:''});}return 1;})()";
+                        // v1.5.38: capture r.url (final URL after redirects).
+                        // The meeting create endpoint responds 302 →
+                        // /office/rooms/{slug}?...&meeting={id}; fetch follows
+                        // it transparently and r.status is the FINAL 200, so
+                        // the created meeting id was previously unreachable.
+                        "window['" + key + "']=JSON.stringify({s:r.status,b:t,u:r.url});}," +
+                        "function(){window['" + key + "']=JSON.stringify({s:r.status,b:'',u:r.url});});})" +
+                        ".catch(function(e){window['" + key + "']=JSON.stringify({s:-1,b:'',u:''});});" +
+                        "}catch(e){window['" + key + "']=JSON.stringify({s:-1,b:'',u:''});}return 1;})()";
                 wv.evaluateJavascript(kick, null);
                 // v1.5.35 stability: same JAVA-DRIVEN poll loop as getJson —
                 // a dropped ValueCallback can no longer strand the caller.
@@ -600,7 +615,10 @@ public final class QolabWebViewTransport {
             if (b != null && b.length() > 500_000) {
                 return new Result(Result.STATUS_IO, null, "bad-beacon");
             }
-            return new Result(s, b, null);
+            // v1.5.38: fetch beacon carries the final URL (u); absent in
+            // legacy beacons → null.
+            String u = o.has("u") ? o.optString("u", null) : null;
+            return new Result(s, b, null, u);
         } catch (Exception e) {
             return new Result(Result.STATUS_IO, null, "bad-beacon");
         }

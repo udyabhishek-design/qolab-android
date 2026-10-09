@@ -39,8 +39,14 @@ import java.util.Set;
 public class CreateMeetingSheet {
 
     public interface Listener {
-        /** Called once after a successful create (schedule or instant). */
-        void onMeetingCreated();
+        /**
+         * Called once after a confirmed successful create.
+         * @param createdMeetingId the id from the server's redirect
+         *        (?…&meeting={id}); 0 when the response carried no id
+         *        (older contract shapes / defensive fallback).
+         * @param instant true when this was a Start-now create.
+         */
+        void onMeetingCreated(long createdMeetingId, boolean instant);
     }
 
     private final AppCompatActivity activity;
@@ -254,12 +260,27 @@ public class CreateMeetingSheet {
                         if (r.status == 302 || r.status == 201 || r.status == 200) {
                             // existing contract redirects on success; any of
                             // these statuses means created
+                            // v1.5.38: the id of the meeting the server just
+                            // created rides the redirect URL (?meeting={id}).
+                            long createdId = RoomDataClient
+                                    .meetingIdFromFinalUrl(r.finalUrl);
                             dialog.dismiss();
+                            if (listener != null) {
+                                // instant: hand the id straight to the room so
+                                // it can chain into the existing join flow —
+                                // no "success" toast that implies a second tap.
+                                // scheduled: existing behavior (toast + list
+                                // refresh) is unchanged.
+                                if (instant) {
+                                    listener.onMeetingCreated(createdId, true);
+                                    return;
+                                }
+                            }
                             Toast.makeText(activity,
                                     instant ? R.string.cm_started_toast
                                             : R.string.cm_created_toast,
                                     Toast.LENGTH_SHORT).show();
-                            if (listener != null) listener.onMeetingCreated();
+                            if (listener != null) listener.onMeetingCreated(createdId, instant);
                         } else if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
                                 || r.status == 401) {
                             // v1.5.35: no longer silent — keep the sheet open

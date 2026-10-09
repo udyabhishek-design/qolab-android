@@ -80,11 +80,26 @@ public class MeetingDetailBindingTest {
         String row = read(ROW);
         assertTrue("meeting card must open MeetingDetailActivity",
                 row.contains("new Intent(this, MeetingDetailActivity.class)"));
-        // v1.5.33 note: the contextual Join/Start pill shares the SAME card
-        // click listener — it must NOT launch LiveRoomActivity directly.
-        int liveRoomLaunches = count(row, "new Intent(this, LiveRoomActivity.class)");
-        assertTrue("RoomActivity must never launch LiveRoomActivity directly",
-                liveRoomLaunches == 0);
+        // v1.5.34 black-screen rule (refined v1.5.38): the CARD TAP must not
+        // enter LiveRoomActivity directly — only the explicit user actions
+        // (Start-now chain / row Join-Start button) may, and via the shared
+        // enterMeeting chain. The card's click listener body (from
+        // setOnClickListener to the closing of that lambda) must contain no
+        // LiveRoom intent.
+        int cardListener = row.indexOf("card.setOnClickListener");
+        int nextListener = row.indexOf("setOnClickListener", cardListener + 1);
+        int scopeEnd = nextListener > 0 ? nextListener : row.length();
+        String cardScope = row.substring(cardListener, scopeEnd);
+        assertTrue("card click must never launch LiveRoomActivity directly",
+                !cardScope.contains("new Intent(this, LiveRoomActivity.class)"));
+        // …and the single LiveRoom launch site must live inside the explicit
+        // requestJoinToken chain, not in any card/list rendering path.
+        int launch = row.indexOf("new Intent(this, LiveRoomActivity.class)");
+        int chainStart = row.indexOf("private void requestJoinToken(long resolvedMeetingId)");
+        int chainEnd = row.indexOf("private void showComingSoon()");
+        assertTrue("LiveRoomActivity launch must be inside requestJoinToken()",
+                chainStart > 0 && launch > chainStart
+                        && (chainEnd < 0 || launch < chainEnd));
     }
 
     @Test
