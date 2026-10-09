@@ -25,6 +25,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.cancel
 import livekit.org.webrtc.RendererCommon
 
 /**
@@ -401,6 +402,12 @@ class LiveRoomActivity : AppCompatActivity() {
 
     // ── leave ─────────────────────────────────────────────────────────
 
+    // v1.5.35: system back = the same contract path as the Leave chip —
+    // disconnect + POST /meetings/{id}/leave — never a silent exit.
+    override fun onBackPressed() {
+        leave()
+    }
+
     private fun leave() {
         if (leaving) return
         leaving = true
@@ -426,8 +433,33 @@ class LiveRoomActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        try { if (leaving) room?.disconnect() } catch (_: Exception) { }
+        // v1.5.35 stability: disconnect UNCONDITIONALLY. Back-press used to
+        // skip leave() entirely — the room stayed connected (HOT MIC) and no
+        // /leave POST fired, stranding the meeting as live (see memory
+        // stranded-live-meetings-incident). Also release the coroutine scope
+        // (events collector leaked) and any SurfaceViewRenderers.
+        if (!leaving) {
+            leaving = true
+            try { room?.disconnect() } catch (_: Exception) { }
+        }
+        try { scope.cancel() } catch (_: Exception) { }
+        try {
+            val root = findViewById<android.view.ViewGroup>(android.R.id.content)
+            releaseRenderers(root)
+        } catch (_: Exception) { }
         super.onDestroy()
+    }
+
+    private fun releaseRenderers(group: android.view.ViewGroup?) {
+        group ?: return
+        for (i in 0 until group.childCount) {
+            val child = group.getChildAt(i)
+            if (child is io.livekit.android.renderer.SurfaceViewRenderer) {
+                try { child.release() } catch (_: Exception) { }
+            } else if (child is android.view.ViewGroup) {
+                releaseRenderers(child)
+            }
+        }
     }
 
     private fun dp(v: Int): Int = Math.round(v * resources.displayMetrics.density)

@@ -48,7 +48,6 @@ public class CreateMeetingSheet {
     private final String roomName;
     private final List<RoomDataClient.Member> members;
     private final Listener listener;
-    private final QolabWebViewTransport transport = QolabWebViewTransport.get();
 
     private androidx.appcompat.app.AlertDialog dialog;
     private EditText titleInput, descriptionInput;
@@ -229,6 +228,16 @@ public class CreateMeetingSheet {
             String payload = CreateMeetingForm.buildPayload(
                     title, descriptionInput.getText().toString(),
                     scheduledAt, CreateMeetingForm.deviceTimezone(), ids);
+            // v1.5.35 stability: capture the transport AT SUBMIT TIME, not
+            // at sheet construction — the singleton can legitimately be
+            // re-adopted (login re-run, cold-start rehydration) while the
+            // sheet sits open. A stale null caused a SILENT dismiss.
+            QolabWebViewTransport transport = QolabWebViewTransport.get();
+            if (transport == null) {
+                setSubmitting(false);
+                showError(activity.getString(R.string.cm_error_generic));
+                return;
+            }
             transport.postJson("/office/rooms/" + channelId + "/meetings", payload,
                     r -> activity.runOnUiThread(() -> {
                         setSubmitting(false);
@@ -243,7 +252,10 @@ public class CreateMeetingSheet {
                             if (listener != null) listener.onMeetingCreated();
                         } else if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD
                                 || r.status == 401) {
-                            dialog.dismiss();
+                            // v1.5.35: no longer silent — keep the sheet open
+                            // with a visible error so the user's input isn't
+                            // lost; they can retry or leave deliberately.
+                            showError(activity.getString(R.string.cm_error_generic));
                         } else if (r.status == 422 && r.body != null) {
                             String human = CreateMeetingForm.humanError(r.body);
                             showError(human != null ? human

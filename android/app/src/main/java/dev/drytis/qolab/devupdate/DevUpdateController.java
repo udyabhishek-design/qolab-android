@@ -191,6 +191,12 @@ public final class DevUpdateController {
     // ------------------------------------------------------------------
 
     private void showPrompt(DevUpdateManifest m) {
+        // v1.5.35 stability: this fires on a 1.5 s startup delay — the host
+        // activity may have already routed to Login (cold start with no
+        // transport) and be FINISHED. Showing a dialog on a dead activity
+        // throws BadTokenException and kills the process (the "first cold
+        // launch exits, second works" bug).
+        if (activity.isFinishing() || activity.isDestroyed()) return;
         new AlertDialog.Builder(activity)
                 .setTitle(R.string.dev_update_available_title)
                 .setMessage(activity.getString(R.string.dev_update_available_msg, m.versionName))
@@ -299,6 +305,8 @@ public final class DevUpdateController {
     }
 
     private void showProgressDialog(DownloadManager dm) {
+        // v1.5.35 stability: same finished-activity guard as showPrompt.
+        if (activity.isFinishing() || activity.isDestroyed()) return;
         ProgressBar bar = new ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal);
         bar.setMax(100);
         TextView label = new TextView(activity);

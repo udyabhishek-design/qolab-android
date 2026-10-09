@@ -35,12 +35,14 @@ public class CreateMeetingWiringTest {
 
     @Test
     public void newMeetingEntryWiredWithoutDisruptingTabs() throws Exception {
-        String layout = read(APP + "/res/layout/activity_room.xml");
+        // v1.5.35: the entry lives in the MEETINGS tab header now, not the
+        // tab pill row in activity_room.xml.
+        String layout = read(APP + "/res/layout/room_tab_meetings.xml");
         assertTrue(layout.contains("room_new_meeting"));
-        // tabs still present and pill-wrapped
-        assertTrue(layout.contains("room_tab_overview"));
-        assertTrue(layout.contains("room_tab_meetings"));
-        assertTrue(layout.contains("room_tab_tasks"));
+        String room = read(APP + "/res/layout/activity_room.xml");
+        assertTrue(room.contains("room_tab_overview"));
+        assertTrue(room.contains("room_tab_meetings"));
+        assertTrue(room.contains("room_tab_tasks"));
         String src = read(JAVA + "/RoomActivity.java");
         assertTrue(src.contains("openCreateMeeting()"));
         assertTrue(src.contains("new CreateMeetingSheet(this, page.channelId,"));

@@ -1,6 +1,8 @@
 package dev.drytis.qolab;
 
 import android.annotation.SuppressLint;
+
+import dev.drytis.qolab.BuildConfig;
 import android.app.Dialog;
 import android.content.Intent;
 import android.content.res.ColorStateList;
@@ -411,11 +413,27 @@ public class HomeActivity extends AppCompatActivity {
         QolabWebViewTransport transport = QolabWebViewTransport.get();
         lastDiag.transportAlive = transport != null && transport.isAlive();
         if (transport == null || !transport.isAlive()) {
-            lastDiag.httpStatus = QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD;
-            lastDiag.loginReason = "WebView transport not alive → Login";
-            lastDiag.loginTransition = true;
+            // v1.5.35 stability: cold start after process death — the
+            // persisted session cookie may still be valid. Rehydrate the
+            // transport from it (server proves/invalidates the session)
+            // instead of instantly bouncing to Login (which expired every
+            // cookie = forced manual re-login on every restart).
+            lastDiag.loginReason = "transport gone → rehydrating session";
+            lastDiag.loginTransition = false;
             fetching = false;
-            routeToLogin();
+            String origin = BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", "");
+            QolabWebViewTransport.rehydrate(getApplicationContext(), origin, valid -> {
+                runOnUiThread(() -> {
+                    if (valid) {
+                        fetching = false;
+                        loadHome(); // transport adopted — retry deterministically
+                    } else {
+                        lastDiag.loginReason = "session expired → Login";
+                        lastDiag.loginTransition = true;
+                        routeToLogin();
+                    }
+                });
+            });
             return;
         }
         long t0 = android.os.SystemClock.elapsedRealtime();

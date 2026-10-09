@@ -12,6 +12,35 @@
     android:paddingBottom="24dp"
     android:visibility="gone">
 
+    <!-- v1.5.35: compact "+ New Meeting" action lives IN the Meetings
+         context (header row) instead of crowding the tab pill row. -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="10dp">
+
+        <Space
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/room_new_meeting"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:paddingStart="12dp"
+            android:paddingEnd="12dp"
+            android:paddingTop="6dp"
+            android:paddingBottom="6dp"
+            android:background="@drawable/qm_bg_room_tab_active"
+            android:text="@string/room_new_meeting_compact"
+            android:textColor="@color/qm_cream_on_wine"
+            android:textSize="12.5sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
     <!-- Loading skeleton -->
     <View
         android:id="@+id/room_meetings_skeleton"

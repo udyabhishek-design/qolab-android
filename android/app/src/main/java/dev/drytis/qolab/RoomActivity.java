@@ -43,9 +43,9 @@ public class RoomActivity extends AppCompatActivity {
     public static final String EXTRA_ROOM_SLUG = "room_slug";
 
     private TextView titleView, avatar, notificationBadge;
-    private TextView tabOverview, tabChat, tabMeetings, tabTasks;
-    private View tabOverviewRoot, tabMeetingsRoot, tabTasksRoot, chatPane, contentScroll;
-    private View errorText, retryText;
+    private TextView tabOverview, tabMeetings, tabTasks;
+    private View tabOverviewRoot, tabMeetingsRoot, tabTasksRoot;
+    private View errorText, retryText, contentScroll;
     private View meetingsSkeleton, tasksSkeleton;
 
     // Overview
@@ -66,10 +66,6 @@ public class RoomActivity extends AppCompatActivity {
     private RoomPage page;
     private volatile boolean fetching;
     private boolean overviewRendered, meetingsRendered, tasksRendered;
-
-    /** v1.5.35: shared channel discussion (Chat tab), built once the room
-     *  channel id is known — same component The Lobby uses. */
-    private ChannelDiscussionView discussion;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,13 +97,11 @@ public class RoomActivity extends AppCompatActivity {
         avatar = findViewById(R.id.room_avatar);
         notificationBadge = findViewById(R.id.room_notification_badge);
         tabOverview = findViewById(R.id.room_tab_overview);
-        tabChat = findViewById(R.id.room_tab_chat);
         tabMeetings = findViewById(R.id.room_tab_meetings);
         tabTasks = findViewById(R.id.room_tab_tasks);
         tabOverviewRoot = findViewById(R.id.room_tab_overview_root);
         tabMeetingsRoot = findViewById(R.id.room_tab_meetings_root);
         tabTasksRoot = findViewById(R.id.room_tab_tasks_root);
-        chatPane = findViewById(R.id.room_chat_pane);
         errorText = findViewById(R.id.room_error);
         retryText = findViewById(R.id.room_retry);
         contentScroll = findViewById(R.id.room_content_scroll);
@@ -141,12 +135,12 @@ public class RoomActivity extends AppCompatActivity {
         ImageButton bell = findViewById(R.id.room_btn_notifications);
         bell.setOnClickListener(v -> showComingSoon());
         tabOverview.setOnClickListener(v -> showTab(0));
-        tabChat.setOnClickListener(v -> showTab(1));
-        tabMeetings.setOnClickListener(v -> showTab(2));
-        tabTasks.setOnClickListener(v -> showTab(3));
+        tabMeetings.setOnClickListener(v -> showTab(1));
+        tabTasks.setOnClickListener(v -> showTab(2));
         retryText.setOnClickListener(v -> loadRoom());
-        // v1.5.31: New Meeting — primary action next to the tabs; visible on
-        // Overview and Meetings alike (tabs/layout otherwise untouched).
+        // v1.5.31→v1.5.35: New Meeting moved from the tab pill row into the
+        // Meetings tab header (compact "+ New Meeting") so it no longer
+        // crowds the tab control. Listener binding is identical.
         TextView newMeeting = findViewById(R.id.room_new_meeting);
         if (newMeeting != null) {
             newMeeting.setOnClickListener(v -> openCreateMeeting());
@@ -180,21 +174,14 @@ public class RoomActivity extends AppCompatActivity {
 
     private void showTab(int index) {
         setTab(tabOverview, index == 0);
-        setTab(tabChat, index == 1);
-        setTab(tabMeetings, index == 2);
-        setTab(tabTasks, index == 3);
+        setTab(tabMeetings, index == 1);
+        setTab(tabTasks, index == 2);
         setVisible(tabOverviewRoot, index == 0);
-        setVisible(tabMeetingsRoot, index == 2);
-        setVisible(tabTasksRoot, index == 3);
-        // Chat pane replaces the tab-content scroll entirely (it owns its
-        // scroll + pinned composer). v1.5.35.
-        boolean chat = index == 1;
-        setVisible(chatPane, chat);
-        contentScroll.setVisibility(chat ? View.GONE : View.VISIBLE);
+        setVisible(tabMeetingsRoot, index == 1);
+        setVisible(tabTasksRoot, index == 2);
         if (index == 0 && page != null) renderOverview();
-        if (index == 2 && page != null) renderMeetings();
-        if (index == 3 && page != null) renderTasks();
-        if (chat && discussion != null) discussion.loadIfNeeded();
+        if (index == 1 && page != null) renderMeetings();
+        if (index == 2 && page != null) renderTasks();
     }
 
     private void setTab(TextView tab, boolean active) {
@@ -249,13 +236,6 @@ public class RoomActivity extends AppCompatActivity {
             overviewRendered = meetingsRendered = tasksRendered = false;
             if (titleView.getText().length() == 0 && parsed.roomName != null) {
                 titleView.setText(parsed.roomName);
-            }
-            // v1.5.35: chat/discussion over the room's own channel (same
-            // /chat/channels/{id}/messages contract as the web room and
-            // The Lobby). Built once the channel id is known.
-            if (discussion == null && parsed.channelId > 0) {
-                discussion = new ChannelDiscussionView(this, parsed.channelId,
-                        chatPane, this::routeToLogin);
             }
             renderOverview();
             renderMeetings();

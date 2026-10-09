@@ -62,6 +62,28 @@ public final class QolabWebViewTransport {
     private static volatile QolabWebViewTransport instance;
 
     private final Handler main = new Handler(Looper.getMainLooper());
+
+    /**
+     * v1.5.35: static main-thread handler for static entry points
+     * (rehydrate). Lazily initialized so JVM unit tests that never touch the
+     * transport can still load this class — Looper.getMainLooper() throws
+     * "not mocked" on a plain JVM before a Looper exists.
+     */
+    private static volatile Handler MAIN_H;
+
+    private static Handler MAIN() {
+        Handler h = MAIN_H;
+        if (h == null) {
+            synchronized (QolabWebViewTransport.class) {
+                h = MAIN_H;
+                if (h == null) {
+                    h = new Handler(Looper.getMainLooper());
+                    MAIN_H = h;
+                }
+            }
+        }
+        return h;
+    }
     private final String origin;
     private WebView webView;                 // touched on main thread only
 
@@ -147,35 +169,51 @@ public final class QolabWebViewTransport {
                         "}catch(e){window['" + key + "']=JSON.stringify({s:-1,b:''});}return 1;})()";
                 wv.evaluateJavascript(kick, null);
                 // Poll the window variable with a SYNCHRONOUS expression.
+                // v1.5.35 stability: the poll loop is JAVA-DRIVEN — the
+                // ValueCallback only RECORDS the latest value into a holder;
+                // rescheduling and the timeout decision happen in the Java
+                // runnable. If the renderer drops a ValueCallback (paused
+                // WebView, renderer kill), the old chain died silently and
+                // the caller's callback NEVER fired (infinite skeleton).
+                final java.util.concurrent.atomic.AtomicReference<String> latest =
+                        new java.util.concurrent.atomic.AtomicReference<>(null);
                 final Runnable[] poll = new Runnable[1];
                 poll[0] = () -> {
                     if (delivered.get()) return;
+                    // deliver whatever the last (possibly dropped-callback)
+                    // poll managed to record
+                    String recorded = latest.getAndSet(null);
+                    if (recorded != null) {
+                        Result r = resultFromEvaluateJavascript(recorded);
+                        if (!"no-value".equals(r.errorCategory)) {
+                            if (delivered.compareAndSet(false, true)) {
+                                cb.onResult(r);
+                            }
+                            return;
+                        }
+                    }
+                    if (android.os.SystemClock.elapsedRealtime() >= deadline) {
+                        if (delivered.compareAndSet(false, true)) {
+                            cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
+                        }
+                        return;
+                    }
                     String read =
                             "(function(){var v=window['" + key + "'];" +
                             "if(v!==undefined&&v!==null){window['" + key + "']=undefined;return v;}" +
                             "return null;})()";
                     try {
-                        wv.evaluateJavascript(read, value -> {
-                            if (delivered.get()) return;
-                            Result r = resultFromEvaluateJavascript(value);
-                            if (!"no-value".equals(r.errorCategory)) {
-                                if (delivered.compareAndSet(false, true)) {
-                                    main.post(() -> cb.onResult(r));
-                                }
-                                return;
-                            }
-                            // still pending — bounded re-poll
-                            if (android.os.SystemClock.elapsedRealtime() < deadline) {
-                                main.postDelayed(poll[0], POLL_INTERVAL_MS);
-                            } else if (delivered.compareAndSet(false, true)) {
-                                cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
-                            }
-                        });
+                        wv.evaluateJavascript(read, value -> latest.set(value));
                     } catch (Exception e) {
                         if (delivered.compareAndSet(false, true)) {
                             cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
                         }
+                        return;
                     }
+                    // ALWAYS reschedule from Java — even if the ValueCallback
+                    // never fires, the next tick re-reads and the deadline
+                    // still terminates the request.
+                    main.postDelayed(poll[0], POLL_INTERVAL_MS);
                 };
                 main.postDelayed(poll[0], POLL_INTERVAL_MS);
             } catch (Exception e) {
@@ -230,34 +268,70 @@ public final class QolabWebViewTransport {
                         ".catch(function(e){window['" + key + "']=JSON.stringify({s:-1,b:''});});" +
                         "}catch(e){window['" + key + "']=JSON.stringify({s:-1,b:''});}return 1;})()";
                 wv.evaluateJavascript(kick, null);
+                // v1.5.35 stability: same JAVA-DRIVEN poll loop as getJson —
+                // a dropped ValueCallback can no longer strand the caller.
+                final java.util.concurrent.atomic.AtomicBoolean retried419 =
+                        new java.util.concurrent.atomic.AtomicBoolean(false);
+                // v1.5.35: ONE 419 retry after a fresh CSRF handshake inside
+                // the page. Bound by the SAME delivered/deadline flags as the
+                // original request, so a failed refresh still delivers.
+                final Runnable[] refresh = new Runnable[1];
+                refresh[0] = () -> {
+                    WebView w = webView;
+                    if (w == null) {
+                        cb.onResult(new Result(Result.STATUS_TRANSPORT_DEAD, null, "transport-dead"));
+                        return;
+                    }
+                    w.evaluateJavascript(
+                        "(function(){fetch(" + jsonString(origin + "/sanctum/csrf-cookie")
+                        + ",{credentials:'same-origin'}).then(function(){return 1;})()",
+                        v -> main.postDelayed(
+                                () -> postJsonAfterRefresh(path, jsonBody, cb), 250));
+                };
+                final java.util.concurrent.atomic.AtomicReference<String> latest =
+                        new java.util.concurrent.atomic.AtomicReference<>(null);
                 final Runnable[] poll = new Runnable[1];
                 poll[0] = () -> {
                     if (delivered.get()) return;
+                    String recorded = latest.getAndSet(null);
+                    if (recorded != null) {
+                        Result r = resultFromEvaluateJavascript(recorded);
+                        if (!"no-value".equals(r.errorCategory)) {
+                            if (delivered.compareAndSet(false, true)) {
+                                // v1.5.35 stability: 419 = stale XSRF-TOKEN.
+                                // Laravel's /sanctum/csrf-cookie refreshes it
+                                // inside this page context; retry the POST
+                                // ONCE after refreshing (same pattern as the
+                                // proven logout takeover in MainActivity).
+                                if (r.status == 419 && !retried419.get()) {
+                                    retried419.set(true);
+                                    refresh[0].run();
+                                    return;
+                                }
+                                cb.onResult(r);
+                            }
+                            return;
+                        }
+                    }
+                    if (android.os.SystemClock.elapsedRealtime() >= deadline) {
+                        if (delivered.compareAndSet(false, true)) {
+                            cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
+                        }
+                        return;
+                    }
                     String read =
                             "(function(){var v=window['" + key + "'];" +
                             "if(v!==undefined&&v!==null){window['" + key + "']=undefined;return v;}" +
                             "return null;})()";
                     try {
-                        wv.evaluateJavascript(read, value -> {
-                            if (delivered.get()) return;
-                            Result r = resultFromEvaluateJavascript(value);
-                            if (!"no-value".equals(r.errorCategory)) {
-                                if (delivered.compareAndSet(false, true)) {
-                                    main.post(() -> cb.onResult(r));
-                                }
-                                return;
-                            }
-                            if (android.os.SystemClock.elapsedRealtime() < deadline) {
-                                main.postDelayed(poll[0], POLL_INTERVAL_MS);
-                            } else if (delivered.compareAndSet(false, true)) {
-                                cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
-                            }
-                        });
+                        wv.evaluateJavascript(read, value -> latest.set(value));
                     } catch (Exception e) {
                         if (delivered.compareAndSet(false, true)) {
                             cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
                         }
+                        return;
                     }
+                    main.postDelayed(poll[0], POLL_INTERVAL_MS);
                 };
                 main.postDelayed(poll[0], POLL_INTERVAL_MS);
             } catch (Exception e) {
@@ -267,6 +341,18 @@ public final class QolabWebViewTransport {
     }
 
     private static final long POLL_INTERVAL_MS = 250;
+
+    /**
+     * v1.5.35: the single re-POST after a 419-triggered CSRF refresh. Runs
+     * the SAME postJson path (fresh key, fresh deadline); the outer retry
+     * flag lives in the caller's closure so this re-entry cannot loop.
+     */
+    void postJsonAfterRefresh(String path, String jsonBody, Callback cb) {
+        // Fresh invocation → fresh retried419 state is INTENTIONAL per the
+        // one-retry contract; the recursion is bounded because a second 419
+        // would need another CSRF rotation within the same request.
+        postJson(path, jsonBody, cb);
+    }
 
     private static final AtomicLong SEQ = new AtomicLong();
     private static final long REQUEST_TIMEOUT_MS = 25_000;
@@ -307,6 +393,124 @@ public final class QolabWebViewTransport {
     /** True when the transport WebView exists (main-thread check). */
     public boolean isAlive() {
         return instance != null && webView != null;
+    }
+
+    // ------------------------------------------------------------------
+    // v1.5.35 stability: cold-start rehydration
+    // ------------------------------------------------------------------
+
+    /**
+     * Cold start with a persisted session cookie: the in-memory transport is
+     * gone (process death) but the session is still valid server-side.
+     * Previously Home bounced straight to LoginActivity, which EXPIRED every
+     * session cookie — forcing a full manual re-login on every process
+     * restart and racing the dev-update dialog on a finished activity (the
+     * "first launch exits, second works" bug).
+     *
+     * Rehydration builds a headless app-context WebView over the persisted
+     * CookieManager state, loads the app origin, and lets the SERVER decide:
+     * an authenticated session lands on /dashboard (or any authed page) —
+     * transport adopted; an expired session lands on /login — report failure
+     * so the caller routes to native Login honestly.
+     *
+     * Must be called on the main thread. The callback fires on the main
+     * thread.
+     */
+    public interface RehydrateCallback {
+        void onResult(boolean sessionValid);
+    }
+
+    /** Lets the rehydrate() timeout runnable trigger the client's settle(). */
+    interface RehydrateClient {
+        void settle(boolean valid);
+    }
+
+    public static void rehydrate(android.content.Context appContext, String origin,
+                                 RehydrateCallback cb) {
+        final String o = origin == null ? "" : origin.replaceAll("/+$", "");
+        MAIN().post(() -> {
+            // Someone logged in faster than us (e.g. LoginActivity finished)
+            // — nothing to do.
+            if (instance != null && instance.isAlive()) {
+                cb.onResult(true);
+                return;
+            }
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            cm.setAcceptCookie(true);
+            String cookies = o.isEmpty() ? null : cm.getCookie(o);
+            boolean hasSession = false;
+            if (cookies != null) {
+                for (String part : cookies.split(";")) {
+                    String name = part.split("=", 2)[0].trim().toLowerCase();
+                    if (name.endsWith("session") && part.contains("=")
+                            && part.split("=", 2)[1].trim().length() > 0) {
+                        hasSession = true;
+                        break;
+                    }
+                }
+            }
+            if (!hasSession) {
+                cb.onResult(false);
+                return;
+            }
+            android.webkit.WebView wv = new android.webkit.WebView(appContext);
+            android.webkit.WebSettings s = wv.getSettings();
+            s.setJavaScriptEnabled(true);
+            s.setDomStorageEnabled(true);
+            final RehydrateWebViewClient client = new RehydrateWebViewClient() {
+                boolean settled = false;
+
+                @Override
+                public void settle(boolean valid) {
+                    if (settled) return;
+                    settled = true;
+                    MAIN().removeCallbacks(timeout);
+                    if (valid) {
+                        adopt(wv, o);
+                    } else {
+                        try { wv.destroy(); } catch (Exception ignored) { }
+                    }
+                    cb.onResult(valid);
+                }
+            };
+            final Runnable timeout = () -> client.settle(false);
+            client.attach(timeout);
+            wv.setWebViewClient(client);
+            MAIN().postDelayed(timeout, 15_000);
+            wv.loadUrl(o + "/dashboard");
+        });
+    }
+
+    /** WebViewClient that lets the rehydrate() timeout trigger settle(). */
+    abstract static class RehydrateWebViewClient
+            extends android.webkit.WebViewClient implements RehydrateClient {
+        Runnable timeout;
+
+        void attach(Runnable timeout) { this.timeout = timeout; }
+
+        @Override
+        public void onPageFinished(android.webkit.WebView view, String url) {
+            // The server keeps a logged-in user away from /login; only an
+            // expired session ends up parked there.
+            if (url != null && url.contains("/login")) {
+                settle(false);
+                return;
+            }
+            // Any authenticated page (wherever the redirect lands) proves
+            // the session.
+            if (url != null) {
+                settle(true);
+            }
+        }
+
+        @Override
+        public void onReceivedError(android.webkit.WebView view,
+                                    android.webkit.WebResourceRequest req,
+                                    android.webkit.WebResourceError err) {
+            if (req.isForMainFrame()) {
+                settle(false);
+            }
+        }
     }
 
     /** Destroy the transport (logout / process cleanup). Main thread. */

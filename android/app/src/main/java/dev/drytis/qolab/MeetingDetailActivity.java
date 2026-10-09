@@ -50,6 +50,8 @@ public class MeetingDetailActivity extends AppCompatActivity {
     private View actionArea;
     private TextView actionPrimary, actionCopy;
     private boolean joining;
+    /** v1.5.35: set when LiveRoomActivity launches; gates the onResume refetch. */
+    private boolean returningFromLiveRoom;
 
     private long meetingId;
     private MeetingDetail detail;
@@ -290,6 +292,7 @@ public class MeetingDetailActivity extends AppCompatActivity {
                     i.putExtra(LiveRoomActivity.EXTRA_MEETING_ID, resolvedMeetingId);
                     i.putExtra(LiveRoomActivity.EXTRA_MEETING_TITLE,
                             detail.title != null ? detail.title : "");
+                    returningFromLiveRoom = true;
                     startActivity(i);
                     // refresh on return: status may now be live/ended
                     renderActions();
@@ -312,9 +315,22 @@ public class MeetingDetailActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        // returning from LiveRoomActivity: reload so status/actions reflect
-        // what the meeting backend now says (live→ended etc.)
-        if (detail != null) loadDetail();
+        // v1.5.35 stability: ONLY refetch when actually returning from the
+        // live room — every onResume refetch re-pulled the full detail
+        // (heaviest payload incl. transcripts) even for a simple tab switch.
+        // Also un-stick the joining flag (a dropped callback previously left
+        // Start/Join permanently at "Joining…").
+        joining = false;
+        if (returningFromLiveRoom) {
+            returningFromLiveRoom = false;
+            if (detail != null) loadDetail();
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        joining = false;
     }
 
     private void routeToLogin() {

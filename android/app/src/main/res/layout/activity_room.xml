@@ -108,13 +108,6 @@
                 style="@style/QmRoomTab"
                 android:text="@string/room_tab_overview" />
 
-                <!-- v1.5.35: room discussion over the existing channel
-                     messaging contract (same endpoints as web RoomDiscussion) -->
-                <TextView
-                    android:id="@+id/room_tab_chat"
-                style="@style/QmRoomTab"
-                android:text="@string/room_tab_chat" />
-
                 <TextView
                     android:id="@+id/room_tab_meetings"
                 style="@style/QmRoomTab"
@@ -122,28 +115,9 @@
 
                 <TextView
                     android:id="@+id/room_tab_tasks"
-                    style="@style/QmRoomTab"
-                    android:text="@string/room_tab_tasks" />
+                style="@style/QmRoomTab"
+                android:text="@string/room_tab_tasks" />
             </LinearLayout>
-
-            <Space
-                android:layout_width="0dp"
-                android:layout_height="1dp"
-                android:layout_weight="1" />
-
-            <TextView
-                android:id="@+id/room_new_meeting"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:paddingStart="14dp"
-                android:paddingEnd="14dp"
-                android:paddingTop="8dp"
-                android:paddingBottom="8dp"
-                android:background="@drawable/qm_bg_room_tab_active"
-                android:text="@string/room_new_meeting"
-                android:textColor="@color/qm_cream_on_wine"
-                android:textSize="13sp"
-                android:textStyle="bold" />
         </LinearLayout>
 
         <!-- Shared states -->
@@ -191,19 +165,5 @@
                 <include layout="@layout/room_tab_tasks" />
             </FrameLayout>
         </ScrollView>
-
-        <!-- v1.5.35 Chat tab: shared channel discussion surface (feed +
-             composer). Own scroll + weight so it coexists with the tab
-             content scroll above (hidden while Chat is active). -->
-        <LinearLayout
-            android:id="@+id/room_chat_pane"
-            android:layout_width="match_parent"
-            android:layout_height="0dp"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:visibility="gone">
-
-            <include layout="@layout/view_channel_discussion" />
-        </LinearLayout>
     </LinearLayout>
 </androidx.coordinatorlayout.widget.CoordinatorLayout>

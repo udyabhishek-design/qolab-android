@@ -119,7 +119,7 @@ public class MeetingJoinTest {
         assertTrue(src.contains("detail.canJoin"));
         assertTrue(src.contains("\"ended\".equals(status)"));
         // join goes through the existing endpoints only
-        assertTrue(src.contains("/start-or-join-session"));
+        assertTrue(src.contains("postJson(\"/meetings/\" + meetingId + \"/start-or-join-session\""));
         assertTrue(src.contains("postJson(\"/meetings/\" + resolvedMeetingId + \"/join-token\""));
     }
 
