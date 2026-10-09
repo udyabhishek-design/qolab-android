@@ -642,7 +642,12 @@ public final class QolabWebViewTransport {
 
     /** JSON string literal for a URL we already validated (no untrusted input).
      *  Emits non-ASCII and control chars as \\uXXXX escapes — a previous
-     *  version silently DROPPED every char outside 0x20–0x7F. */
+     *  version silently DROPPED every char outside 0x20–0x7F.
+     *  v1.5.39: public wrapper for other native layers (realtime auth). */
+    public static String jsonStringSafe(String s) {
+        return jsonString(s);
+    }
+
     static String jsonString(String s) {  // package-private: JVM-testable
         StringBuilder sb = new StringBuilder("\"");
         for (int i = 0; i < s.length(); i++) {

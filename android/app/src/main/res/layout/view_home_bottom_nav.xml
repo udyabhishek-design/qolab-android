@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Home V1 — fixed bottom navigation: Home / Office / [Ask Drytis focal] / Chat
+<!-- Home V1 — fixed bottom navigation: Home / Chat / [Ask Drytis focal]
+     (v1.5.39: Office removed from primary navigation — three tabs.)
      Warm-white container; active tab = wine icon + wine bold label; inactive
      = muted gray. Ask Drytis: 44dp wine circle, sparkle centered, label fully
      below the circle (nav row 64dp so the circle never clips its label).
@@ -43,31 +44,6 @@
                 android:textColor="@color/qm_wine"
                 android:textSize="10sp"
                 android:textStyle="bold"
-                android:maxLines="1" />
-        </LinearLayout>
-
-        <LinearLayout
-            android:id="@+id/home_nav_office"
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:orientation="vertical"
-            android:gravity="center">
-
-            <ImageView
-                android:id="@+id/home_nav_office_icon"
-                android:layout_width="24dp"
-                android:layout_height="24dp"
-                android:src="@drawable/qm_ic_office"
-                android:tint="@color/qm_nav_unselected" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_marginTop="3dp"
-                android:text="@string/home_nav_office"
-                android:textColor="@color/qm_nav_unselected"
-                android:textSize="10sp"
                 android:maxLines="1" />
         </LinearLayout>
 

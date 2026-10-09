@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- New group action (people + plus) -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF1A1A1A"
+        android:pathData="M15,8a4,4 0,1 1,-8 0a4,4 0,1 1,8 0M4.5,19.5c0,-3.2 2.7,-5.2 6.5,-5.2s6.5,2 6.5,5.2a0.9,0.9 0,0 1,-0.9 0.9H5.4a0.9,0.9 0,0 1,-0.9 -0.9M17.7,11.3a3.4,3.4 0,0 0,0 -5.9,0.85 0.85,0 0,1 0.8,-1.5 5.1,5.1 0,0 1,0 8.9,0.85 0.85,0 0,1,-0.8 -1.5M18.9,19.5c0,-1.9 -0.6,-3.4 -1.7,-4.4a0.85,0.85 0,0 1,1.2 -1.2c1.5,1.4 2.2,3.3 2.2,5.6a0.9,0.9 0,0 1,-0.9 0.9h-1.4a0.4,0.4 0,0 1,-0.4 -0.5z" />
+</vector>

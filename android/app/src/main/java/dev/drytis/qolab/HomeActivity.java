@@ -77,7 +77,7 @@ public class HomeActivity extends AppCompatActivity {
     private TextView todayTasks, todayMeetings, todayUpdates;
 
     // bottom nav
-    private LinearLayout navHome, navOffice, navChat;
+    private LinearLayout navHome, navChat;
     private FrameLayout navAskDrytis;
 
     private HomeDataClient.HomeData data;
@@ -232,7 +232,6 @@ public class HomeActivity extends AppCompatActivity {
         todayUpdates = findViewById(R.id.home_today_updates);
 
         navHome = findViewById(R.id.home_nav_home);
-        navOffice = findViewById(R.id.home_nav_office);
         navChat = findViewById(R.id.home_nav_chat);
         navAskDrytis = findViewById(R.id.home_nav_ask_drytis);
     }
@@ -289,9 +288,9 @@ public class HomeActivity extends AppCompatActivity {
         });
 
         navHome.setOnClickListener(v -> smoothScrollToTop());
-        navOffice.setOnClickListener(v ->
-                startActivity(new Intent(this, OfficeActivity.class)));
-        navChat.setOnClickListener(v -> showComingSoon(getString(R.string.home_nav_chat)));
+        // v1.5.39: Office removed from primary navigation (code retained,
+        // reachable nowhere in the primary flow). Chat is now native.
+        navChat.setOnClickListener(v -> openChat());
         navAskDrytis.setOnClickListener(v ->
                 showComingSoon(getString(R.string.home_nav_ask_drytis)));
     }
@@ -642,8 +641,10 @@ public class HomeActivity extends AppCompatActivity {
             circle.setShape(android.graphics.drawable.GradientDrawable.OVAL);
             circle.setColor(style.enterBg);
             arrowCircle.setBackground(circle);
-            arrowCircle.setOnClickListener(v ->
-                    showComingSoon(room.name != null ? room.name : getString(R.string.home_room_cd_enter)));
+            // v1.5.39: Social Rooms stay accessible from Home — the lobby
+            // theme opens the native LobbyActivity exactly like Office did
+            // (same identity contract: channel id + slug + name).
+            arrowCircle.setOnClickListener(v -> openSocialRoom(room));
             arrowCircle.setContentDescription(getString(R.string.home_room_cd_enter));
         }
         if (arrow != null) {
@@ -695,6 +696,33 @@ public class HomeActivity extends AppCompatActivity {
      * /mobile/home payload. Missing slug → Coming Soon (same rule as
      * Office).
      */
+    private void openChat() {
+        Intent i = new Intent(this, ChatListActivity.class);
+        i.putExtra(ChatListActivity.EXTRA_MY_USER_ID,
+                data != null ? data.userId : 0L);
+        startActivity(i);
+    }
+
+    /**
+     * v1.5.39: mirrors OfficeActivity.openRoom — the Lobby theme opens the
+     * shared native Lobby screen (Discussion | Members). Other themes keep
+     * Coming Soon, exactly as Office behaved; nothing was deleted.
+     */
+    private void openSocialRoom(HomeDataClient.Room room) {
+        if ("lobby".equals(room.roomTheme) && room.id > 0
+                && room.roomSlug != null && !room.roomSlug.isEmpty()) {
+            Intent i = new Intent(this, LobbyActivity.class);
+            i.putExtra(LobbyActivity.EXTRA_ROOM_ID, room.id);
+            i.putExtra(LobbyActivity.EXTRA_ROOM_SLUG, room.roomSlug);
+            i.putExtra(LobbyActivity.EXTRA_ROOM_NAME,
+                    room.name != null ? room.name : room.roomSlug);
+            startActivity(i);
+        } else {
+            showComingSoon(room.name != null ? room.name
+                    : getString(R.string.home_room_cd_enter));
+        }
+    }
+
     private void openDepartmentRoom(HomeDataClient.Room dept) {
         String slug = dept.roomSlug;
         if (slug == null || slug.isEmpty()) {
@@ -725,8 +753,18 @@ public class HomeActivity extends AppCompatActivity {
                 meta = getString(R.string.home_continue_unread, conv.unreadCount) + " · " + meta;
             }
             convMeta.setText(meta);
-            convCard.setOnClickListener(v ->
-                    showComingSoon(getString(R.string.home_nav_chat)));
+            // v1.5.39: opens the actual conversation in native Chat.
+            convCard.setOnClickListener(v -> {
+                Intent i = new Intent(this, ChatScreenActivity.class);
+                i.putExtra(ChatScreenActivity.EXTRA_CHANNEL_ID, conv.id);
+                i.putExtra(ChatScreenActivity.EXTRA_CHANNEL_NAME,
+                        conv.type != null && conv.type.equals("dm") && conv.dmPartnerName != null
+                                ? conv.dmPartnerName : conv.name);
+                i.putExtra(ChatScreenActivity.EXTRA_CHANNEL_TYPE, conv.type);
+                i.putExtra(ChatScreenActivity.EXTRA_MY_USER_ID,
+                        data != null ? data.userId : 0L);
+                startActivity(i);
+            });
         } else {
             hide(convCard);
             show(convEmpty);

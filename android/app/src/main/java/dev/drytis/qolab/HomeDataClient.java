@@ -153,6 +153,7 @@ public final class HomeDataClient {
     }
 
     public static final class HomeData {
+        public final long userId;
         public final String userName;
         public final String userAvatarPath;
         public final String systemRole;
@@ -164,10 +165,11 @@ public final class HomeDataClient {
         public final Task priorityTask;              // null when none
         public final TodayCounts today;
 
-        HomeData(String userName, String userAvatarPath, String systemRole,
+        HomeData(long userId, String userName, String userAvatarPath, String systemRole,
                  String departmentName, Meeting nextMeeting, List<Room> socialRooms,
                  Room departmentRoom, Conversation recentConversation,
                  Task priorityTask, TodayCounts today) {
+            this.userId = userId;
             this.userName = userName;
             this.userAvatarPath = userAvatarPath;
             this.systemRole = systemRole;
@@ -192,6 +194,7 @@ public final class HomeDataClient {
             JSONObject root = new JSONObject(json == null ? "{}" : json);
 
             JSONObject user = root.optJSONObject("user");
+            long userId = user != null ? user.optLong("id", 0) : 0L;
             String userName = user != null ? user.optString("name", null) : null;
             String avatar = user != null ? user.optString("avatar_path", null) : null;
             String role = user != null ? user.optString("system_role", null) : null;
@@ -232,7 +235,7 @@ public final class HomeDataClient {
                         todayObj.optInt("unread_notifications", 0));
             }
 
-            return new HomeData(userName, avatar, role, dept, meeting, rooms,
+            return new HomeData(userId, userName, avatar, role, dept, meeting, rooms,
                     deptRoom, conv, task, today);
         } catch (Exception e) {
             // v1.5.36: a body we cannot parse (HTML error page, truncated

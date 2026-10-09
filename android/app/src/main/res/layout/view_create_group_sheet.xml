@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ═══ Qolab Mobile — Create Group sheet ═══
+     Bottom sheet: group name field → searchable member list (checkbox
+     rows) → Create button. Matches view_create_meeting_sheet styling. -->
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:background="@color/qm_canvas">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="@dimen/qm_room_page_pad">
+
+        <View
+            android:layout_width="40dp"
+            android:layout_height="4dp"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="14dp"
+            android:background="@drawable/qm_bg_room_tabs" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/chat_new_group"
+            android:textColor="@color/qm_ink"
+            android:textSize="18sp"
+            android:textStyle="bold" />
+
+        <EditText
+            android:id="@+id/group_name"
+            android:layout_width="match_parent"
+            android:layout_height="46dp"
+            android:layout_marginTop="14dp"
+            android:background="@drawable/qm_bg_room_card"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:hint="@string/chat_group_name_hint"
+            android:textColorHint="@color/qm_muted"
+            android:textColor="@color/qm_ink"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:inputType="textCapWords" />
+
+        <EditText
+            android:id="@+id/group_member_search"
+            android:layout_width="match_parent"
+            android:layout_height="44dp"
+            android:layout_marginTop="10dp"
+            android:background="@drawable/qm_bg_room_tabs"
+            android:paddingStart="14dp"
+            android:paddingEnd="14dp"
+            android:hint="@string/chat_search_members"
+            android:textColorHint="@color/qm_muted"
+            android:textColor="@color/qm_ink"
+            android:textSize="14sp"
+            android:singleLine="true"
+            android:imeOptions="actionSearch"
+            android:inputType="text" />
+
+        <!-- Selected count -->
+        <TextView
+            android:id="@+id/group_selected_count"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textColor="@color/qm_muted"
+            android:textSize="12sp"
+            android:visibility="gone" />
+
+        <!-- Member list (max height enforced at runtime) -->
+        <LinearLayout
+            android:id="@+id/group_members_list"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+
+        <!-- Skeleton -->
+        <LinearLayout
+            android:id="@+id/group_members_skeleton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginTop="6dp">
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginBottom="8dp"
+                android:background="@drawable/qm_bg_skeleton" />
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginBottom="8dp"
+                android:background="@drawable/qm_bg_skeleton" />
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:background="@drawable/qm_bg_skeleton" />
+        </LinearLayout>
+
+        <TextView
+            android:id="@+id/group_members_empty"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:text="@string/chat_no_members"
+            android:textColor="@color/qm_muted"
+            android:textSize="13sp"
+            android:visibility="gone" />
+
+        <TextView
+            android:id="@+id/group_create"
+            android:layout_width="match_parent"
+            android:layout_height="50dp"
+            android:layout_marginTop="16dp"
+            android:gravity="center"
+            android:background="@drawable/qm_button_wine"
+            android:text="@string/chat_create_group"
+            android:textColor="#FFFFFF"
+            android:textSize="15sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/group_error"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:textColor="@color/qm_wine"
+            android:textSize="13sp"
+            android:visibility="gone" />
+    </LinearLayout>
+</ScrollView>

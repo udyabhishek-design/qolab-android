@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ═══ Chat v1.5.39 ═══ -->
+    <string name="chat_title">Chat</string>
+    <string name="chat_new_group">New group</string>
+    <string name="chat_search_hint">Search conversations</string>
+    <string name="chat_empty">No conversations yet. Start one from the directory.</string>
+    <string name="chat_empty_filtered">No conversations match “%1$s”.</string>
+    <string name="chat_send">Send</string>
+    <string name="chat_composer_hint">Write a message…</string>
+    <string name="chat_no_messages">No messages yet. Say hello 👋</string>
+    <string name="chat_retry_send">Retry</string>
+    <string name="chat_send_failed">Didn’t send — tap Retry</string>
+    <string name="chat_send_failed_short">Failed</string>
+    <string name="chat_group_name_hint">Group name</string>
+    <string name="chat_search_members">Search members</string>
+    <string name="chat_no_members">No people found.</string>
+    <string name="chat_members_selected">%1$d selected</string>
+    <string name="chat_create_group">Create group</string>
+    <string name="chat_group_error_name">Enter a group name first.</string>
+    <string name="chat_group_error_members">Select at least one member.</string>
+    <string name="chat_group_created">Group “%1$s” created</string>
+    <string name="chat_create_failed">Couldn’t create the group. Try again.</string>
+    <string name="chat_members_count">%1$d members</string>
+    <string name="chat_member_count_one">1 member</string>
+    <string name="chat_you">You</string>
+    <string name="chat_connection_lost">Reconnecting…</string>
+    <string name="chat_unread">%1$d</string>
+    <!-- preview line: members + activity -->
+    <string name="chat_preview_members">%1$d members · %2$s</string>
+    <string name="chat_preview_two">2 members · %1$s</string>
+    <string name="chat_active_recent">Active %1$s</string>
+    <string name="chat_say_hello">Say hello</string>
+</resources>

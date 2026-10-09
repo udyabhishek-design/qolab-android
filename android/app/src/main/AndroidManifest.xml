@@ -90,6 +90,22 @@
             android:theme="@style/AppTheme.NoActionBar"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Native Chat (v1.5.39): conversation list + one conversation.
+             Session-authenticated via the WebView transport, realtime via
+             Reverb websockets with transport-bridged channel auth. -->
+        <activity
+            android:name=".ChatListActivity"
+            android:exported="false"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+        <activity
+            android:name=".ChatScreenActivity"
+            android:exported="false"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
         <!-- Native meeting room on LiveKit (v1.5.33). Entered ONLY from
              Meeting Details after POST /meetings/{id}/join-token returned
              server-issued {token,url}. No token/room invention on device. -->

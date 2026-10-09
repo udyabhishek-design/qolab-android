@@ -13,8 +13,8 @@ android {
         applicationId "dev.drytis.qolab"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 54
-        versionName "1.5.38"
+        versionCode 55
+        versionName "1.5.39"
 
         // ── Environment-aware server origin ─────────────────────────
         // DEBUG / DEVELOPMENT  -> Qolab DEVELOPMENT backend
@@ -74,6 +74,9 @@ dependencies {
     implementation project(':capacitor-cordova-android-plugins')
     // LiveKit native meeting room (v1.5.33) — server-issued token+url only.
     implementation "io.livekit:livekit-android:2.18.2"
+    // v1.5.39 — native Chat realtime: WebSocket client for Laravel Reverb.
+    // Same version LiveKit already resolves (no new transitive deps).
+    implementation "com.squareup.okhttp3:okhttp:4.12.0"
 }
 
 apply from: 'capacitor.build.gradle'
