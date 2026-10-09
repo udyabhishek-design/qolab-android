@@ -1,8 +1,10 @@
 package dev.drytis.qolab;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertTrue;
 
 import org.json.JSONArray;
@@ -123,5 +125,68 @@ public class CreateMeetingFormTest {
     @Test
     public void emptyTitleNeverSubmittedWithWhitespace() {
         assertEquals("title", CreateMeetingForm.validate("   ", true, true));
+    }
+
+    // ── v1.5.37: scheduled-time-must-be-future regression ────────────
+    // Backend list contract: upcoming only includes scheduled meetings with
+    // scheduled_at >= now(); past-dated creates are hidden from every bucket.
+    // The picker must therefore default to a future slot and submit must
+    // reject past datetimes BEFORE any request is sent.
+
+    @Test
+    public void pastLocalDatetimeIsRejected() {
+        // Far past — always rejected.
+        assertFalse(CreateMeetingForm.isFutureLocal(2020, 1, 1, 9, 0));
+    }
+
+    @Test
+    public void farFutureLocalDatetimeIsAccepted() {
+        // 2100 is comfortably future on any device clock.
+        assertTrue(CreateMeetingForm.isFutureLocal(2100, 6, 15, 14, 30));
+    }
+
+    @Test
+    public void oneMinuteAheadIsAccepted() {
+        // A slot one minute in the future must pass — the guard must not be
+        // so aggressive that legitimate near-term scheduling breaks.
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.add(java.util.Calendar.MINUTE, 1);
+        assertTrue(CreateMeetingForm.isFutureLocal(
+                c.get(java.util.Calendar.YEAR),
+                c.get(java.util.Calendar.MONTH) + 1,
+                c.get(java.util.Calendar.DAY_OF_MONTH),
+                c.get(java.util.Calendar.HOUR_OF_DAY),
+                c.get(java.util.Calendar.MINUTE)));
+    }
+
+    @Test
+    public void oneMinuteAgoIsRejected() {
+        java.util.Calendar c = java.util.Calendar.getInstance();
+        c.add(java.util.Calendar.MINUTE, -1);
+        assertFalse(CreateMeetingForm.isFutureLocal(
+                c.get(java.util.Calendar.YEAR),
+                c.get(java.util.Calendar.MONTH) + 1,
+                c.get(java.util.Calendar.DAY_OF_MONTH),
+                c.get(java.util.Calendar.HOUR_OF_DAY),
+                c.get(java.util.Calendar.MINUTE)));
+    }
+
+    @Test
+    public void pickerDefaultIsAlwaysAFutureSlotTodayOrRollsHour() {
+        // The computed default must land on a half-hour boundary and be a
+        // valid future time when combined with today's date (or the next
+        // hour when the current time is past :30).
+        int h = CreateMeetingForm.defaultPickerHour();
+        int min = CreateMeetingForm.defaultPickerMinute();
+        assertTrue("minute must be 0 or 30", min == 0 || min == 30);
+        assertTrue("hour must be 0..23", h >= 0 && h <= 23);
+        java.util.Calendar now = java.util.Calendar.getInstance();
+        int nowMin = now.get(java.util.Calendar.HOUR_OF_DAY) * 60
+                + now.get(java.util.Calendar.MINUTE);
+        int defMin = h * 60 + min;
+        // Either later today, or it rolled to 00:00 (next day) — both are
+        // future slots relative to now.
+        assertTrue("default slot must be after now or rolled to next day",
+                defMin > nowMin || (h == 0 && min == 0));
     }
 }

@@ -17,6 +17,7 @@
     <string name="cm_action_schedule">Schedule</string>
     <string name="cm_error_title_required">Please add a meeting title.</string>
     <string name="cm_error_when_required">Please pick a date and start time.</string>
+    <string name="cm_error_past_time">That time has already passed. Please pick a future time.</string>
     <string name="cm_error_generic">Couldn\'t create the meeting. Please try again.</string>
     <string name="cm_created_toast">Meeting scheduled</string>
     <string name="cm_started_toast">Instant meeting created</string>

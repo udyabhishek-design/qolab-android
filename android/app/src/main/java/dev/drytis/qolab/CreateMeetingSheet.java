@@ -116,7 +116,8 @@ public class CreateMeetingSheet {
             hour = h; minute = min;
             timePick.setText(humanTime(h, min));
             clearError();
-        }, 9, 0, false).show());
+        }, CreateMeetingForm.defaultPickerHour(), CreateMeetingForm.defaultPickerMinute(),
+                false).show());
 
         renderParticipants();
 
@@ -216,6 +217,15 @@ public class CreateMeetingSheet {
                 showError("title".equals(v)
                         ? R.string.cm_error_title_required
                         : R.string.cm_error_when_required);
+                return;
+            }
+            // v1.5.37: the backend list contract hides scheduled meetings
+            // whose scheduled_at has passed ("expired" — dropped from every
+            // bucket). A create that the list would immediately hide is a
+            // false success; block it at submit and keep the form open so
+            // the user can pick a future slot. No request is sent.
+            if (!CreateMeetingForm.isFutureLocal(year, month, day, hour, minute)) {
+                showError(activity.getString(R.string.cm_error_past_time));
                 return;
             }
         }

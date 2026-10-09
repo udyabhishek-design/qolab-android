@@ -1,5 +1,6 @@
 package dev.drytis.qolab;
 
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.Test;
@@ -112,5 +113,43 @@ public class CreateMeetingWiringTest {
         // Meeting Details / Transcript sources must not be touched by this feature
         String detail = read(JAVA + "/MeetingDetailActivity.java");
         assertTrue(detail.contains("transport.getJson(\"/meetings/\" + meetingId + \"/detail\""));
+    }
+
+    @Test
+    public void submitRejectsPastScheduledTimeBeforeRequest() throws Exception {
+        // v1.5.37: the backend list contract hides scheduled meetings whose
+        // scheduled_at has passed, so a past-dated create is a false success.
+        // submit() must guard BEFORE building/sending the payload, keeping the
+        // sheet open with a visible human error (form data preserved).
+        String src = read(JAVA + "/CreateMeetingSheet.java");
+        int guard = src.indexOf("CreateMeetingForm.isFutureLocal");
+        int payload = src.indexOf("CreateMeetingForm.buildPayload");
+        assertTrue("future-time guard missing from submit()", guard > 0);
+        assertTrue("buildPayload call missing", payload > 0);
+        assertTrue("future-time guard must precede buildPayload",
+                guard < payload);
+        assertTrue("guard must show the human past-time error",
+                src.contains("cm_error_past_time"));
+        // Within submit() itself, nothing dismisses before the guard —
+        // the sheet must stay open so entered data is preserved.
+        int submitStart = src.indexOf("private void submit(boolean instant)");
+        int guard2 = src.indexOf("CreateMeetingForm.isFutureLocal", submitStart);
+        assertTrue("submit() method not found or guard absent inside it",
+                submitStart >= 0 && guard2 > submitStart);
+        String beforeGuard = src.substring(submitStart, guard2);
+        assertTrue("submit() must not dismiss before the guard fires",
+                !beforeGuard.contains("dialog.dismiss()"));
+    }
+
+    @Test
+    public void timePickerDefaultsToNextFutureSlot() throws Exception {
+        String src = read(JAVA + "/CreateMeetingSheet.java");
+        // hardcoded 9,0 default was the v1.5.36 bug: scheduling "today"
+        // defaulted to a time already past → meeting hidden from Upcoming.
+        assertFalse("hardcoded 9:00 picker default must be gone",
+                src.contains("}, 9, 0, false).show()"));
+        assertTrue("picker must use the computed future default",
+                src.contains("CreateMeetingForm.defaultPickerHour()")
+                        && src.contains("CreateMeetingForm.defaultPickerMinute()"));
     }
 }

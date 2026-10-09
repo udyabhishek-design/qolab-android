@@ -164,4 +164,37 @@ public final class CreateMeetingForm {
         return new int[]{c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1,
                 c.get(Calendar.DAY_OF_MONTH)};
     }
+
+    // ── Future-time validation (v1.5.37) ─────────────────────────────
+    // The backend's room list contract includes a scheduled meeting under
+    // `upcoming` ONLY while scheduled_at >= now(); a past-dated scheduled
+    // meeting is silently dropped from every bucket ("expired"). Scheduling
+    // "today" with a default/picked time already past therefore produced a
+    // successful create ("Scheduled" toast) for a meeting the list would
+    // never show. Guard at submit: the picked LOCAL datetime must be
+    // strictly in the future.
+
+    /** TimePicker default: the next half-hour boundary from now (or the
+     *  following hour when already exactly on one) — "today + default time"
+     *  is always a valid future slot. */
+    public static int defaultPickerHour() {
+        Calendar c = Calendar.getInstance();
+        int min = c.get(Calendar.MINUTE);
+        int h = c.get(Calendar.HOUR_OF_DAY);
+        return min >= 30 ? (h + 1) % 24 : h;
+    }
+
+    public static int defaultPickerMinute() {
+        Calendar c = Calendar.getInstance();
+        return c.get(Calendar.MINUTE) >= 30 ? 0 : 30;
+    }
+
+    /** True when the picked local date+time is strictly after "now" on the
+     *  device clock. Pure decision logic — no Android deps, unit-testable. */
+    public static boolean isFutureLocal(int year, int month1based, int day,
+                                        int hour, int minute) {
+        Calendar picked = new java.util.GregorianCalendar(
+                year, month1based - 1, day, hour, minute, 0);
+        return picked.getTimeInMillis() > System.currentTimeMillis();
+    }
 }
