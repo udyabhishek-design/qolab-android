@@ -146,9 +146,22 @@ public class HomeLogicTest {
 
     @Test
     public void malformedJsonNeverThrows() {
+        // v1.5.36: a body we cannot parse is a FAILURE (null), never
+        // fabricated empty data. Previously this returned an empty HomeData,
+        // which made Office render a 404's HTML error page as a valid
+        // "No social rooms yet" empty account.
         HomeDataClient.HomeData d = HomeDataClient.parse("not json {");
-        assertNull(d.nextMeeting);
-        assertTrue(d.socialRooms.isEmpty());
+        assertNull(d);
+    }
+
+    @Test
+    public void htmlErrorPageIsParseFailureNotEmptyData() {
+        // Exact v1.5.35 field regression: a Laravel 404/500 HTML page body
+        // must parse to null so the screen shows error+retry, not empty state.
+        HomeDataClient.HomeData d = HomeDataClient.parse(
+            "<!DOCTYPE html><html><head><title>404 Not Found</title></head>"
+            + "<body><h1>Not Found</h1></body></html>");
+        assertNull(d);
     }
 
     // ------------------------------------------------------------------

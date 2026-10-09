@@ -180,6 +180,16 @@ public class OfficeActivity extends AppCompatActivity {
                 showError();
                 return;
             }
+            // v1.5.36: a non-2xx HTTP status is a failure even when a body
+            // exists (Laravel 404/500 pages are HTML). Previously such a
+            // body reached HomeDataClient.parse() and its fallback rendered
+            // the failure as "No social rooms yet" — a valid-looking empty
+            // account. Now: error + Retry, same rule as Home.
+            if (r.status / 100 != 2) {
+                Log.d(TAG, "showError path: HTTP " + r.status);
+                showError();
+                return;
+            }
             HomeDataClient.HomeData parsed = HomeDataClient.parse(r.body);
             if (parsed == null) {
                 Log.d(TAG, "showError path: parse returned null");

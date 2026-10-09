@@ -189,10 +189,10 @@ public class HomeSessionTransportTest {
 
     @Test
     public void parseMalformedJsonDegradesSafely() {
+        // v1.5.36: malformed body = failure (null). The parser still never
+        // throws; callers treat null as error+retry, never as empty data.
         HomeDataClient.HomeData d = HomeDataClient.parse("not json {{{");
-        assertNotNull("parser never throws — degrades to empty model", d);
-        assertTrue(d.socialRooms.isEmpty());
-        assertNull(d.nextMeeting);
+        assertNull("unparseable body must be null (failure), not empty model", d);
     }
 
     @Test

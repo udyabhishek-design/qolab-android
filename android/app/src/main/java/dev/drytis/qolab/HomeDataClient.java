@@ -235,9 +235,14 @@ public final class HomeDataClient {
             return new HomeData(userName, avatar, role, dept, meeting, rooms,
                     deptRoom, conv, task, today);
         } catch (Exception e) {
-            return new HomeData(null, null, null, null, null,
-                    new ArrayList<Room>(), null, null, null,
-                    new TodayCounts(0, 0, 0, 0, 0));
+            // v1.5.36: a body we cannot parse (HTML error page, truncated
+            // payload, non-JSON) is a FAILURE — returning fabricated empty
+            // data here made Office render "No social rooms yet" for a 404,
+            // hiding a real outage as a valid empty account. Parse failure
+            // is reported as null; the caller shows its error+retry state.
+            // Valid JSON with missing sections still degrades gracefully
+            // inside the try block above (that is real data, not failure).
+            return null;
         }
     }
 
