@@ -160,6 +160,20 @@ public final class QolabWebViewTransport {
                 cb.onResult(new Result(Result.STATUS_TRANSPORT_DEAD, null, "transport-dead"));
                 return;
             }
+            // v1.5.42: the (possibly rehydrate-adopted, window-less)
+            // WebView must be RESUMED for the in-page fetch to run at all.
+            resumeForRequest();
+            // v1.5.42: pause the WebView once THIS request settles. Declared
+            // OUTSIDE the try so the catch path can also pause it.
+            final java.util.concurrent.atomic.AtomicBoolean closed2 =
+                    new java.util.concurrent.atomic.AtomicBoolean(false);
+            final QolabWebViewTransport self = this;
+            final java.util.function.Consumer<Result> wrap = r -> {
+                if (closed2.compareAndSet(false, true)) {
+                    self.pauseAfterRequest();
+                    cb.onResult(r);
+                }
+            };
             try {
                 final long id = SEQ.incrementAndGet();
                 final String key = "__qolabT" + id; // numeric id → safe JS ident
@@ -197,14 +211,14 @@ public final class QolabWebViewTransport {
                         Result r = resultFromEvaluateJavascript(recorded);
                         if (!"no-value".equals(r.errorCategory)) {
                             if (delivered.compareAndSet(false, true)) {
-                                cb.onResult(r);
+                                wrap.accept(r);
                             }
                             return;
                         }
                     }
                     if (android.os.SystemClock.elapsedRealtime() >= deadline) {
                         if (delivered.compareAndSet(false, true)) {
-                            cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
+                            wrap.accept(new Result(Result.STATUS_IO, null, "timeout"));
                         }
                         return;
                     }
@@ -216,7 +230,7 @@ public final class QolabWebViewTransport {
                         wv.evaluateJavascript(read, value -> latest.set(value));
                     } catch (Exception e) {
                         if (delivered.compareAndSet(false, true)) {
-                            cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
+                            wrap.accept(new Result(Result.STATUS_IO, null, "evaluate-failed"));
                         }
                         return;
                     }
@@ -229,7 +243,7 @@ public final class QolabWebViewTransport {
                 // POLL_INTERVAL_MS (was: always a full interval late).
                 poll[0].run();
             } catch (Exception e) {
-                cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
+                wrap.accept(new Result(Result.STATUS_IO, null, "evaluate-failed"));
             }
         });
     }
@@ -254,6 +268,19 @@ public final class QolabWebViewTransport {
                 cb.onResult(new Result(Result.STATUS_TRANSPORT_DEAD, null, "transport-dead"));
                 return;
             }
+            // v1.5.42: resumed for the duration of the round-trip (see
+            // resumeForRequest — cold-restart partial-render fix).
+            resumeForRequest();
+            // Declared OUTSIDE the try so the catch path can also pause it.
+            final java.util.concurrent.atomic.AtomicBoolean closed2 =
+                    new java.util.concurrent.atomic.AtomicBoolean(false);
+            final QolabWebViewTransport self = this;
+            final java.util.function.Consumer<Result> wrap = r -> {
+                if (closed2.compareAndSet(false, true)) {
+                    self.pauseAfterRequest();
+                    cb.onResult(r);
+                }
+            };
             try {
                 final long id = SEQ.incrementAndGet();
                 final String key = "__qolabT" + id;
@@ -322,17 +349,22 @@ public final class QolabWebViewTransport {
                                 // proven logout takeover in MainActivity).
                                 if (r.status == 419 && !retried419.get()) {
                                     retried419.set(true);
+                                    // v1.5.42: the retry re-enters postJson,
+                                    // which owns its own resume/pause pair —
+                                    // release THIS request's hold first.
+                                    closed2.set(true);
+                                    self.pauseAfterRequest();
                                     refresh[0].run();
                                     return;
                                 }
-                                cb.onResult(r);
+                                wrap.accept(r);
                             }
                             return;
                         }
                     }
                     if (android.os.SystemClock.elapsedRealtime() >= deadline) {
                         if (delivered.compareAndSet(false, true)) {
-                            cb.onResult(new Result(Result.STATUS_IO, null, "timeout"));
+                            wrap.accept(new Result(Result.STATUS_IO, null, "timeout"));
                         }
                         return;
                     }
@@ -344,7 +376,7 @@ public final class QolabWebViewTransport {
                         wv.evaluateJavascript(read, value -> latest.set(value));
                     } catch (Exception e) {
                         if (delivered.compareAndSet(false, true)) {
-                            cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
+                            wrap.accept(new Result(Result.STATUS_IO, null, "evaluate-failed"));
                         }
                         return;
                     }
@@ -354,7 +386,7 @@ public final class QolabWebViewTransport {
                 // POLL_INTERVAL_MS (was: always a full interval late).
                 poll[0].run();
             } catch (Exception e) {
-                cb.onResult(new Result(Result.STATUS_IO, null, "evaluate-failed"));
+                wrap.accept(new Result(Result.STATUS_IO, null, "evaluate-failed"));
             }
         });
     }
@@ -417,6 +449,47 @@ public final class QolabWebViewTransport {
     /** True when the transport WebView exists (main-thread check). */
     public boolean isAlive() {
         return instance != null && webView != null;
+    }
+
+    /**
+     * v1.5.42 FIX (cold-restart partial Home): the rehydrate-adopted
+     * WebView is app-scoped and NEVER attached to a window, so Android
+     * keeps it in the PAUSED lifecycle state. A paused WebView runs NO
+     * page JavaScript — the fetch kick-off below executes, but the
+     * promise resolution / window-variable write never happens, and
+     * every data request on a cold start eventually times out while
+     * warm (activity-owned) WebViews work fine. That asymmetry is why
+     * cold restarts showed partial Home while normal navigation was
+     * fast. Every request now briefly resumes the WebView for the
+     * duration of the round-trip (and pauses it again when idle), so
+     * timers/promises run during requests while the WebView stays
+     * battery-friendly in between. Main thread.
+     */
+    private void resumeForRequest() {
+        WebView wv = webView;
+        if (wv == null) return;
+        if (requestDepth == 0) {
+            try { wv.onResume(); } catch (Exception ignored) { }
+        }
+        requestDepth++;
+    }
+
+    /** Pauses the WebView again once no request is in flight. Main thread. */
+    private void pauseAfterRequest() {
+        if (requestDepth > 0) requestDepth--;
+        if (requestDepth == 0) {
+            WebView wv = webView;
+            if (wv != null) {
+                try { wv.onPause(); } catch (Exception ignored) { }
+            }
+        }
+    }
+
+    /** Number of in-flight requests (test seam). */
+    private int requestDepth = 0;
+
+    int requestDepthForTest() {
+        return requestDepth;
     }
 
     // ------------------------------------------------------------------
@@ -617,6 +690,11 @@ public final class QolabWebViewTransport {
     private void releaseQuietly() {
         try {
             if (webView != null) {
+                // v1.5.42: destroy() requires a RESUMED state when the
+                // WebView was paused between requests — resuming first
+                // avoids the renderer teardown crash path on paused views.
+                try { webView.onResume(); } catch (Exception ignored) { }
+                requestDepth = 0;
                 try { webView.removeJavascriptInterface("QolabLoginDriver"); } catch (Exception ignored) { }
                 webView.stopLoading();
                 ViewGroup parent = (ViewGroup) webView.getParent();

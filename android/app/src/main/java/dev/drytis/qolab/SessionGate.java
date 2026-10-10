@@ -99,23 +99,81 @@ public final class SessionGate {
                                            ValidCallback onValid,
                                            LogoutCallback onLogout,
                                            ExhaustedCallback onExhausted) {
-        // Someone else is already verifying — fold into that run: they
-        // will deliver a decision through their own callbacks. To keep
-        // THIS caller responsive, treat the in-flight check as its own:
-        // retry-when-alive via the direct path below.
+        android.os.Handler main = new android.os.Handler(
+                android.os.Looper.getMainLooper());
+        // Someone else is already verifying — fold THIS caller into the
+        // in-flight run: they must receive a decision through their own
+        // callbacks too. v1.5.42 FIX (cold-restart partial Home): the old
+        // behavior returned SILENTLY when no transport existed yet — the
+        // second caller's load never restarted, so Home stayed in skeleton
+        // with no error and no retry (permanently partial content).
         if (!checking.compareAndSet(false, true)) {
-            // If a transport appeared while we queued, use it now.
+            pending.add(new PendingDecision(appContext, origin, onValid, onLogout, onExhausted, main));
+            // If a transport appeared while we queued, service the queue now.
             QolabWebViewTransport t = QolabWebViewTransport.get();
             if (t != null && t.isAlive()) {
-                android.os.Handler main = new android.os.Handler(
-                        android.os.Looper.getMainLooper());
-                main.post(onValid::onSessionValid);
+                servicePending(t.isAlive());
             }
             return;
         }
-        android.os.Handler main = new android.os.Handler(
-                android.os.Looper.getMainLooper());
         attemptRecheck(appContext, origin, onValid, onLogout, onExhausted, 0, main);
+    }
+
+    /** v1.5.42: callers that arrived while a check was in flight. The
+     *  decision made for the in-flight run is delivered to every pending
+     *  caller — nobody's callback is dropped. */
+    private static final java.util.List<PendingDecision> pending =
+            java.util.Collections.synchronizedList(new java.util.ArrayList<>());
+
+    private static final class PendingDecision {
+        final android.content.Context appContext;
+        final String origin;
+        final ValidCallback onValid;
+        final LogoutCallback onLogout;
+        final ExhaustedCallback onExhausted;
+        final android.os.Handler main;
+        PendingDecision(android.content.Context appContext, String origin,
+                        ValidCallback onValid, LogoutCallback onLogout,
+                        ExhaustedCallback onExhausted, android.os.Handler main) {
+            this.appContext = appContext;
+            this.origin = origin;
+            this.onValid = onValid;
+            this.onLogout = onLogout;
+            this.onExhausted = onExhausted;
+            this.main = main;
+        }
+    }
+
+    /** Deliver the decided outcome to every pending caller. Clears the
+     *  queue first so late arrivals start their own fresh gate run. */
+    private static void servicePending(boolean valid) {
+        java.util.List<PendingDecision> drained;
+        synchronized (pending) {
+            drained = new java.util.ArrayList<>(pending);
+            pending.clear();
+        }
+        for (PendingDecision p : drained) {
+            if (valid) {
+                p.main.post(p.onValid::onSessionValid);
+            } else if (p.onLogout != null) {
+                p.main.post(p.onLogout::onSessionInvalid);
+            }
+        }
+    }
+
+    /** Deliver an exhausted outcome (network down through the whole
+     *  window) to every pending caller — retryable error, never logout. */
+    private static void servicePendingExhausted() {
+        java.util.List<PendingDecision> drained;
+        synchronized (pending) {
+            drained = new java.util.ArrayList<>(pending);
+            pending.clear();
+        }
+        for (PendingDecision p : drained) {
+            if (p.onExhausted != null) {
+                p.main.post(p.onExhausted::onNetworkUnavailable);
+            }
+        }
     }
 
     private static void attemptRecheck(android.content.Context appContext,
@@ -129,6 +187,9 @@ public final class SessionGate {
         if (t != null && t.isAlive()) {
             checking.set(false);
             main.post(onValid::onSessionValid);
+            // v1.5.42: the fold-in callers waiting on this run also get
+            // their VALID decision (their retries restart the data load).
+            servicePending(true);
             return;
         }
         QolabWebViewTransport.rehydrate(appContext, origin,
@@ -142,6 +203,7 @@ public final class SessionGate {
                             // PROVEN_INVALID — server parked us on /login.
                             main.post(onLogout::onSessionInvalid);
                         }
+                        servicePending(sessionValid);
                     }
 
                     @Override
@@ -156,6 +218,7 @@ public final class SessionGate {
                             if (onExhausted != null) {
                                 main.post(onExhausted::onNetworkUnavailable);
                             }
+                            servicePendingExhausted();
                             return;
                         }
                         long delay = attempt == 0 ? 2_000L : 5_000L;

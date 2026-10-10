@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.5.42: placeholder shown inside the local video slot when the
+     camera is OFF. The live renderer is REMOVED (no frozen frame); this
+     view replaces it so the slot never looks broken. -->
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/live_cam_placeholder"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:gravity="center"
+    android:text="@string/live_cam_off_placeholder"
+    android:textColor="#B3FFFFFF"
+    android:textSize="14sp"
+    android:background="#331A1A1A"/>

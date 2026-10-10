@@ -316,6 +316,10 @@ class LiveRoomActivity : AppCompatActivity() {
                     refreshPeople()
                     // v1.5.41: toolbar icons start from real track state
                     syncTrackState()
+                    // v1.5.42: camera is NOT auto-published on join — show
+                    // the camera-off placeholder immediately instead of an
+                    // empty black slot.
+                    syncLocalPreview()
                 }            } catch (e: Exception) {
                 runOnUiThread {
                     Toast.makeText(
@@ -344,12 +348,16 @@ class LiveRoomActivity : AppCompatActivity() {
                 // server) — icons follow the actual track state.
                 if (ev.participant is io.livekit.android.room.participant.LocalParticipant) {
                     syncTrackState()
+                    // v1.5.42: a muted camera track must also clear the
+                    // local preview (frozen-frame fix).
+                    syncLocalPreview()
                 }
                 refreshPeople()
             }
             is RoomEvent.TrackUnmuted -> {
                 if (ev.participant is io.livekit.android.room.participant.LocalParticipant) {
                     syncTrackState()
+                    syncLocalPreview()
                 }
                 refreshPeople()
             }
@@ -370,27 +378,75 @@ class LiveRoomActivity : AppCompatActivity() {
                 local.setMicrophoneEnabled(true)
                 runOnUiThread { syncTrackState() }
             } catch (_: Exception) { }
-            attachLocalPreview()
+            runOnUiThread { syncLocalPreview() }
         }
     }
 
-    private fun attachLocalPreview() {
+    /**
+     * v1.5.42 FIX (camera-off freeze): the local slot is now rendered
+     * strictly from the actual camera publication state.
+     *   camera published   → EXACTLY ONE live renderer attached
+     *   camera unpublished → renderer removed + released (the frozen last
+     *                        frame was the v1.5.41 bug: toggling OFF left
+     *                        the old SurfaceViewRenderer in place with no
+     *                        track feeding it) and a clean "Camera is off"
+     *                        placeholder shown instead.
+     * Idempotent: re-running with an unchanged state re-attaches nothing
+     * (the renderer guard prevents duplicate renderers on repeated
+     * Camera ON → OFF → ON cycles).
+     */
+    private fun syncLocalPreview() {
         val local = room?.localParticipant ?: return
         val pub = local.getTrackPublication(io.livekit.android.room.track.Track.Source.CAMERA)
         val track = (pub as? io.livekit.android.room.track.LocalTrackPublication)?.track
-        if (track is io.livekit.android.room.track.LocalVideoTrack) {
-            runOnUiThread {
-                val renderer = makeRenderer(mirror = true)
-                localFrame.addView(
-                    renderer,
-                    FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
+        val videoTrack = track as? io.livekit.android.room.track.LocalVideoTrack
+        runOnUiThread {
+            if (videoTrack != null) {
+                // Camera ON: keep the existing renderer if any (no
+                // duplicate attachment), else attach a fresh one.
+                if (localFrame.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer?>(
+                        "local-renderer") == null) {
+                    val renderer = makeRenderer(mirror = true)
+                    renderer.tag = "local-renderer"
+                    localFrame.removeAllViews()
+                    localFrame.addView(
+                        renderer,
+                        FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
                     )
-                )
-                track.addRenderer(renderer)
+                    videoTrack.addRenderer(renderer)
+                }
+            } else {
+                // Camera OFF: remove + RELEASE the renderer (a stale
+                // SurfaceViewRenderer with no track displays the last
+                // frame forever), then show the placeholder.
+                val existing = localFrame.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer?>(
+                    "local-renderer")
+                if (existing != null) {
+                    try { existing.release() } catch (_: Exception) { }
+                    localFrame.removeAllViews()
+                }
+                if (localFrame.findViewWithTag<View>("cam-placeholder") == null) {
+                    val ph = layoutInflater.inflate(R.layout.live_cam_placeholder, localFrame, false)
+                    ph.tag = "cam-placeholder"
+                    localFrame.addView(
+                        ph,
+                        FrameLayout.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    )
+                }
             }
         }
+    }
+
+    /** v1.5.41 kept for compatibility; now a thin wrapper over
+     *  syncLocalPreview (single source of truth for the local slot). */
+    private fun attachLocalPreview() {
+        syncLocalPreview()
     }
 
     private fun onRemoteVideo(track: RemoteVideoTrack) {
@@ -438,7 +494,11 @@ class LiveRoomActivity : AppCompatActivity() {
             try {
                 local.setCameraEnabled(target)
                 syncTrackState()
-                if (target) attachLocalPreview()
+                // v1.5.42: single source of truth — syncLocalPreview decides
+                // from the publication state whether the live renderer
+                // attaches (ON) or is removed+released with a placeholder
+                // (OFF). Called AFTER the state change settles.
+                syncLocalPreview()
             } catch (_: Exception) { }
         }
     }
