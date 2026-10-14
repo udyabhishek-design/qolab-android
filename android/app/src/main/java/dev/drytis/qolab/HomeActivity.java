@@ -2,6 +2,7 @@ package dev.drytis.qolab;
 
 import android.annotation.SuppressLint;
 
+import android.util.Log;
 import dev.drytis.qolab.BuildConfig;
 import android.app.Dialog;
 import android.content.Intent;
@@ -434,6 +435,25 @@ public class HomeActivity extends AppCompatActivity {
             box.addView(item);
         }
 
+        // v1.5.45: Log out — final item, separated from the destinations.
+        View sep = new View(this);
+        sep.setBackgroundColor(0xFFE8E4DA);
+        LinearLayout.LayoutParams seplp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1,
+                        (int) (1 * getResources().getDisplayMetrics().density)));
+        seplp.setMargins(0, pad / 2, 0, pad / 2);
+        box.addView(sep, seplp);
+        TextView logoutItem = new TextView(this);
+        logoutItem.setText(R.string.home_menu_logout);
+        logoutItem.setTextColor(0xFF8B1E2D);
+        logoutItem.setTextSize(16);
+        logoutItem.setPadding(0, pad / 2, 0, pad / 2);
+        logoutItem.setOnClickListener(v -> {
+            sheet.dismiss();
+            confirmLogout();
+        });
+        box.addView(logoutItem);
+
         // DEBUG-only: Home fetch diagnostics (names/booleans only)
         if (BuildConfig.DEBUG) {
             // v1.5.25: manual Development update check (dev builds only)
@@ -483,6 +503,8 @@ public class HomeActivity extends AppCompatActivity {
     private void loadHome() {
         if (fetching) return;
         fetching = true;
+        // v1.5.45: any unread callback from a previous cycle is now stale.
+        fetchGeneration.incrementAndGet();
         // v1.5.41 PERFORMANCE: only run the skeleton phase when there is
         // nothing to show. With cached/stale data up, a background refresh
         // keeps the current content (no skeleton flash, no empty states).
@@ -597,6 +619,23 @@ public class HomeActivity extends AppCompatActivity {
             lastDiag.renderExecuted = true;
             lastDiag.skeletonsCleared = true;
             renderAll(data.today.unreadNotifications);
+        }), (unreadUserId, unread, parseOk) -> runOnUiThread(() -> {
+            // v1.5.45: independent unread patch — badge + Today indicator
+            // ONLY. Never a full renderAll (no skeleton reintroduction,
+            // no content teardown). Stale generations (logout/new fetch
+            // cycle), destroyed activities and cross-account payloads are
+            // dropped; on failure the CURRENT value is preserved.
+            if (isFinishing() || isDestroyed()) return;
+            if (data != null
+                    && LogoutFlowRules.applyUnreadResult(
+                            unreadUserId, data.userId,
+                            REQUEST_GENERATION.get() != fetchGeneration.get(),
+                            parseOk)) {
+                data.today.unreadNotifications = unread;
+                notificationBadge.setVisibility(unread > 0
+                        ? View.VISIBLE : View.GONE);
+                todayUpdates.setText(String.valueOf(unread));
+            }
         }));
     }
 
@@ -607,6 +646,115 @@ public class HomeActivity extends AppCompatActivity {
         cachedData = null;
         cachedForUserId = Long.MIN_VALUE;
         ChatRealtime.get().shutdown();
+        Intent i = new Intent(this, LoginActivity.class);
+        i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        startActivity(i);
+        finish();
+    }
+
+    // ------------------------------------------------------------------
+    // v1.5.45: NATIVE LOGOUT (menu sheet → confirmation → webview
+    // POST /logout → cleanup → Login). The HTTP transaction reuses the
+    // EXISTING AuthNavRules.buildWebviewLogoutJs() evaluated inside the
+    // authenticated session WebView (QolabWebViewTransport.
+    // runLogoutTransaction) — never native HTTP (proven-419). On server
+    // confirmation the full cleanup runs ONCE (idempotent via
+    // logoutCompleting); on failure the session stays intact with a
+    // non-blocking error + Retry.
+    // ------------------------------------------------------------------
+
+    /** Confirmation gate + single-flight for the whole logout flow. */
+    private volatile boolean logoutCompleting = false;
+
+    /** v1.5.45: generation of the current fetch cycle. Bumped when a new
+     *  loadHome starts (so a previous cycle's late unread callback is
+     *  dropped) and on logout (all pending callbacks go stale). */
+    private final java.util.concurrent.atomic.AtomicInteger fetchGeneration =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+
+    /** v1.5.45: bumped on logout — late fetch/unread callbacks check it. */
+    private static final java.util.concurrent.atomic.AtomicInteger
+            REQUEST_GENERATION = new java.util.concurrent.atomic.AtomicInteger(0);
+
+    private void confirmLogout() {
+        if (logoutCompleting) return;
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.home_logout_title)
+                .setMessage(R.string.home_logout_message)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.home_logout_confirm,
+                        (d, w) -> performLogout())
+                .show();
+    }
+
+    private void performLogout() {
+        if (logoutCompleting) return;
+        logoutCompleting = true;
+        QolabWebViewTransport transport = QolabWebViewTransport.get();
+        if (transport == null) {
+            // No live transport: nothing authenticated to end server-side
+            // (fresh process with a stale cookie would have gone through
+            // SessionGate first). Local cleanup + Login is correct here.
+            android.util.Log.i("QolabHome", "logout: no transport → local cleanup");
+            completeLogoutLocally();
+            return;
+        }
+        final int genAtStart = REQUEST_GENERATION.get();
+        transport.runLogoutTransaction((serverConfirmed, status, attempts, err) ->
+                runOnUiThread(() -> {
+                    if (!serverConfirmed) {
+                        // Failure keeps EVERYTHING: session, cookies, data.
+                        logoutCompleting = false;
+                        Log.w(TAG, "logout failed: http=" + status
+                                + " attempts=" + attempts + " err=" + err);
+                        Toast.makeText(this, R.string.home_logout_failed,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    if (genAtStart != REQUEST_GENERATION.get()) {
+                        // A newer lifecycle event already re-ran the flow —
+                        // the server session is gone either way; finish up.
+                        Log.i(TAG, "logout: stale completion suppressed");
+                    }
+                    Log.i(TAG, "logout confirmed (http=" + status
+                            + " attempts=" + attempts + ") → cleanup");
+                    completeLogoutLocally();
+                }));
+    }
+
+    /**
+     * Idempotent post-confirmation cleanup, in LogoutFlowRules order:
+     * cache → realtime → pending callbacks → transport → cookies →
+     * Login (NEW_TASK | CLEAR_TASK — Back cannot return here).
+     */
+    private void completeLogoutLocally() {
+        if (!logoutCompleting) return; // double-callback guard
+        logoutCompleting = false;
+        // 1–3. cache, realtime, pending fetch callbacks (generation bump
+        // makes every in-flight composite/unread callback stale).
+        cachedData = null;
+        cachedForUserId = Long.MIN_VALUE;
+        REQUEST_GENERATION.incrementAndGet();
+        ChatRealtime.get().shutdown();
+        // 4. release the authenticated session WebView (also kills its
+        //    poll loops — no stale write can land after this).
+        QolabWebViewTransport.destroy();
+        // 5. expire ONLY app-origin *-session cookies (server session is
+        //    already invalidated by the confirmed POST /logout).
+        try {
+            android.webkit.CookieManager cm = android.webkit.CookieManager.getInstance();
+            String origin = BuildConfig.QOLAB_ORIGIN.replaceAll("/+$", "");
+            String header = cm.getCookie(origin);
+            java.util.List<String> names = AuthNavRules.sessionCookieNames(header);
+            for (String name : names) {
+                cm.setCookie(origin + "/", AuthNavRules.expireCookieValue(name));
+            }
+            cm.flush();
+            Log.i(TAG, "logout: " + names.size() + " session cookies expired");
+        } catch (Exception e) {
+            Log.w(TAG, "logout: cookie expiry issue (continuing)", e);
+        }
+        // 6. Login as the new task root.
         Intent i = new Intent(this, LoginActivity.class);
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
         startActivity(i);

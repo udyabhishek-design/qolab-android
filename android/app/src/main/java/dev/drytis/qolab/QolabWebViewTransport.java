@@ -13,6 +13,8 @@ import org.json.JSONObject;
 
 import java.util.concurrent.atomic.AtomicLong;
 
+import dev.drytis.qolab.AuthNavRules;
+
 /**
  * v1.5.15 — Architecture B: the AUTHENTICATED WEBVIEW TRANSPORT.
  *
@@ -123,6 +125,117 @@ public final class QolabWebViewTransport {
     /** Live instance or null (Home routes to Login when null). */
     public static QolabWebViewTransport get() {
         return instance;
+    }
+
+    /**
+     * v1.5.45: evaluate the EXISTING webview logout transaction
+     * (AuthNavRules.buildWebviewLogoutJs — CSRF handshake → POST /logout →
+     * one 419 recovery) INSIDE the authenticated session WebView. This is
+     * the same cookie context every other request uses; native HTTP logout
+     * is physically proven to 419 (v1.4.12) and is never attempted.
+     *
+     * The JS beacons its result through window.__qolabLogout{id}; the Java
+     * poll loop (same pattern as getJson) picks it up and parses the safe
+     * JSON {status, attempts, ms, xsrfPresent[, error]}. onDone fires ONCE
+     * on the main thread with serverConfirmed = (2xx or 3xx), or false on
+     * transport death / timeout. The instance is NOT released here — the
+     * caller owns the post-success transition (cookie expiry, cache clear,
+     * Login routing, release).
+     */
+    public void runLogoutTransaction(final LogoutCallback onDone) {
+        final String cbName = "logout";
+        android.os.Handler mainHandler = new android.os.Handler(
+                android.os.Looper.getMainLooper());
+        final java.util.concurrent.atomic.AtomicBoolean settled =
+                new java.util.concurrent.atomic.AtomicBoolean(false);
+        // 20s ceiling — generous vs the JS's own 2-attempt budget.
+        final Runnable timeout = () -> {
+            if (settled.compareAndSet(false, true)) {
+                onDone.onDone(false, 0, 0, "timeout");
+            }
+        };
+        mainHandler.postDelayed(timeout, 20_000);
+        WebView wv = webView;
+        if (wv == null) {
+            mainHandler.removeCallbacks(timeout);
+            if (settled.compareAndSet(false, true)) onDone.onDone(false, 0, 0, "transport-dead");
+            return;
+        }
+        try { wv.onResume(); } catch (Exception ignored) { }
+        final String key = "__qolabLogout" + System.identityHashCode(onDone);
+        String js = AuthNavRules.buildWebviewLogoutJs().replace(
+                "window.QolabNative.onLogoutResult(",
+                "(function(v){ window." + key + " = v; })(");
+        // The JS above ends with ");" from the original call — closing paren
+        // already balanced by the replacement wrapper. Kick it off.
+        wv.evaluateJavascript(js, null);
+        final long t0 = android.os.SystemClock.elapsedRealtime();
+        final Runnable[] poll = new Runnable[1];
+        poll[0] = new Runnable() {
+            @Override public void run() {
+                if (settled.get()) return;
+                WebView w2 = webView;
+                if (w2 == null) {
+                    mainHandler.removeCallbacks(timeout);
+                    if (settled.compareAndSet(false, true)) {
+                        onDone.onDone(false, 0, 0, "transport-dead");
+                    }
+                    return;
+                }
+                w2.evaluateJavascript("window." + key + " === undefined ? null : window."
+                        + key, value -> {
+                    if (settled.get()) return;
+                    String v = (value == null || "null".equals(value)) ? null : value;
+                    if (v != null) {
+                        try {
+                            org.json.JSONObject o = new org.json.JSONObject(v);
+                            // strip surrounding quotes from the JS string
+                        } catch (Exception ignored) { }
+                    }
+                    if (v == null || v.isEmpty() || "null".equals(v)) {
+                        if (android.os.SystemClock.elapsedRealtime() - t0 > 15_000) {
+                            mainHandler.removeCallbacks(timeout);
+                            if (settled.compareAndSet(false, true)) {
+                                onDone.onDone(false, 0, 0, "no-result");
+                            }
+                        } else {
+                            mainHandler.postDelayed(this, 100);
+                        }
+                        return;
+                    }
+                    try {
+                        String s = v;
+                        if (s.startsWith("\"") && s.endsWith("\"")) {
+                            s = new org.json.JSONTokener(s).nextValue().toString();
+                        }
+                        org.json.JSONObject o = new org.json.JSONObject(s);
+                        int status = o.optInt("status", 0);
+                        boolean ok = (status >= 200 && status < 400);
+                        mainHandler.removeCallbacks(timeout);
+                        if (settled.compareAndSet(false, true)) {
+                            onDone.onDone(ok, status,
+                                    o.optInt("attempts", 0),
+                                    ok ? null
+                                       : ("http-" + status + (o.has("error")
+                                            ? " / " + o.optString("error") : "")));
+                        }
+                    } catch (Exception e) {
+                        mainHandler.removeCallbacks(timeout);
+                        if (settled.compareAndSet(false, true)) {
+                            onDone.onDone(false, 0, 0, "bad-result-json");
+                        }
+                    }
+                });
+            }
+        };
+        mainHandler.postDelayed(poll[0], 200);
+    }
+
+    /** Single-shot outcome of the webview logout transaction. */
+    public interface LogoutCallback {
+        /** @param serverConfirmed 2xx/3xx from POST /logout (server-proven) */
+        void onDone(boolean serverConfirmed, int httpStatus, int attempts,
+                    String errorCategory);
     }
 
     private QolabWebViewTransport(String origin) {

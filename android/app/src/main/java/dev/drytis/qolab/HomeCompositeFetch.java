@@ -21,8 +21,17 @@ import org.json.JSONObject;
  * bounded Java-driven poll loop — safe to interleave). Parsing and
  * composition are the pure JVM-tested functions in {@link HomeDataClient}.
  *
+ * v1.5.45 PERFORMANCE: the optional unread-count request NO LONGER
+ * blocks primary content. The moment both required pages are valid the
+ * composed HomeData is delivered (unread=0 placeholder preserved from
+ * any previous value by the caller); the unread request is then fired
+ * INDEPENDENTLY and reported through {@link UnreadCallback} so the
+ * caller can patch ONLY the badge / Today indicator. A stale, failed
+ * or cross-account unread result is dropped by
+ * {@link HomeActivity}'s generation check (never a full re-render).
+ *
  * Single-shot contract — onReady fires EXACTLY once, on the main thread:
- *   200 + data            — fully composed HomeData (unread included)
+ *   200 + data            — fully composed HomeData (unread NOT awaited)
  *   401                   — server-PROVEN session expiry → route to Login
  *   STATUS_IO             — transport/timeout failure → retryable error
  *   STATUS_TRANSPORT_DEAD — renderer gone → SessionGate recheck
@@ -37,16 +46,34 @@ final class HomeCompositeFetch {
         void onReady(int status, HomeDataClient.HomeData data, String errorCategory);
     }
 
+    /** v1.5.45: independent, non-blocking unread outcome. */
+    interface UnreadCallback {
+        /**
+         * @param userId   the userId of the composed HomeData this request
+         *                 belongs to (0 = unknown — caller must drop)
+         * @param unread   parsed unread_count (defensive 0 on odd bodies)
+         * @param parseOk  false when the response was absent/malformed —
+         *                 the caller keeps the current value
+         */
+        void onUnread(long userId, int unread, boolean parseOk);
+    }
+
     private HomeCompositeFetch() {}
 
-    static void fetch(final QolabWebViewTransport transport, final Callback cb) {
+    /** Overload preserving the old single-callback signature. */
+    static void fetch(QolabWebViewTransport transport, Callback cb) {
+        fetch(transport, cb, null);
+    }
+
+    static void fetch(final QolabWebViewTransport transport, final Callback cb,
+                      final UnreadCallback unreadCb) {
         final java.util.concurrent.atomic.AtomicInteger done =
                 new java.util.concurrent.atomic.AtomicInteger(0);
         final HomeDataClient.PartialDashboard[] dashOut =
                 new HomeDataClient.PartialDashboard[1];
         final String[] roomsBody = new String[1]; // rooms HTML parked if
         // it settles before dashboard (department match needs the user's
-        // department_id from /dashboard)
+        // department_id from dashboard)
         final boolean[] roomsParsed = new boolean[1];
         final int[] statusOut = new int[1];
         final String[] errOut = new String[1];
@@ -65,28 +92,36 @@ final class HomeCompositeFetch {
                         errOut[0] != null ? errOut[0] : "io");
                 return;
             }
-            // Both pages parsed — fetch unread-count, then deliver once,
-            // fully composed.
+            HomeDataClient.PartialRooms pr = HomeDataClient.parseRoomsPage(
+                    roomsBody[0],
+                    dashOut[0] != null ? dashOut[0].userDepartmentId : null);
+            // v1.5.45: deliver the PRIMARY content IMMEDIATELY — the
+            // optional unread request is fired afterwards, independently,
+            // and only ever patches the badge via unreadCb (never a
+            // re-render, never a skeleton).
+            HomeDataClient.HomeData data =
+                    HomeDataClient.composeHomeData(dashOut[0], pr, 0);
+            if (data == null) {
+                cb.onReady(STATUS_COMPOSITE_PARSE, null, "inertia-missing");
+                return;
+            }
+            final long payloadUserId = data.userId;
+            cb.onReady(200, data, null);
+            if (unreadCb == null) return;
+            // Independent optional request — failures here are silently
+            // non-fatal (caller keeps the current badge value).
             transport.getJson("/notifications/unread-count", u -> {
-                // NOTE: no delivered-check here — settle() has already
-                // flipped the guard above; this arm owns the single
-                // delivery of the final composed result.
                 int unread = 0;
+                boolean ok = false;
                 try {
-                    JSONObject o = new JSONObject(u.body == null ? "{}" : u.body);
-                    unread = o.optInt("unread_count", 0);
+                    if (u != null && u.body != null && u.status / 100 == 2) {
+                        JSONObject o = new JSONObject(u.body);
+                        unread = o.optInt("unread_count", 0);
+                        ok = true;
+                    }
                 } catch (Exception ignored) {
                 }
-                HomeDataClient.HomeData full = HomeDataClient.composeHomeData(
-                        dashOut[0],
-                        HomeDataClient.parseRoomsPage(roomsBody[0],
-                                dashOut[0] != null ? dashOut[0].userDepartmentId : null),
-                        unread);
-                if (full == null) {
-                    cb.onReady(STATUS_COMPOSITE_PARSE, null, "inertia-missing");
-                    return;
-                }
-                cb.onReady(200, full, null);
+                unreadCb.onUnread(payloadUserId, unread, ok);
             });
         };
 

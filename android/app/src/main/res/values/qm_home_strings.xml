@@ -57,6 +57,12 @@
     <string name="home_menu_directory">Directory</string>
     <string name="home_menu_settings">Settings</string>
     <string name="home_menu_profile">Profile</string>
+    <!-- v1.5.45: native logout -->
+    <string name="home_menu_logout">Log out</string>
+    <string name="home_logout_title">Log out?</string>
+    <string name="home_logout_message">Are you sure you want to log out of Qolab?</string>
+    <string name="home_logout_confirm">Log out</string>
+    <string name="home_logout_failed">Couldn\u2019t log out \u2014 please try again</string>
     <string name="home_menu_notifications">Notifications</string>
     <string name="home_menu_search">Search</string>
     <string name="home_menu_rooms">Rooms</string>

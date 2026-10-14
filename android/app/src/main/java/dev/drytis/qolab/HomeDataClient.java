@@ -140,7 +140,9 @@ public final class HomeDataClient {
         public final int tasksOverdue;
         public final int tasksPending;
         public final int meetingsToday;
-        public final int unreadNotifications;
+        /** v1.5.45: mutable — patched in place by the non-blocking unread
+         *  callback (no full re-render, no new HomeData allocation). */
+        public int unreadNotifications;
 
         TodayCounts(int tasksDueToday, int tasksOverdue, int tasksPending,
                     int meetingsToday, int unreadNotifications) {

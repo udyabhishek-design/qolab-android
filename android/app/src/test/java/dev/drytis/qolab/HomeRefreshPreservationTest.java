@@ -176,19 +176,23 @@ public class HomeRefreshPreservationTest {
 
     @Test
     public void unreadFailureStillDeliversCompositeContent() throws Exception {
-        // HomeCompositeFetch: the unread arm parses defensively — a failed
-        // or malformed unread response yields unread=0 and STILL delivers
-        // 200 with the composed HomeData. Content rendering must not
-        // depend on the optional endpoint.
+        // v1.5.45 update: the unread request no longer gates content —
+        // primary HomeData is delivered BEFORE the optional unread fetch
+        // starts, and the unread arm can only patch badge/Today via its
+        // own callback (defensive parse; failure keeps current value).
         String src = new String(Files.readAllBytes(repoRoot().resolve(
                 "android/app/src/main/java/dev/drytis/qolab/HomeCompositeFetch.java")));
-        assertTrue("unread parse must be defensive (try/catch)",
-                src.contains("} catch (Exception ignored) {\n                }"));
-        int unreadArm = src.indexOf("getJson(\"/notifications/unread-count\"");
-        assertTrue("composite must still deliver after unread settles",
-                unreadArm > 0);
+        int settle = src.indexOf("final Runnable settle");
+        int deliver = src.indexOf("cb.onReady(200, data, null);", settle);
+        int unreadArm = src.indexOf("getJson(\"/notifications/unread-count\"", settle);
+        assertTrue("composite must deliver primary content (200)",
+                deliver > 0);
+        assertTrue("content delivery must precede the optional unread request",
+                deliver > 0 && unreadArm > deliver);
         String tail = src.substring(unreadArm);
-        assertTrue("delivery must be unconditional in the unread callback",
-                tail.contains("cb.onReady(200, full, null)"));
+        assertTrue("unread parse must be defensive (try/catch)",
+                tail.contains("catch (Exception ignored)"));
+        assertFalse("unread arm must never re-deliver the composite",
+                tail.contains("cb.onReady("));
     }
 }
