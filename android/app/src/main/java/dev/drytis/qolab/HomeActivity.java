@@ -55,6 +55,9 @@ public class HomeActivity extends AppCompatActivity {
 
     // meeting
     private View meetingCard, meetingSkeleton, meetingEmpty, meetingError;
+
+    /** v1.5.44: non-blocking refresh-failure warning (kept-content case). */
+    private View refreshWarning;
     private TextView meetingTime, meetingTitle, meetingOverflow;
     private LinearLayout meetingAvatars;
 
@@ -260,6 +263,9 @@ public class HomeActivity extends AppCompatActivity {
         greetingDate = findViewById(R.id.home_greeting_date);
         greetingName = findViewById(R.id.home_greeting_name);
         notificationBadge = findViewById(R.id.home_notification_badge);
+        refreshWarning = findViewById(R.id.home_refresh_warning);
+        // v1.5.44: tapping the non-blocking warning retries the refresh.
+        if (refreshWarning != null) refreshWarning.setOnClickListener(v -> loadHome());
 
         meetingCard = findViewById(R.id.home_meeting_card);
         meetingSkeleton = findViewById(R.id.home_meeting_skeleton);
@@ -616,11 +622,32 @@ public class HomeActivity extends AppCompatActivity {
         show(deptSkeleton); hide(deptCard, deptEmpty, deptError);
         show(convSkeleton, taskSkeleton);
         hide(convCard, convEmpty, taskCard, taskEmpty);
+        hide(refreshWarning);
         // rooms row keeps its skeleton children until data arrives
     }
 
     private void showError() {
         lastDiag.skeletonsCleared = true;
+        // v1.5.44 FIX (intermittent content disappearance): when valid
+        // data from an earlier successful load is still held (and its
+        // sections rendered), a transient refresh failure must NOT tear
+        // the content down. Previously this method unconditionally did
+        // roomsRow.removeAllViews(), hid the Continue section and showed
+        // "Couldn't load" over the Meeting/Department cards — while
+        // this.data/cache still held the real data (confirmed on
+        // BlueStacks). Now: keep everything, show a small non-blocking
+        // warning with Retry. Full error state ONLY when there is
+        // nothing to preserve (data == null).
+        boolean keep = HomeSectionState.refreshFailureKeepsContent(data != null);
+        if (keep) {
+            // Any in-flight skeletons from the refresh go away; content
+            // states stay exactly as last rendered.
+            hide(meetingSkeleton, deptSkeleton, convSkeleton, taskSkeleton,
+                    roomsSkeletonRow);
+            show(refreshWarning);
+            return;
+        }
+        hide(refreshWarning);
         hide(meetingSkeleton); show(meetingError);
         hide(deptSkeleton); show(deptError);
         hide(convSkeleton, taskSkeleton, convCard, convEmpty, taskCard, taskEmpty);
@@ -632,6 +659,9 @@ public class HomeActivity extends AppCompatActivity {
     }
 
     private void renderAll(int unread) {
+        // v1.5.44: a successful render retires the non-blocking refresh
+        // warning from any earlier failed refresh.
+        hide(refreshWarning);
         renderGreeting();
         renderMeeting();
         renderRooms();
@@ -657,11 +687,16 @@ public class HomeActivity extends AppCompatActivity {
         hide(meetingSkeleton);
         HomeDataClient.Meeting m = data.nextMeeting;
         if (m == null) {
+            // v1.5.44: empty state is mutually exclusive with card AND
+            // error — a stale error from a failed refresh must not linger.
             show(meetingEmpty);
-            hide(meetingCard);
+            hide(meetingCard, meetingError);
             return;
         }
         show(meetingCard);
+        // v1.5.44: successful render clears stale error AND empty views
+        // (previously neither was hidden → card + error shown at once).
+        hide(meetingEmpty, meetingError);
         meetingTime.setText(m.timeDisplay != null ? m.timeDisplay : "");
         meetingTitle.setText(m.title != null ? m.title : "");
         meetingAvatars.removeAllViews();
@@ -769,10 +804,11 @@ public class HomeActivity extends AppCompatActivity {
         HomeDataClient.Room dept = data.departmentRoom;
         if (dept == null) {
             show(deptEmpty);
-            hide(deptCard);
+            hide(deptCard, deptError);
             return;
         }
         show(deptCard);
+        hide(deptEmpty, deptError);
         deptName.setText(dept.name);
         deptOnline.setText(getString(R.string.home_room_online, dept.membersCount));
         deptDescription.setText(dept.description != null ? dept.description

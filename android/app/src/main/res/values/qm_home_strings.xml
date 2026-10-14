@@ -41,6 +41,8 @@
     <!-- Errors / retry -->
     <string name="home_error_section">Couldn\u2019t load</string>
     <string name="home_retry">Retry</string>
+    <!-- v1.5.44: non-blocking refresh warning when stale content is kept -->
+    <string name="home_refresh_warning">Couldn\u2019t refresh \u2014 showing saved content</string>
     <!-- Bottom navigation -->
     <string name="home_nav_home">Home</string>
     <string name="home_nav_office">Office</string>
