@@ -175,12 +175,19 @@ public class OfficeActivity extends AppCompatActivity {
                     this::showError);
             return;
         }
-        transport.getJson("/mobile/home", r -> runOnUiThread(() -> {
+        // v1.5.43: /mobile/home was removed from the backend (404 with a
+        // valid session). Office now uses the same composite fetch as Home
+        // (/dashboard + /rooms Inertia + unread-count) — same parsing,
+        // same single payload model, same render code.
+        HomeCompositeFetch.fetch(transport, (status, parsed, errCat) -> runOnUiThread(() -> {
             fetching = false;
-            Log.d(TAG, "transport result status=" + r.status
-                    + " bodyLen=" + (r.body == null ? "null" : r.body.length())
-                    + " errCat=" + r.errorCategory);
-            if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+            Log.d(TAG, "composite fetch status=" + status
+                    + " data=" + (parsed == null ? "null"
+                        : "rooms=" + parsed.socialRooms.size()
+                          + " dept=" + (parsed.departmentRoom == null
+                                ? "null" : parsed.departmentRoom.name))
+                    + " errCat=" + errCat);
+            if (status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
                 Log.d(TAG, "transport dead → verifying session (SessionGate)");
                 SessionGate.requireValidSession(this, appOrigin(),
                         () -> runOnUiThread(this::loadOffice),
@@ -188,34 +195,16 @@ public class OfficeActivity extends AppCompatActivity {
                         this::showError);
                 return;
             }
-            if (r.status == 401) {
+            if (status == 401) {
                 Log.d(TAG, "routing to login (401, server-proven)");
                 routeToLogin();
                 return;
             }
-            if (r.status == QolabWebViewTransport.Result.STATUS_IO || r.body == null) {
-                Log.d(TAG, "showError path: IO or null body");
+            if (status != 200 || parsed == null) {
+                Log.d(TAG, "showError path: status=" + status + " errCat=" + errCat);
                 showError();
                 return;
             }
-            // v1.5.36: a non-2xx HTTP status is a failure even when a body
-            // exists (Laravel 404/500 pages are HTML). Previously such a
-            // body reached HomeDataClient.parse() and its fallback rendered
-            // the failure as "No social rooms yet" — a valid-looking empty
-            // account. Now: error + Retry, same rule as Home.
-            if (r.status / 100 != 2) {
-                Log.d(TAG, "showError path: HTTP " + r.status);
-                showError();
-                return;
-            }
-            HomeDataClient.HomeData parsed = HomeDataClient.parse(r.body);
-            if (parsed == null) {
-                Log.d(TAG, "showError path: parse returned null");
-                showError();
-                return;
-            }
-            Log.d(TAG, "parse ok: rooms=" + (parsed.socialRooms == null ? -1 : parsed.socialRooms.size())
-                    + " dept=" + (parsed.departmentRoom == null ? "null" : parsed.departmentRoom.name));
             data = parsed;
             renderAll();
         }));
@@ -404,8 +393,14 @@ public class OfficeActivity extends AppCompatActivity {
      * Coming Soon until they get their own native build.
      */
     private void openRoom(HomeDataClient.Room room) {
-        if ("lobby".equals(room.roomTheme) && room.id > 0
-                && room.roomSlug != null && !room.roomSlug.isEmpty()) {
+        // v1.5.43: all three approved social rooms (The Lobby, Music
+        // Lounge, Coffee Lounge) open the same native room screen —
+        // Discussion | Members, identity (channel id + slug + name) from
+        // the payload, never hardcoded.
+        boolean openable = room.id > 0 && room.roomSlug != null && !room.roomSlug.isEmpty();
+        String theme = room.roomTheme == null ? "" : room.roomTheme;
+        if (openable && ("lobby".equals(theme) || "music".equals(theme)
+                || "coffee".equals(theme))) {
             Intent i = new Intent(this, LobbyActivity.class);
             i.putExtra(LobbyActivity.EXTRA_ROOM_ID, room.id);
             i.putExtra(LobbyActivity.EXTRA_ROOM_SLUG, room.roomSlug);

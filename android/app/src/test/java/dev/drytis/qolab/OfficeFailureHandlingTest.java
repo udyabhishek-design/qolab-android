@@ -45,17 +45,39 @@ public class OfficeFailureHandlingTest {
     @Test
     public void officeRejectsNon2xxBeforeParse() throws Exception {
         String src = read(OFFICE);
-        // The non-2xx rejection must exist ...
-        assertTrue("OfficeActivity must gate on r.status / 100 != 2",
-                src.contains("r.status / 100 != 2"));
-        // ... BEFORE the parse call, so an HTML 404 body can never reach
-        // HomeDataClient.parse and masquerade as empty data.
-        int gate = src.indexOf("r.status / 100 != 2");
-        int parse = src.indexOf("HomeDataClient.parse(r.body)");
-        assertTrue("non-2xx gate missing", gate > 0);
-        assertTrue("parse call missing", parse > 0);
-        assertTrue("non-2xx gate must precede HomeDataClient.parse(r.body)",
-                gate < parse);
+        // v1.5.43: Office loads through HomeCompositeFetch (the /mobile/home
+        // aggregate was removed from the backend). The gate now lives in
+        // HomeCompositeFetch: non-2xx / null-body / 401 are rejected BEFORE
+        // any Inertia parse, and Office's callback only renders on status 200.
+        assertTrue("OfficeActivity must use the composite fetch",
+                src.contains("HomeCompositeFetch.fetch(transport"));
+        int fetchCall = src.indexOf("HomeCompositeFetch.fetch(transport");
+        int render = src.indexOf("data = parsed;", fetchCall);
+        assertTrue("render path must come after the composite fetch",
+                render > fetchCall);
+        // Non-2xx must route to showError, never to the parse/render path.
+        String gate = src.substring(fetchCall, render);
+        assertTrue("composite callback must gate on status != 200 before render",
+                gate.contains("status != 200 || parsed == null"));
+
+        // The transport-level non-2xx rejection itself:
+        String composite = new String(java.nio.file.Files.readAllBytes(
+                new File("src/main/java/dev/drytis/qolab/HomeCompositeFetch.java")
+                        .toPath()));
+        assertTrue("HomeCompositeFetch must reject non-2xx before parsing",
+                composite.contains("r.status / 100 != 2"));
+        // The gate must sit inside the response arm BEFORE the dashboard
+        // parse it guards. (parseRoomsPage also appears in the park helper
+        // tryFinishRooms, which is only reachable from the arm's 2xx
+        // branch — the guard ordering that matters is arm: gate → parse.)
+        int armIdx = composite.indexOf("final java.util.function.BiConsumer");
+        int httpGate = composite.indexOf("r.status / 100 != 2", armIdx);
+        int dashParse = composite.indexOf("HomeDataClient.parseDashboardPage", armIdx);
+        assertTrue("response arm not found", armIdx > 0);
+        assertTrue("non-2xx gate missing in arm", httpGate > armIdx);
+        assertTrue("dashboard parse missing in arm", dashParse > armIdx);
+        assertTrue("non-2xx gate must precede the dashboard parse in the arm",
+                httpGate < dashParse);
     }
 
     @Test

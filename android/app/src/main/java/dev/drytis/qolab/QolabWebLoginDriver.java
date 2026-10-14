@@ -77,12 +77,12 @@ public final class QolabWebLoginDriver {
         public volatile boolean webProbeOk = false;
         // v1.5.13: three-stage verification flags (the diag panel's core).
         public volatile boolean loginPostAuthenticated = false; // 2xx from POST /login
-        public volatile boolean webSessionVerified = false;     // WebView /mobile/home 200
+        public volatile boolean webSessionVerified = false;     // WebView session probe 200 (v1.5.43: /rooms)
         // v1.5.14: cookie header captured on the MAIN thread at the
         // web-verified moment (request-time authoritative read). Used for
         // the Java probe's first attempt ONLY; never logged.
         public volatile String verifiedCookieHeader = null;
-        public volatile boolean javaSessionVerified = false;    // Java /mobile/home 200
+        public volatile boolean javaSessionVerified = false;    // Java session probe 200
 
         /** One-line, panel-safe rendering (booleans only). */
         public String render() {
@@ -428,7 +428,7 @@ public final class QolabWebLoginDriver {
                             // login failure. Preserve exactly; WebView KEPT
                             // ALIVE for inspection (caller decides teardown).
                             finish(new Result(true, "web-verify-failed",
-                                    "POST /login authenticated but WebView /mobile/home="
+                                    "POST /login authenticated but WebView session probe="
                                             + LAST.webProbeStatus
                                             + " — preserved for diagnostics",
                                     elapsed(), lastUrl, lastDomDiag), true);
@@ -688,7 +688,7 @@ public final class QolabWebLoginDriver {
             main.post(() -> onOutcomeJson(json));
         }
 
-        /** v1.5.12: WebView-context /mobile/home probe result (status only). */
+        /** v1.5.12: WebView-context session probe result (status only). */
         @JavascriptInterface
         public void onWebProbe(String json) {
             main.post(() -> {
@@ -822,7 +822,7 @@ public final class QolabWebLoginDriver {
             " sessionAfter:sess(),changed:null}));}catch(e){}" +
             // v1.5.13: DO NOT navigate to /dashboard. The WebView stays
             // exactly where it is and alive; the Java side now runs the
-            // authoritative in-page /mobile/home probe (VERIFY_JS).
+            // authoritative in-page session probe (VERIFY_JS, /rooms v1.5.43).
             "})" +
             ".catch(function(e){rep(-1,{started:true,networkError:(e&&e.name)?String(e.name).substring(0,40):'network'});" +
             " try{d.onLoginMeta(JSON.stringify({redirected:false,finalUrl:location.href," +
@@ -884,7 +884,7 @@ public final class QolabWebLoginDriver {
             "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
             "var n=0;" +
             "var go=function(){" +
-            " fetch(location.origin+'/mobile/home',{credentials:'same-origin'," +
+            " fetch(location.origin+'/rooms',{credentials:'same-origin'," +
             " headers:{'Accept':'application/json'}})" +
             " .then(function(r){d.onWebProbe(JSON.stringify({status:r.status}));" +
             "  if(r.status>=200&&r.status<300)return;" +
@@ -897,7 +897,7 @@ public final class QolabWebLoginDriver {
             "}catch(e){try{d.onWebProbe(JSON.stringify({status:-1}));}catch(e2){}}})()";
 
     /**
-     * v1.5.12: WebView-context /mobile/home probe — run INSIDE the
+     * v1.5.12: WebView-context session probe — run INSIDE the
      * authenticated hidden WebView before destroy. Reports the HTTP
      * status only (never body/cookies/tokens). This distinguishes
      * browser-session-authenticated (A: web 200 + java 401 → cookie
@@ -906,7 +906,7 @@ public final class QolabWebLoginDriver {
      */
     static final String WEB_PROBE_JS =
             "(function(){try{var d=window.QolabLoginDriver;if(!d){return;}" +
-            "fetch(location.origin+'/mobile/home',{credentials:'same-origin'," +
+            "fetch(location.origin+'/rooms',{credentials:'same-origin'," +
             "headers:{'Accept':'application/json'}})" +
             ".then(function(r){d.onWebProbe(JSON.stringify({status:r.status}));})" +
             ".catch(function(){d.onWebProbe(JSON.stringify({status:-1}));});" +

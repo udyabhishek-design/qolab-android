@@ -309,4 +309,201 @@ public final class HomeDataClient {
         return (v == null || v.isEmpty() || "null".equals(v)) ? null : v;
     }
 
+    // ------------------------------------------------------------------
+    // v1.5.43: Inertia-page composition (replaces the retired dev-only
+    // GET /mobile/home aggregate, which the backend no longer serves —
+    // 404 NotFoundHttpException even with a fully valid session).
+    //
+    // Home is now composed from TWO existing Inertia pages plus the
+    // existing unread-count JSON endpoint — no backend changes:
+    //   GET /dashboard        → auth.user, today_meetings,
+    //                           dashboard_metrics, admin_summary
+    //   GET /rooms            → channels.group[]  (social rooms)
+    //                           channels.department[] (department rooms)
+    //   GET /notifications/unread-count → unread_notifications
+    //
+    // The parse functions are PURE and JVM-testable; the fetch step lives
+    // in fetchComposite() and drives the existing WebView transport.
+    // ------------------------------------------------------------------
+
+    /**
+     * Parse the /dashboard Inertia page (HTML) into the user / meeting /
+     * today-counts part of HomeData. Returns null when the page has no
+     * Inertia payload or no auth.user — a 401/redirect body never
+     * masquerades as empty data.
+     */
+    public static PartialDashboard parseDashboardPage(String html) {
+        try {
+            JSONObject page = RoomDataClient.extractInertiaPage(html);
+            if (page == null) return null;
+            JSONObject props = page.optJSONObject("props");
+            if (props == null) return null;
+            JSONObject user = props.optJSONObject("auth") != null
+                    ? props.optJSONObject("auth").optJSONObject("user") : null;
+            if (user == null) return null;
+
+            long userId = user.optLong("id", 0);
+            String userName = optStringOrNull(user, "name");
+            String avatar = optStringOrNull(user, "avatar_path");
+            String role = optStringOrNull(user, "system_role");
+            String deptName = optStringOrNull(user, "department_name");
+            Long deptId = user.isNull("department_id") || !user.has("department_id")
+                    ? null : user.optLong("department_id");
+
+            // Next meeting: first of today_meetings that is not cancelled,
+            // else first upcoming_meeting.
+            Meeting meeting = null;
+            JSONArray today = props.optJSONArray("today_meetings");
+            if (today != null) {
+                for (int i = 0; i < today.length(); i++) {
+                    JSONObject m = today.optJSONObject(i);
+                    if (m == null) continue;
+                    if ("cancelled".equals(optStringOrNull(m, "status"))) continue;
+                    meeting = parseMeeting(m);
+                    break;
+                }
+            }
+            if (meeting == null) {
+                JSONArray up = props.optJSONArray("upcoming_meetings");
+                if (up != null && up.length() > 0) {
+                    meeting = parseMeeting(up.optJSONObject(0));
+                }
+            }
+
+            int meetingsToday = 0;
+            JSONObject metrics = props.optJSONObject("dashboard_metrics");
+            if (metrics != null) meetingsToday = metrics.optInt("meetings_today", 0);
+            int overdue = 0;
+            JSONObject admin = props.optJSONObject("admin_summary");
+            if (admin != null) overdue = admin.optInt("overdue_tasks", 0);
+
+            return new PartialDashboard(userId, userName, avatar, role, deptName,
+                    deptId, meeting, meetingsToday, overdue);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Parse the /rooms Inertia page (HTML) into social rooms + the user's
+     * department room. Returns null when there is no Inertia payload (401
+     * / error page). Missing sections degrade to empty list / null dept —
+     * that is real data (valid session, no rooms), not failure.
+     */
+    public static PartialRooms parseRoomsPage(String html, Long userDepartmentId) {
+        try {
+            JSONObject page = RoomDataClient.extractInertiaPage(html);
+            if (page == null) return null;
+            JSONObject props = page.optJSONObject("props");
+            if (props == null) return null;
+            JSONObject channels = props.optJSONObject("channels");
+            if (channels == null) return null;
+
+            // Social rooms: entries in the "group" bucket that are rooms
+            // (is_room) with a social/casual room_type. Non-room groups
+            // (chat groups) are excluded — rooms never appear in Chat.
+            List<Room> social = new ArrayList<>();
+            JSONArray group = channels.optJSONArray("group");
+            if (group != null) {
+                for (int i = 0; i < group.length(); i++) {
+                    JSONObject c = group.optJSONObject(i);
+                    if (c == null) continue;
+                    if (!c.optBoolean("is_room", false)) continue;
+                    String type = optStringOrNull(c, "room_type");
+                    if (!"social".equals(type) && !"casual".equals(type)) continue;
+                    social.add(parseRoomFromChannel(c));
+                }
+            }
+
+            // Department room: the channel whose department_id matches the
+            // signed-in user's department (rooms list carries all
+            // departments' rooms; matching picks the user's own).
+            Room dept = null;
+            if (userDepartmentId != null) {
+                JSONArray depts = channels.optJSONArray("department");
+                if (depts != null) {
+                    for (int i = 0; i < depts.length(); i++) {
+                        JSONObject c = depts.optJSONObject(i);
+                        if (c == null) continue;
+                        if (!c.optBoolean("is_room", false)) continue;
+                        if (c.isNull("department_id")) continue;
+                        if (c.optLong("department_id", -1) != userDepartmentId) continue;
+                        dept = parseRoomFromChannel(c);
+                        break;
+                    }
+                }
+            }
+
+            return new PartialRooms(social, dept);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Channel JSON (from /rooms) → Room model. participants absent in
+     *  this payload — empty list (avatar row degrades honestly). */
+    private static Room parseRoomFromChannel(JSONObject c) {
+        return new Room(
+                c.optLong("id", 0),
+                optStringOrNull(c, "name"),
+                optStringOrNull(c, "description"),
+                optStringOrNull(c, "room_slug"),
+                optStringOrNull(c, "room_type"),
+                optStringOrNull(c, "room_theme"),
+                c.optInt("members_count", 0),
+                new ArrayList<>());
+    }
+
+    /** Fields parseDashboardPage extracts from /dashboard. */
+    public static final class PartialDashboard {
+        public final long userId;
+        public final String userName;
+        public final String userAvatarPath;
+        public final String systemRole;
+        public final String departmentName;
+        public final Long userDepartmentId; // null when the user has none
+        public final Meeting nextMeeting;   // null when none
+        public final int meetingsToday;
+        public final int tasksOverdue;
+
+        PartialDashboard(long userId, String userName, String avatar, String role,
+                         String deptName, Long deptId, Meeting nextMeeting,
+                         int meetingsToday, int tasksOverdue) {
+            this.userId = userId;
+            this.userName = userName;
+            this.userAvatarPath = avatar;
+            this.systemRole = role;
+            this.departmentName = deptName;
+            this.userDepartmentId = deptId;
+            this.nextMeeting = nextMeeting;
+            this.meetingsToday = meetingsToday;
+            this.tasksOverdue = tasksOverdue;
+        }
+    }
+
+    /** Fields parseRoomsPage extracts from /rooms. */
+    public static final class PartialRooms {
+        public final List<Room> socialRooms;
+        public final Room departmentRoom; // null when user has no department
+
+        PartialRooms(List<Room> socialRooms, Room departmentRoom) {
+            this.socialRooms = socialRooms;
+            this.departmentRoom = departmentRoom;
+        }
+    }
+
+    /** Compose the three responses into the HomeData model the native
+     *  Home/Office screens already render. Null when the composition is
+     *  not possible (dashboard or rooms page failed to yield props). */
+    public static HomeData composeHomeData(PartialDashboard dash, PartialRooms rooms,
+                                           int unreadNotifications) {
+        if (dash == null || rooms == null) return null;
+        TodayCounts today = new TodayCounts(0, dash.tasksOverdue, 0,
+                dash.meetingsToday, unreadNotifications);
+        return new HomeData(dash.userId, dash.userName, dash.userAvatarPath,
+                dash.systemRole, dash.departmentName, dash.nextMeeting,
+                rooms.socialRooms, rooms.departmentRoom,
+                null, null, today);
+    }
+
 }

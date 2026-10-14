@@ -519,17 +519,24 @@ public class HomeActivity extends AppCompatActivity {
             return;
         }
         long t0 = android.os.SystemClock.elapsedRealtime();
-        transport.getJson("/mobile/home", r -> {
+        // v1.5.43: /mobile/home was REMOVED from the backend (404 even
+        // with a valid session — the cause of the permanent "Couldn't
+        // load" on Next Meeting / Social Rooms / Your Department). Home
+        // data is now composed from the existing /dashboard + /rooms
+        // Inertia pages + /notifications/unread-count. Same transport,
+        // same session, same auth/transport-dead/401 handling.
+        HomeCompositeFetch.fetch(transport, (status, data, errCat) ->
+                runOnUiThread(() -> {
             lastDiag.durationMs = android.os.SystemClock.elapsedRealtime() - t0;
-            lastDiag.httpStatus = r.status;
-            lastDiag.transportErrorCategory = r.errorCategory;
+            lastDiag.httpStatus = status;
+            lastDiag.transportErrorCategory = errCat;
             lastDiag.requestMade = true;
-            lastDiag.payloadReceived = r.body != null;
-            lastDiag.bodyLength = r.body == null ? -1 : r.body.length();
-            lastDiag.parseAttempted = false;
-            lastDiag.parseOk = false;
+            lastDiag.payloadReceived = data != null;
+            lastDiag.bodyLength = -1;
+            lastDiag.parseAttempted = true;
+            lastDiag.parseOk = data != null;
             fetching = false;
-            if (r.status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
+            if (status == QolabWebViewTransport.Result.STATUS_TRANSPORT_DEAD) {
                 // v1.5.40: a dead transport is NOT proof of session expiry
                 // (renderer kill, memory pressure). Verify with the server
                 // via the SessionGate before ever showing Login.
@@ -546,7 +553,7 @@ public class HomeActivity extends AppCompatActivity {
                         () -> runOnUiThread(() -> showError()));
                 return;
             }
-            if (r.status == 401) {
+            if (status == 401) {
                 // Genuine session loss INSIDE the browser context itself:
                 // the server answered 401 to an authenticated request with
                 // Accept: application/json (verified live — unauthenticated
@@ -558,24 +565,10 @@ public class HomeActivity extends AppCompatActivity {
                 routeToLogin();
                 return;
             }
-            if (r.status == QolabWebViewTransport.Result.STATUS_IO
-                    || r.status / 100 != 2 || r.body == null) {
-                lastDiag.transportErrorCategory = r.errorCategory != null
-                        ? r.errorCategory : ("http-" + r.status);
+            if (status != 200 || data == null) {
+                lastDiag.transportErrorCategory = errCat != null
+                        ? errCat : ("http-" + status);
                 showError(); // retry — never a logout
-                return;
-            }
-            HomeDataClient.HomeData data = HomeDataClient.parse(r.body);
-            lastDiag.parseAttempted = true;
-            lastDiag.parseOk = data != null;
-            if (data != null) {
-                lastDiag.userPresent = data.userName != null;
-                lastDiag.socialRoomCount = data.socialRooms.size();
-                lastDiag.departmentPresent = data.departmentRoom != null;
-                lastDiag.nextMeetingPresent = data.nextMeeting != null;
-            }
-            if (data == null) {
-                showError();
                 return;
             }
             // v1.5.17 FIX: render Home data IMMEDIATELY — the unread badge
@@ -591,21 +584,14 @@ public class HomeActivity extends AppCompatActivity {
             lastFetchNs = System.nanoTime();
             if (tDataMs == 0) tDataMs = android.os.SystemClock.elapsedRealtime();
             if (tFirstContentMs == 0) tFirstContentMs = tDataMs;
+            lastDiag.userPresent = data.userName != null;
+            lastDiag.socialRoomCount = data.socialRooms.size();
+            lastDiag.departmentPresent = data.departmentRoom != null;
+            lastDiag.nextMeetingPresent = data.nextMeeting != null;
             lastDiag.renderExecuted = true;
             lastDiag.skeletonsCleared = true;
-            renderAll(-1);
-            transport.getJson("/notifications/unread-count", u -> {
-                int unread = -1;
-                try {
-                    org.json.JSONObject o = new org.json.JSONObject(u.body == null ? "{}" : u.body);
-                    unread = o.optInt("unread_count", 0);
-                } catch (Exception ignored) {
-                }
-                if (unread >= 0) {
-                    renderAll(unread);
-                }
-            });
-        });
+            renderAll(data.today.unreadNotifications);
+        }));
     }
 
 
@@ -820,8 +806,15 @@ public class HomeActivity extends AppCompatActivity {
      * Coming Soon, exactly as Office behaved; nothing was deleted.
      */
     private void openSocialRoom(HomeDataClient.Room room) {
-        if ("lobby".equals(room.roomTheme) && room.id > 0
-                && room.roomSlug != null && !room.roomSlug.isEmpty()) {
+        // v1.5.43: ALL three approved social rooms open natively. The
+        // Lobby screen is a generic room screen (Discussion | Members)
+        // keyed by channel id + slug — identity comes from the payload,
+        // never hardcoded. Backend room_capabilities confirm discussion +
+        // members for The Lobby, Music Lounge AND Coffee Lounge.
+        boolean openable = room.id > 0 && room.roomSlug != null && !room.roomSlug.isEmpty();
+        String theme = room.roomTheme == null ? "" : room.roomTheme;
+        if (openable && ("lobby".equals(theme) || "music".equals(theme)
+                || "coffee".equals(theme))) {
             Intent i = new Intent(this, LobbyActivity.class);
             i.putExtra(LobbyActivity.EXTRA_ROOM_ID, room.id);
             i.putExtra(LobbyActivity.EXTRA_ROOM_SLUG, room.roomSlug);
