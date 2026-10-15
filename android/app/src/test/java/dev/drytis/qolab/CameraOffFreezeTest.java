@@ -236,8 +236,15 @@ public class CameraOffFreezeTest {
         assertTrue(destroy > 0);
         assertTrue("onDestroy must release renderers",
                 src.indexOf("releaseRenderers(root)", destroy) > 0);
-        assertTrue("onDestroy must disconnect the room",
-                src.indexOf("room?.disconnect()", destroy) > 0);
+        // v1.5.50: teardown funnels into shutdownRoom() — disconnect +
+        // release exactly once (the legacy direct room?.disconnect() pin
+        // is superseded; the call now lives inside shutdownRoom()).
+        int shutdown = src.indexOf("private fun shutdownRoom()");
+        assertTrue(shutdown > 0);
+        assertTrue("shutdownRoom must disconnect the room",
+                src.indexOf("r.disconnect()", shutdown) > 0);
+        assertTrue("shutdownRoom must release the room",
+                src.indexOf("r.release()", shutdown) > 0);
         int leave = src.indexOf("private fun leave()");
         assertTrue(leave > 0);
         assertTrue("leave stays single-flight",

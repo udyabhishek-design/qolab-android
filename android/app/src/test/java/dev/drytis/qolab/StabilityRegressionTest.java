@@ -123,7 +123,9 @@ public class StabilityRegressionTest {
         assertTrue("back press must route through leave()",
                 src.contains("override fun onBackPressed() {\n        leave()\n    }"));
         assertTrue("onDestroy must disconnect unconditionally",
-                src.contains("if (!leaving)"));
+                // v1.5.50: onDestroy funnels into shutdownRoom() (guarded
+                // disconnect + release) instead of the old leaving check.
+                src.contains("shutdownRoom()"));
         assertTrue("coroutine scope must be cancelled",
                 src.contains("scope.cancel()"));
     }

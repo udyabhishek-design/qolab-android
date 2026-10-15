@@ -37,5 +37,6 @@
     <!-- v1.5.49: user-visible toggle failure feedback (was silently
          swallowed — camera init failures left the icon dishonest). -->
     <string name="live_mic_toggle_failed">Couldn\'t change the microphone. Please try again.</string>
+    <string name="live_mic_enable_failed">Couldn\'t turn on your microphone.</string>
     <string name="live_cam_toggle_failed">Couldn\'t switch the camera. Please try again.</string>
 </resources>

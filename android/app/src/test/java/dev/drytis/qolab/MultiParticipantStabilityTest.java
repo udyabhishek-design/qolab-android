@@ -54,7 +54,10 @@ public class MultiParticipantStabilityTest {
                 src.contains("rendererTracks.remove(renderer)"));
         int onDestroy = src.indexOf("override fun onDestroy()");
         assertTrue("onDestroy must clear the registry",
-                src.indexOf("rendererTracks.clear()", onDestroy) > 0);
+                // v1.5.50: onDestroy funnels into shutdownRoom() which
+                // clears the registry (ordering-insensitive pin: the clear
+                // must exist in the file at/after the shutdown path).
+                src.indexOf("rendererTracks.clear()", src.indexOf("private fun shutdownRoom()")) > 0);
     }
 
     @Test
@@ -208,7 +211,9 @@ public class MultiParticipantStabilityTest {
         int destroy = src.indexOf("override fun onDestroy()");
         String destroyBody = src.substring(destroy, src.indexOf("private fun releaseRenderers"));
         assertTrue("onDestroy disconnects unconditionally",
-                destroyBody.contains("try { room?.disconnect() }"));
+                // v1.5.50: the disconnect now lives in shutdownRoom(), which
+                // onDestroy calls unconditionally; leave() also routes there.
+                destroyBody.contains("shutdownRoom()"));
         assertTrue("onDestroy releases all renderers",
                 destroyBody.contains("releaseRenderers(root)"));
     }

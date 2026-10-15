@@ -65,6 +65,9 @@ class LiveRoomActivity : AppCompatActivity() {
     // v1.5.49: activity lifecycle guard — no renderer work after destroy.
     private var destroyed = false
 
+    // v1.5.50: Room.release() runs exactly once (shutdownRoom()).
+    private var released = false
+
     private var room: Room? = null
     private var micOn = false
     private var camOn = false
@@ -161,10 +164,17 @@ class LiveRoomActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             )
         }
+        // v1.5.50 FIX (grid starvation): localFrame previously used
+        // MATCH_PARENT height with NO weight in a VERTICAL LinearLayout —
+        // it consumed the entire grid and every remote tile (height 0,
+        // weight 1f) measured to ZERO pixels. Confirmed cause of "second
+        // participant does not appear". Weighted children now share the
+        // grid equally and redistribute automatically when tiles are
+        // added/removed (1 participant → local fills; 2 → ~equal halves;
+        // 3–4 → practical single-column grid).
         localFrame = FrameLayout(this).apply {
-            layoutParams = ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             )
         }
         grid.addView(localFrame)
@@ -432,8 +442,17 @@ class LiveRoomActivity : AppCompatActivity() {
                 refreshPeople()
             }
             is RoomEvent.Disconnected -> {
-                Log.w(TAG, "room disconnected (leaving=$leaving)")
-                if (!leaving) {
+                // v1.5.50: Disconnected is TERMINAL in 2.18.2 (transient loss
+                // arrives as Reconnecting/Reconnected instead). Log with the
+                // SDK reason and, for an UNEXPECTED terminal disconnect
+                // (server shutdown, room deleted, exhausted reconnect), still
+                // POST the existing /leave endpoint so the backend is not left
+                // with a stranded participant.
+                val reason = ev.reason
+                val clientInitiated = leaving
+                Log.w("QolabLive", "terminal disconnect reason=$reason clientInitiated=$clientInitiated")
+                if (!clientInitiated) {
+                    postLeave()
                     Toast.makeText(this, R.string.live_disconnected, Toast.LENGTH_LONG).show()
                     finish()
                 }
@@ -447,8 +466,21 @@ class LiveRoomActivity : AppCompatActivity() {
         scope.launch {
             try {
                 local.setMicrophoneEnabled(true)
-                runOnUiThread { syncTrackState() }
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                // v1.5.50: a silent mic failure leaves the toolbar lying
+                // (icon shows unmuted while nothing is published). Log it and
+                // tell the user; syncTrackState() re-reads the REAL state.
+                Log.e("QolabLive", "microphone enable failed", e)
+                runOnUiThread {
+                    if (destroyed || isFinishing) return@runOnUiThread
+                    Toast.makeText(
+                        this@LiveRoomActivity,
+                        R.string.live_mic_enable_failed,
+                        Toast.LENGTH_LONG
+                    ).show()
+                    syncTrackState()
+                }
+            }
             runOnUiThread { syncLocalPreview() }
         }
     }
@@ -819,14 +851,65 @@ class LiveRoomActivity : AppCompatActivity() {
         leave()
     }
 
+    // v1.5.50: the backend /leave POST fires at most once per visit —
+    // the Red Leave button, Back and an unexpected terminal disconnect
+    // all funnel through postLeave().
+    private var leavePosted = false
+
     private fun leave() {
         if (leaving) return
         leaving = true
+        // v1.5.50: single final-cleanup path — disconnect now; release()
+        // happens exactly once in shutdownRoom() (leave + onDestroy are
+        // both entry points; the guard makes duplicates no-ops).
         try { room?.disconnect() } catch (_: Exception) { }
-        transport.postJson("/meetings/$meetingId/leave", "{}") {
-            runOnUiThread { finish() }
-        }
+        postLeave()
         Handler(Looper.getMainLooper()).postDelayed({ finish() }, 3000)
+    }
+
+    /** v1.5.50: POST /meetings/{id}/leave exactly once, guarded. */
+    private fun postLeave() {
+        if (leavePosted) return
+        leavePosted = true
+        try {
+            transport.postJson("/meetings/$meetingId/leave", "{}") {
+                runOnUiThread { if (!destroyed) finish() }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "leave POST failed: ${e.message}")
+        }
+    }
+
+    /**
+     * v1.5.50: THE idempotent final SDK cleanup. LiveKit 2.18.2 contract
+     * (SDK-verified): disconnect() tears down the session; release() then
+     * frees the Room's engine/audio-module/EGL resources and MUST be
+     * called exactly once per Room once it is never used again — every
+     * join creates a fresh Room, so an unreleased Room leaks the
+     * camera/mic modules and the shared EGL context (the "leave and
+     * rejoin fails" defect). Ordering: renderers are detached/destroyed
+     * FIRST (they reference room.lkObjects.eglBase), then disconnect,
+     * then release — all guarded so leave(), finish() and onDestroy()
+     * can all funnel here without double-cleanup.
+     */
+    private fun shutdownRoom() {        if (released) return
+        released = true
+        destroyed = true
+        val r = room
+        room = null
+        if (r != null) {
+            try { r.disconnect() } catch (_: Exception) { }
+            try { r.release() } catch (e: Exception) {
+                Log.w(TAG, "room release failed: ${e.message}")
+            }
+        }
+        // Renderers may still reference the Room's EGL context — destroy
+        // them AFTER the room is down (destroyRenderer unregisters sinks
+        // from tracks first, which no longer exist post-release, so the
+        // registry-driven destroy is skipped and only release() runs).
+        rendererTracks.clear()
+        try { scope.cancel() } catch (_: Exception) { }
+        Log.i(TAG, "room shut down and released")
     }
 
     override fun onRequestPermissionsResult(
@@ -844,24 +927,16 @@ class LiveRoomActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
-        // v1.5.35 stability: disconnect UNCONDITIONALLY. Back-press used to
-        // skip leave() entirely — the room stayed connected (HOT MIC) and no
-        // /leave POST fired, stranding the meeting as live (see memory
-        // stranded-live-meetings-incident). Also release the coroutine scope
-        // (events collector leaked) and any SurfaceViewRenderers.
+        // v1.5.50: renderers are destroyed FIRST (they render through the
+        // Room's EGL context and hold track registrations), THEN the Room
+        // itself goes through the single idempotent shutdownRoom() path
+        // (disconnect + release exactly once).
         destroyed = true
-        if (!leaving) {
-            leaving = true
-            try { room?.disconnect() } catch (_: Exception) { }
-        }
-        try { scope.cancel() } catch (_: Exception) { }
         try {
             val root = findViewById<android.view.ViewGroup>(android.R.id.content)
             releaseRenderers(root)
         } catch (_: Exception) { }
-        // v1.5.49: clear the renderer→track registry (every registered
-        // renderer was destroyed by the sweep above).
-        rendererTracks.clear()
+        shutdownRoom()
         super.onDestroy()
     }
 
