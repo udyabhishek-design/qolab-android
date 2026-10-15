@@ -241,7 +241,9 @@ public class NotificationsActivity extends AppCompatActivity {
             openIfChat(it);
             return;
         }
-        t.postJson("/notifications/" + it.id + "/read", "{}", r -> runOnUiThread(() -> {
+        // v1.5.47: true PATCH (the route rejects POST with 405).
+        t.postJson("/notifications/" + it.id + "/read", "{}",
+                r -> runOnUiThread(() -> {
             if (stale(-1)) return;
             boolean ok = r.status == 200
                     && NotificationsDataClient.parseSuccess(r.body);
@@ -253,7 +255,7 @@ public class NotificationsActivity extends AppCompatActivity {
             }
             items = NotificationsDataClient.withRead(items, it.id);
             renderAll();
-        }));
+        }), true);
     }
 
     private void markAllRead() {
@@ -266,6 +268,7 @@ public class NotificationsActivity extends AppCompatActivity {
                     Toast.LENGTH_SHORT).show();
             return;
         }
+        // v1.5.47: true PATCH (the route rejects POST with 405).
         t.postJson("/notifications/read-all", "{}", r -> runOnUiThread(() -> {
             markingAll = false;
             if (stale(-1)) return;
@@ -278,20 +281,95 @@ public class NotificationsActivity extends AppCompatActivity {
             }
             items = NotificationsDataClient.allRead(items);
             renderAll();
-        }));
+        }), true);
     }
 
     // ── Deep-link ─────────────────────────────────────────────────────
 
-    private void openIfChat(NotificationsDataClient.Item it) {
+    /**
+     * v1.5.47 Fix 6: resolve the authenticated user id independently of
+     * Home's volatile cache. Order: (1) Home cache when present; (2) a
+     * one-shot authenticated /dashboard fetch (parseDashboardPage exposes
+     * the same auth.user identity every other screen trusts). We NEVER
+     * fabricate a user id — if identity can't be resolved the chat
+     * destination is still opened with the best available value only when
+     * it is > 0; otherwise the user gets an honest notice instead of a
+     * broken permission check.
+     */
+    private void openIfChat(final NotificationsDataClient.Item it) {
         if (!NotificationsDataClient.isChatOpenable(it)) return;
-        long myUserId = 0;
+        long cachedId = peekMyUserId();
+        if (cachedId > 0) {
+            route(it, cachedId);
+            return;
+        }
+        QolabWebViewTransport t = QolabWebViewTransport.get();
+        if (t == null || !t.isAlive()) {
+            Toast.makeText(this, R.string.notif_channel_unavailable,
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        t.getJson("/dashboard", r -> runOnUiThread(() -> {
+            if (stale(-1)) return;
+            long uid = 0;
+            if (r.status == 200 && r.body != null) {
+                HomeDataClient.PartialDashboard d =
+                        HomeDataClient.parseDashboardPage(r.body);
+                if (d != null) uid = d.userId;
+            }
+            if (uid <= 0) {
+                // No fabricated identity — honest notice, row untouched.
+                Toast.makeText(this, R.string.notif_channel_unavailable,
+                        Toast.LENGTH_SHORT).show();
+                return;
+            }
+            route(it, uid);
+        }));
+    }
+
+    private long peekMyUserId() {
         try {
             Object cached = HomeActivity.peekCachedHomeData();
             if (cached instanceof HomeDataClient.HomeData) {
-                myUserId = ((HomeDataClient.HomeData) cached).userId;
+                return ((HomeDataClient.HomeData) cached).userId;
             }
         } catch (Exception ignored) {
+        }
+        return 0;
+    }
+
+    /**
+     * v1.5.47 Fix 4 (approved product decision): message.sent in THE LOBBY
+     * opens the native Lobby room (Discussion | Members), ordinary chat
+     * channels open ChatScreenActivity. The Lobby is identified by matching
+     * the notification's channel_id against the social rooms from the
+     * backend /rooms payload (room_theme == "lobby") — the authoritative
+     * mapping openSocialRoom() already uses; never a title match.
+     */
+    private void route(NotificationsDataClient.Item it, long myUserId) {
+        HomeDataClient.HomeData cached = null;
+        try {
+            Object o = HomeActivity.peekCachedHomeData();
+            if (o instanceof HomeDataClient.HomeData) cached =
+                    (HomeDataClient.HomeData) o;
+        } catch (Exception ignored) {
+        }
+        String lobbySlug = null;
+        if (cached != null
+                && NotificationsDataClient.isLobbyChannel(it, cached.socialRooms)) {
+            lobbySlug = lobbySlugFor(it, cached);
+        }
+        if (lobbySlug != null && !lobbySlug.isEmpty()) {
+            // LobbyActivity requires id + slug; without a verified slug it
+            // would finish() instantly — route to Chat instead (both read
+            // the same channel feed).
+            Intent i = new Intent(this, LobbyActivity.class);
+            i.putExtra(LobbyActivity.EXTRA_ROOM_ID, it.channelId);
+            i.putExtra(LobbyActivity.EXTRA_ROOM_SLUG, lobbySlug);
+            i.putExtra(LobbyActivity.EXTRA_ROOM_NAME,
+                    it.channelName != null ? it.channelName : "");
+            startActivity(i);
+            return;
         }
         Intent i = new Intent(this, ChatScreenActivity.class);
         i.putExtra(ChatScreenActivity.EXTRA_CHANNEL_ID, it.channelId);
@@ -301,8 +379,20 @@ public class NotificationsActivity extends AppCompatActivity {
                 it.isDm ? "dm" : (it.channelType != null ? it.channelType : "group"));
         i.putExtra(ChatScreenActivity.EXTRA_MY_USER_ID, myUserId);
         startActivity(i);
-        // If the channel is unavailable, ChatScreenActivity surfaces its own
-        // error/Retry state — the user returns here with rows intact.
+        // If the channel is unavailable, the destination screen surfaces its
+        // own error/Retry state — the user returns here with rows intact.
+    }
+
+    private static String lobbySlugFor(NotificationsDataClient.Item it,
+            HomeDataClient.HomeData cached) {
+        if (cached != null && cached.socialRooms != null) {
+            for (HomeDataClient.Room r : cached.socialRooms) {
+                if (r != null && r.id == it.channelId && r.roomSlug != null) {
+                    return r.roomSlug;
+                }
+            }
+        }
+        return ""; // LobbyActivity derives identity from id when slug absent
     }
 
     // ── Rendering ─────────────────────────────────────────────────────
@@ -363,14 +453,20 @@ public class NotificationsActivity extends AppCompatActivity {
                             boolean ok = r.status == 200
                                     && NotificationsDataClient.parseSuccess(r.body);
                             if (!ok) {
+                                // Server rejected the mutation — keep the
+                                // unread state (never falsely marked read),
+                                // but STILL open the destination (approved
+                                // v1.5.47 behavior: navigation is not held
+                                // hostage by a failed mark-read).
                                 Toast.makeText(this, R.string.notif_mark_failed,
                                         Toast.LENGTH_SHORT).show();
-                                return; // keep unread state, no navigation
+                                openIfChat(it);
+                                return;
                             }
                             items = NotificationsDataClient.withRead(items, it.id);
                             renderAll();
                             openIfChat(it);
-                        }));
+                        }), true);
             }
         });
         return card;

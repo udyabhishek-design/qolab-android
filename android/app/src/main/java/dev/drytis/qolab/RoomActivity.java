@@ -416,6 +416,11 @@ public class RoomActivity extends AppCompatActivity {
                 return;
             }
             page = parsed;
+            // v1.5.47 FIX: the first successful parse must RESTORE content
+            // visibility — loadRoom() hid contentScroll when page was null,
+            // and nothing re-showed it on the first success (v1.5.46
+            // regression: room rendered into a hidden container).
+            setVisible(contentScroll, true);
             overviewRendered = meetingsRendered = tasksRendered = false;
             if (titleView.getText().length() == 0 && parsed.roomName != null) {
                 titleView.setText(parsed.roomName);
@@ -441,9 +446,10 @@ public class RoomActivity extends AppCompatActivity {
             setVisible(tasksSkeleton, false);
             setVisible(contentScroll, false);
         } else {
-            // v1.5.46 FIX: error cleared → content scroll must come back so
-            // a successful Retry after a full-error state actually renders
-            // (showError(true) hid it; nothing ever re-showed it).
+            // v1.5.47: the explicit setVisible(contentScroll, true) after a
+            // successful parse is now the single restore point (covers the
+            // first load, Retry and automatic recovery); this branch only
+            // handles the pre-request clear.
             if (page != null) setVisible(contentScroll, true);
         }
     }

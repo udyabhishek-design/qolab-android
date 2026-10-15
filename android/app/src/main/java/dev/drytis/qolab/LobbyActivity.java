@@ -219,7 +219,18 @@ public class LobbyActivity extends AppCompatActivity {
         t.getJson("/chat/channels/" + channelId + "/messages?per_page=50", r -> {
             runOnUiThread(() -> {
                 if (gen != loadGeneration.get() || isFinishing() || isDestroyed()) {
-                    return; // stale delivery — superseded or destroyed
+                    // v1.5.47 FIX: a guard-dropped delivery previously left
+                    // fetching=true forever, wedging every later Retry /
+                    // recovery tap. Ownership rules:
+                    //  - activity destroyed/finishing → nothing can load
+                    //    again here, release the flag (harmless, correct);
+                    //  - superseded generation but activity alive → a NEWER
+                    //    load owns the flag; this old delivery must NOT
+                    //    clear it (it never touches current UI state).
+                    if (isFinishing() || isDestroyed()) {
+                        fetching = false;
+                    }
+                    return; // stale delivery — never touches current UI
                 }
                 fetching = false;
                 skeleton.setVisibility(View.GONE);
@@ -265,6 +276,10 @@ public class LobbyActivity extends AppCompatActivity {
     }
 
     private void showError() {
+        // v1.5.47: defensive — the error state is only reachable from the
+        // delivery path (fetching already false), but if a future path
+        // lands here mid-request the flag must never stay wedged.
+        fetching = false;
         errorView.setVisibility(View.VISIBLE);
         retryView.setVisibility(View.VISIBLE);
         retryView.setOnClickListener(v -> loadDiscussion());

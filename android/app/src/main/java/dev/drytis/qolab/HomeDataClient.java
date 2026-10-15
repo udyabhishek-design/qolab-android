@@ -265,6 +265,12 @@ public final class HomeDataClient {
     }
 
     private static Room parseRoom(JSONObject r) {
+        Room parsed = parseRoomForTest(r);
+        return parsed;
+    }
+
+    /** v1.5.47: test seam for the Room parser (same JSON contract). */
+    static Room parseRoomForTest(JSONObject r) {
         if (r == null) return null;
         return new Room(
                 r.optLong("id", 0),

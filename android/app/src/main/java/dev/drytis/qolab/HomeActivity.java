@@ -259,7 +259,54 @@ public class HomeActivity extends AppCompatActivity {
             // the background without a skeleton; the cached render stays up.
             loadHome();
         }
+        // v1.5.47 Fix 5: returning (typically from Notifications) inside the
+        // 10-min staleness window used to leave the badge outdated. This is
+        // an INDEPENDENT badge-only fetch: never blocks Home, never triggers
+        // renderAll, generation-guarded so older responses can't overwrite
+        // newer counts, dropped after logout/account switch.
+        refreshBadgeOnly();
         if (devUpdater != null) devUpdater.onResume();
+    }
+
+    /** v1.5.47 Fix 5: single-flight guard for the resume-time badge-only
+     *  unread refresh (prevents duplicate simultaneous badge requests). */
+    private volatile boolean badgeRefreshing;
+
+    /**
+     * v1.5.47 Fix 5: badge-only refresh of GET /notifications/unread-count.
+     * Reuses the v1.5.45 unread-callback gating (LogoutFlowRules) so a late
+     * or cross-account response can never touch the badge; the per-load
+     * generation guard drops responses from superseded loads. Failures are
+     * silent — the existing badge value stays; Home content is untouched.
+     * Account state: the session cache and static Home cache are cleared in
+     * completeLogoutLocally(); nothing account-specific persists here.
+     */
+    private void refreshBadgeOnly() {
+        if (isFinishing() || isDestroyed()) return;
+        if (data == null || fetching) return; // loadHome() carries unread anyway
+        if (badgeRefreshing) return;          // single-flight
+        QolabWebViewTransport t = QolabWebViewTransport.get();
+        if (t == null || !t.isAlive()) return;
+        final int gen = fetchGeneration.get();
+        badgeRefreshing = true;
+        t.getJson("/notifications/unread-count", r -> runOnUiThread(() -> {
+            badgeRefreshing = false;
+            if (isFinishing() || isDestroyed()) return;
+            if (data == null) return;
+            // v1.5.45 gating: abort when logged out or when the load cycle
+            // this response belongs to was superseded by a newer one.
+            if (LogoutFlowRules.applyUnreadResult(
+                    data.userId, data.userId,
+                    gen != fetchGeneration.get(),
+                    r.status == 200)) {
+                int unread = NotificationsDataClient.parseUnreadCount(r.body);
+                if (unread < 0) return; // parse failure → keep current badge
+                data.today.unreadNotifications = unread;
+                notificationBadge.setVisibility(unread > 0
+                        ? View.VISIBLE : View.GONE);
+                todayUpdates.setText(String.valueOf(unread));
+            }
+        }));
     }
 
     @Override

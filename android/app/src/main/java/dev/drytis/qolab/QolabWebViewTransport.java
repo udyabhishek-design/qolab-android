@@ -370,6 +370,17 @@ public final class QolabWebViewTransport {
      * the bridge into Java.
      */
     public void postJson(String path, String jsonBody, final Callback cb) {
+        postJson(path, jsonBody, cb, false);
+    }
+
+    /**
+     * v1.5.47: PATCH variant of the authenticated JSON mutation. Identical
+     * machinery to POST — cookies, XSRF header, 419 CSRF-refresh retry,
+     * java-driven poll, timeout ceiling — only the fetch method differs.
+     * Existing three-argument callers keep POST (behaviour preserved).
+     */
+    public void postJson(String path, String jsonBody, final Callback cb,
+                         final boolean patch) {
         final String url = resolveInsideOrigin(path);
         if (url == null) {
             cb.onResult(new Result(Result.STATUS_IO, null, "off-origin"));
@@ -401,29 +412,7 @@ public final class QolabWebViewTransport {
                         new java.util.concurrent.atomic.AtomicBoolean(false);
                 final long deadline = android.os.SystemClock.elapsedRealtime()
                         + REQUEST_TIMEOUT_MS;
-                String kick =
-                        "(function(){try{window['" + key + "']=null;" +
-                        "var xsrf='';var m=document.cookie.match(/(?:^|;\\s*)XSRF-TOKEN=([^;]+)/);" +
-                        "if(m){xsrf=decodeURIComponent(m[1].replace(/\\+/g,'%20'));}" +
-                        "var h={'Accept':'application/json','Content-Type':'application/json'};" +
-                        "if(xsrf)h['X-XSRF-TOKEN']=xsrf;" +
-                        "fetch(" + jsonString(url) + "," +
-                        "{method:'POST',credentials:'same-origin',headers:h," +
-                        // jsonString() already emits a JS string literal of the
-                        // serialized payload; JSON.stringify() around it would
-                        // DOUBLE-encode (string scalar, not object) and the
-                        // server would see no fields. Send the string as-is.
-                        "body:" + jsonString(jsonBody == null ? "{}" : jsonBody) + "})" +
-                        ".then(function(r){r.text().then(function(t){" +
-                        // v1.5.38: capture r.url (final URL after redirects).
-                        // The meeting create endpoint responds 302 →
-                        // /office/rooms/{slug}?...&meeting={id}; fetch follows
-                        // it transparently and r.status is the FINAL 200, so
-                        // the created meeting id was previously unreachable.
-                        "window['" + key + "']=JSON.stringify({s:r.status,b:t,u:r.url});}," +
-                        "function(){window['" + key + "']=JSON.stringify({s:r.status,b:'',u:r.url});});})" +
-                        ".catch(function(e){window['" + key + "']=JSON.stringify({s:-1,b:'',u:''});});" +
-                        "}catch(e){window['" + key + "']=JSON.stringify({s:-1,b:'',u:''});}return 1;})()";
+                String kick = buildKickScript(url, jsonBody, key, patch);
                 wv.evaluateJavascript(kick, null);
                 // v1.5.35 stability: same JAVA-DRIVEN poll loop as getJson —
                 // a dropped ValueCallback can no longer strand the caller.
@@ -443,7 +432,7 @@ public final class QolabWebViewTransport {
                         "(function(){fetch(" + jsonString(origin + "/sanctum/csrf-cookie")
                         + ",{credentials:'same-origin'}).then(function(){return 1;})()",
                         v -> main.postDelayed(
-                                () -> postJsonAfterRefresh(path, jsonBody, cb), 250));
+                                () -> postJsonAfterRefresh(path, jsonBody, cb, patch), 250));
                 };
                 final java.util.concurrent.atomic.AtomicReference<String> latest =
                         new java.util.concurrent.atomic.AtomicReference<>(null);
@@ -504,18 +493,52 @@ public final class QolabWebViewTransport {
         });
     }
 
+    /**
+     * v1.5.47: extracted fetch-script builder (JVM-testable). PATCH emits
+     * a true HTTP PATCH fetch; POST is byte-identical to the pre-1.5.47
+     * inline script so existing callers are provably unaffected.
+     */
+    static String buildKickScript(String url, String jsonBody, String key,
+                                  boolean patch) {
+        return
+                "(function(){try{window['" + key + "']=null;" +
+                "var xsrf='';var m=document.cookie.match(/(?:^|;\\s*)XSRF-TOKEN=([^;]+)/);" +
+                "if(m){xsrf=decodeURIComponent(m[1].replace(/\\+/g,'%20'));}" +
+                "var h={'Accept':'application/json','Content-Type':'application/json'};" +
+                "if(xsrf)h['X-XSRF-TOKEN']=xsrf;" +
+                "fetch(" + jsonString(url) + "," +
+                "{method:'" + (patch ? "PATCH" : "POST") + "',credentials:'same-origin',headers:h," +
+                // jsonString() already emits a JS string literal of the
+                // serialized payload; JSON.stringify() around it would
+                // DOUBLE-encode (string scalar, not object) and the
+                // server would see no fields. Send the string as-is.
+                "body:" + jsonString(jsonBody == null ? "{}" : jsonBody) + "})" +
+                ".then(function(r){r.text().then(function(t){" +
+                // v1.5.38: capture r.url (final URL after redirects).
+                // The meeting create endpoint responds 302 →
+                // /office/rooms/{slug}?...&meeting={id}; fetch follows
+                // it transparently and r.status is the FINAL 200, so
+                // the created meeting id was previously unreachable.
+                "window['" + key + "']=JSON.stringify({s:r.status,b:t,u:r.url});}," +
+                "function(){window['" + key + "']=JSON.stringify({s:r.status,b:'',u:r.url});});})" +
+                ".catch(function(e){window['" + key + "']=JSON.stringify({s:-1,b:'',u:''});});" +
+                "}catch(e){window['" + key + "']=JSON.stringify({s:-1,b:'',u:''});}return 1;})()";
+    }
+
     private static final long POLL_INTERVAL_MS = 60;
 
     /**
      * v1.5.35: the single re-POST after a 419-triggered CSRF refresh. Runs
      * the SAME postJson path (fresh key, fresh deadline); the outer retry
      * flag lives in the caller's closure so this re-entry cannot loop.
+     * v1.5.47: carries the PATCH flag through (a PATCH 419 retries as PATCH).
      */
-    void postJsonAfterRefresh(String path, String jsonBody, Callback cb) {
+    void postJsonAfterRefresh(String path, String jsonBody, Callback cb,
+                              boolean patch) {
         // Fresh invocation → fresh retried419 state is INTENTIONAL per the
         // one-retry contract; the recursion is bounded because a second 419
         // would need another CSRF rotation within the same request.
-        postJson(path, jsonBody, cb);
+        postJson(path, jsonBody, cb, patch);
     }
 
     /** Test seam for the poll cadence (v1.5.41 latency work). */

@@ -198,7 +198,7 @@ public final class NotificationsDataClient {
     }
 
     /**
-     * Should tapping this notification open the native Chat screen?
+     * Should tapping this notification open a native messaging screen?
      * Only message.sent rows that carry a real channel_id. Every other
      * type renders its information without an invented destination.
      */
@@ -206,5 +206,25 @@ public final class NotificationsDataClient {
         return i != null
                 && "message.sent".equals(i.type)
                 && i.channelId != null && i.channelId > 0;
+    }
+
+    /**
+     * v1.5.47 (approved product decision): a message.sent notification for
+     * THE LOBBY channel must open the native Lobby room, not the Chat
+     * screen. The Lobby channel is identified AUTHORITATIVELY by matching
+     * the notification's channel_id against the social rooms the backend
+     * reports in the /rooms payload (room_theme == "lobby") — the exact
+     * mapping openSocialRoom() uses. A loose title match is NEVER used.
+     */
+    public static boolean isLobbyChannel(Item i,
+            java.util.List<HomeDataClient.Room> socialRooms) {
+        if (!isChatOpenable(i) || socialRooms == null) return false;
+        for (HomeDataClient.Room r : socialRooms) {
+            if (r != null && r.id == i.channelId
+                    && "lobby".equals(r.roomTheme == null ? "" : r.roomTheme)) {
+                return true;
+            }
+        }
+        return false;
     }
 }
