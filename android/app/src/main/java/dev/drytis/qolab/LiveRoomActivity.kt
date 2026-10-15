@@ -337,11 +337,24 @@ class LiveRoomActivity : AppCompatActivity() {
         when (ev) {
             is RoomEvent.TrackSubscribed -> {
                 val t = ev.track
-                if (t is RemoteVideoTrack) onRemoteVideo(t)
+                if (t is RemoteVideoTrack) {
+                    val identity = ev.participant.identity?.value ?: return
+                    onRemoteVideo(
+                        t,
+                        identity,
+                        ev.participant.name,
+                        alreadyMuted = ev.publication?.muted ?: false
+                    )
+                }
                 refreshPeople()
             }
-            is RoomEvent.ParticipantConnected,
-            is RoomEvent.ParticipantDisconnected,
+            is RoomEvent.ParticipantConnected -> refreshPeople()
+            is RoomEvent.ParticipantDisconnected -> {
+                // v1.5.48: drop the remote slot when they leave — no
+                // orphaned renderer surfaces for departed participants.
+                ev.participant.identity?.value?.let { onRemoteGone(it) }
+                refreshPeople()
+            }
             is RoomEvent.ActiveSpeakersChanged -> refreshPeople()
             is RoomEvent.TrackMuted -> {
                 // v1.5.41: track state changed (local toggle, remote, or
@@ -351,6 +364,13 @@ class LiveRoomActivity : AppCompatActivity() {
                     // v1.5.42: a muted camera track must also clear the
                     // local preview (frozen-frame fix).
                     syncLocalPreview()
+                } else if (
+                    ev.publication?.source == io.livekit.android.room.track.Track.Source.CAMERA
+                ) {
+                    // v1.5.48: remote camera OFF — no frozen frame for them
+                    // on our screen either.
+                    val id = ev.participant.identity?.value ?: return
+                    onRemoteCameraOff(id, ev.participant.name)
                 }
                 refreshPeople()
             }
@@ -358,6 +378,20 @@ class LiveRoomActivity : AppCompatActivity() {
                 if (ev.participant is io.livekit.android.room.participant.LocalParticipant) {
                     syncTrackState()
                     syncLocalPreview()
+                } else if (
+                    ev.publication?.source == io.livekit.android.room.track.Track.Source.CAMERA
+                ) {
+                    // v1.5.48: remote camera back ON — re-attach a fresh
+                    // renderer (the old one was released on mute).
+                    onRemoteCameraOn(ev)
+                }
+                refreshPeople()
+            }
+            is RoomEvent.TrackUnsubscribed -> {
+                // v1.5.48: drop the slot entirely on unsubscribe — no
+                // orphaned renderer surfaces.
+                if (ev.track is RemoteVideoTrack) {
+                    ev.participant.identity?.value?.let { onRemoteGone(it) }
                 }
                 refreshPeople()
             }
@@ -383,25 +417,38 @@ class LiveRoomActivity : AppCompatActivity() {
     }
 
     /**
-     * v1.5.42 FIX (camera-off freeze): the local slot is now rendered
-     * strictly from the actual camera publication state.
-     *   camera published   → EXACTLY ONE live renderer attached
-     *   camera unpublished → renderer removed + released (the frozen last
-     *                        frame was the v1.5.41 bug: toggling OFF left
-     *                        the old SurfaceViewRenderer in place with no
-     *                        track feeding it) and a clean "Camera is off"
-     *                        placeholder shown instead.
+     * v1.5.48 FIX (frozen frame on camera-off): the local slot is rendered
+     * from the publication's MUTED state, not merely from track existence.
+     *
+     * LiveKit Android 2.18.2 `setCameraEnabled(false)` does NOT unpublish
+     * the camera track — it marks the existing publication muted and stops
+     * capture while the track stays attached. The v1.5.42 logic keyed on
+     * "a track object exists", so camera-OFF kept the renderer attached to
+     * a muted, capture-stopped track and the SurfaceViewRenderer retained
+     * its final (frozen) frame.
+     *
+     *   publication unmuted        → EXACTLY ONE live renderer attached
+     *   publication muted (OFF)    → renderer removed + released and a
+     *                                 clean "Camera is off" placeholder
+     *   no publication / no track  → placeholder
+     *
      * Idempotent: re-running with an unchanged state re-attaches nothing
-     * (the renderer guard prevents duplicate renderers on repeated
-     * Camera ON → OFF → ON cycles).
+     * (the renderer tag-guard prevents duplicate renderers on repeated
+     * Camera ON → OFF → ON cycles). The decision runs through
+     * [LocalVideoSlotRules] (pure, JVM-tested).
      */
     private fun syncLocalPreview() {
         val local = room?.localParticipant ?: return
         val pub = local.getTrackPublication(io.livekit.android.room.track.Track.Source.CAMERA)
-        val track = (pub as? io.livekit.android.room.track.LocalTrackPublication)?.track
-        val videoTrack = track as? io.livekit.android.room.track.LocalVideoTrack
+        val ltp = pub as? io.livekit.android.room.track.LocalTrackPublication
+        val videoTrack = ltp?.track as? io.livekit.android.room.track.LocalVideoTrack
+        val state = LocalVideoSlotRules.localSlot(
+            publicationExists = ltp != null,
+            trackIsLiveVideo = videoTrack != null,
+            publicationMuted = ltp?.muted ?: true
+        )
         runOnUiThread {
-            if (videoTrack != null) {
+            if (state == LocalVideoSlotRules.SlotState.LIVE) {
                 // Camera ON: keep the existing renderer if any (no
                 // duplicate attachment), else attach a fresh one.
                 if (localFrame.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer?>(
@@ -416,17 +463,20 @@ class LiveRoomActivity : AppCompatActivity() {
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                     )
-                    videoTrack.addRenderer(renderer)
+                    videoTrack!!.addRenderer(renderer)
                 }
+                // Remove any stale placeholder left over from a prior OFF.
+                localFrame.findViewWithTag<View>("cam-placeholder")?.let { localFrame.removeView(it) }
             } else {
-                // Camera OFF: remove + RELEASE the renderer (a stale
-                // SurfaceViewRenderer with no track displays the last
-                // frame forever), then show the placeholder.
+                // Camera OFF (or no publication): remove + RELEASE the
+                // renderer (a muted, capture-stopped track leaves the
+                // SurfaceViewRenderer holding its final frame forever),
+                // then show the placeholder.
                 val existing = localFrame.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer?>(
                     "local-renderer")
                 if (existing != null) {
                     try { existing.release() } catch (_: Exception) { }
-                    localFrame.removeAllViews()
+                    localFrame.removeView(existing)
                 }
                 if (localFrame.findViewWithTag<View>("cam-placeholder") == null) {
                     val ph = layoutInflater.inflate(R.layout.live_cam_placeholder, localFrame, false)
@@ -449,14 +499,38 @@ class LiveRoomActivity : AppCompatActivity() {
         syncLocalPreview()
     }
 
-    private fun onRemoteVideo(track: RemoteVideoTrack) {
-        val slot = FrameLayout(this).apply {
-            layoutParams = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-            )
+    /**
+     * v1.5.48: remote slots are keyed by participant identity so the same
+     * principles as the local fix apply: a muted remote publication (their
+     * camera OFF) must not keep a frozen frame on our screen, and an
+     * unsubscribed/gone track must drop the slot entirely.
+     */
+    private fun remoteSlotTag(identity: String) = "remote-${identity}"
+
+    private fun onRemoteVideo(
+        track: RemoteVideoTrack,
+        identity: String,
+        name: String?,
+        alreadyMuted: Boolean
+    ) {
+        val tag = remoteSlotTag(identity)
+        // If a slot already exists for this participant (resubscribe),
+        // replace its contents rather than stacking a second tile.
+        var slot = grid.findViewWithTag<FrameLayout>(tag)
+        if (slot == null) {
+            slot = FrameLayout(this).apply {
+                this.tag = tag
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+                )
+            }
+            grid.addView(slot, 1)
+        } else {
+            releaseRenderers(slot)
+            slot.removeAllViews()
         }
-        grid.addView(slot, 1)
         val renderer = makeRenderer(mirror = false)
+        renderer.tag = tag
         slot.addView(
             renderer,
             FrameLayout.LayoutParams(
@@ -465,6 +539,72 @@ class LiveRoomActivity : AppCompatActivity() {
             )
         )
         track.addRenderer(renderer)
+        // The publication may already be muted at subscribe time (camera
+        // OFF before we joined) — show the placeholder right away instead
+        // of relying on a TrackMuted event that already fired.
+        if (LocalVideoSlotRules.remoteSlot(
+                trackExists = true,
+                publicationMuted = alreadyMuted
+            ) == LocalVideoSlotRules.SlotState.PLACEHOLDER
+        ) {
+            onRemoteCameraOff(identity, name)
+        }
+    }
+
+    /**
+     * v1.5.48: detach a remote slot's renderer and show the shared
+     * placeholder in the slot — used when the remote camera publication
+     * is muted (their camera OFF). The renderer is RELEASED, because a
+     * released SurfaceViewRenderer no longer displays its last frame.
+     */
+    private fun onRemoteCameraOff(identity: String, name: String?) {
+        val tag = remoteSlotTag(identity)
+        val slot = grid.findViewWithTag<FrameLayout>(tag) ?: return
+        val renderer = slot.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer>(tag)
+        if (renderer != null) {
+            try { renderer.release() } catch (_: Exception) { }
+            slot.removeView(renderer)
+        }
+        if (slot.findViewWithTag<View>("cam-placeholder") == null) {
+            val ph = layoutInflater.inflate(R.layout.live_cam_placeholder, slot, false)
+            ph.tag = "cam-placeholder"
+            slot.addView(ph, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+        }
+    }
+
+    /**
+     * v1.5.48: restore live video in a remote slot after it was muted —
+     * the old renderer was released on mute, so attach a fresh one.
+     */
+    private fun onRemoteCameraOn(ev: RoomEvent.TrackUnmuted) {
+        val identity = ev.participant.identity?.value ?: return
+        val track = (ev.publication?.track as? RemoteVideoTrack) ?: return
+        val tag = remoteSlotTag(identity)
+        val slot = grid.findViewWithTag<FrameLayout>(tag) ?: return
+        slot.findViewWithTag<View>("cam-placeholder")?.let { slot.removeView(it) }
+        if (slot.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer>(tag) == null) {
+            val renderer = makeRenderer(mirror = false)
+            renderer.tag = tag
+            slot.addView(renderer, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+            track.addRenderer(renderer)
+        }
+    }
+
+    /**
+     * v1.5.48: fully remove a remote slot when its track is unsubscribed
+     * or the participant disconnects — renderer released, slot removed
+     * from the grid, no orphaned video surface left behind.
+     */
+    private fun onRemoteGone(identity: String) {
+        val slot = grid.findViewWithTag<FrameLayout>(remoteSlotTag(identity)) ?: return
+        releaseRenderers(slot)
+        grid.removeView(slot)
     }
 
     private fun makeRenderer(mirror: Boolean): SurfaceViewRenderer =
