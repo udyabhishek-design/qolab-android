@@ -106,6 +106,15 @@
             android:theme="@style/AppTheme.NoActionBar"
             android:windowSoftInputMode="adjustResize" />
 
+        <!-- Native Notifications screen (v1.5.46) — Home bell destination.
+             GET /notifications, PATCH /notifications/{id}/read via the
+             authenticated WebView transport. -->
+        <activity
+            android:name=".NotificationsActivity"
+            android:exported="false"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar" />
+
         <!-- Native meeting room on LiveKit (v1.5.33). Entered ONLY from
              Meeting Details after POST /meetings/{id}/join-token returned
              server-issued {token,url}. No token/room invention on device. -->

@@ -61,6 +61,17 @@ public class LobbyActivity extends AppCompatActivity {
     private View skeleton, errorView, retryView, sendBtn;
     private EditText composerInput;
     private boolean sending = false;
+    /** v1.5.46: single-flight guard for the discussion fetch (the Retry/
+     *  recovery paths can re-enter loadDiscussion; duplicate concurrent
+     *  GETs raced renderMessages and could interleave rows). */
+    private volatile boolean fetching;
+    /** v1.5.46: generation of the in-flight discussion load — late
+     *  deliveries from superseded loads or a destroyed instance are
+     *  dropped at delivery time. */
+    private final java.util.concurrent.atomic.AtomicInteger loadGeneration =
+            new java.util.concurrent.atomic.AtomicInteger(0);
+    /** v1.5.46: automatic network recovery handle (ConnectivityWatcher). */
+    private Object netWatcher;
 
     // members
     private LinearLayout membersAvatars, membersList;
@@ -100,7 +111,29 @@ public class LobbyActivity extends AppCompatActivity {
         avatar.setBackground(g);
 
         showTab(0);
+
+        // v1.5.46: automatic network recovery — same bounded pattern as
+        // RoomActivity/Home: on the connectivity-available edge, reload the
+        // discussion ONLY when no feed has loaded yet and nothing is in
+        // flight. A failed edge retry keeps the retryable error state;
+        // manual Retry stays available. No polling, no infinite loops.
+        netWatcher = ConnectivityWatcher.register(this, () -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (messages == null && !fetching) {
+                loadDiscussion();
+            }
+        }));
+
         loadDiscussion();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // v1.5.46: stop watching connectivity — no recovery callbacks
+        // after destruction, no leaked registration.
+        ConnectivityWatcher.unregister(this, netWatcher);
+        netWatcher = null;
     }
 
     private void bindViews() {
@@ -161,13 +194,18 @@ public class LobbyActivity extends AppCompatActivity {
     // ------------------------------------------------------------------
 
     private void loadDiscussion() {
-        skeleton.setVisibility(View.VISIBLE);
-        errorView.setVisibility(View.GONE);
-        retryView.setVisibility(View.GONE);
+        // v1.5.46: single-flight — a recovery edge while a load is already
+        // in flight (or a fast Retry double-tap) must not start a second
+        // concurrent GET.
+        if (fetching) return;
+        fetching = true;
+        final int gen = loadGeneration.incrementAndGet();
+        showLoadingState();
         // v1.5.40: capture at use-time; a field-init capture was the
         // v1.5.35 intermittent-failure class.
         final QolabWebViewTransport t = QolabWebViewTransport.get();
         if (t == null || !t.isAlive()) {
+            fetching = false;
             SessionGate.requireValidSession(this, appOrigin(),
                     () -> runOnUiThread(this::loadDiscussion),
                     () -> runOnUiThread(() -> {
@@ -180,6 +218,10 @@ public class LobbyActivity extends AppCompatActivity {
         }
         t.getJson("/chat/channels/" + channelId + "/messages?per_page=50", r -> {
             runOnUiThread(() -> {
+                if (gen != loadGeneration.get() || isFinishing() || isDestroyed()) {
+                    return; // stale delivery — superseded or destroyed
+                }
+                fetching = false;
                 skeleton.setVisibility(View.GONE);
                 Log.d(TAG, "messages status=" + r.status + " bodyLen="
                         + (r.body == null ? -1 : r.body.length()));
@@ -215,6 +257,13 @@ public class LobbyActivity extends AppCompatActivity {
         });
     }
 
+    /** v1.5.46: symmetric loading state — skeleton up, error/retry down. */
+    private void showLoadingState() {
+        skeleton.setVisibility(View.VISIBLE);
+        errorView.setVisibility(View.GONE);
+        retryView.setVisibility(View.GONE);
+    }
+
     private void showError() {
         errorView.setVisibility(View.VISIBLE);
         retryView.setVisibility(View.VISIBLE);
@@ -222,6 +271,12 @@ public class LobbyActivity extends AppCompatActivity {
     }
 
     private void renderMessages() {
+        // v1.5.46: successful render clears any stale error/retry state
+        // (v1.5.44 Home class of bug — valid rows + "Couldn't load" both
+        // visible after a recovery success following an error).
+        errorView.setVisibility(View.GONE);
+        retryView.setVisibility(View.GONE);
+        skeleton.setVisibility(View.GONE);
         messagesList.removeAllViews();
         if (messages.isEmpty()) {
             TextView empty = new TextView(this);

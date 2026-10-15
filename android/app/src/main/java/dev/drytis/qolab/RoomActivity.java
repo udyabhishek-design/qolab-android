@@ -65,6 +65,13 @@ public class RoomActivity extends AppCompatActivity {
     private String roomName;
     private RoomPage page;
     private volatile boolean fetching;
+    /** v1.5.46: automatic network recovery handle (ConnectivityWatcher). */
+    private Object netWatcher;
+    /** v1.5.46: generation of the in-flight load; bumped per loadRoom call
+     *  so a late callback from a DESTROYED previous instance or a stale
+     *  request can never mutate state. */
+    private final java.util.concurrent.atomic.AtomicInteger loadGeneration =
+            new java.util.concurrent.atomic.AtomicInteger(0);
 
     /** v1.5.40: transport origin for the SessionGate recheck. */
     private String appOrigin() {
@@ -97,7 +104,33 @@ public class RoomActivity extends AppCompatActivity {
         avatar.setBackground(circle);
 
         showTab(0);
+
+        // v1.5.46: automatic network recovery — airplane-mode cycles. When
+        // connectivity returns while the room shows its error state (page
+        // never loaded), reload without waiting for a manual Retry. Bounded:
+        // fires only on the system "network available" edge; the fetching
+        // single-flight guard prevents duplicate requests, and loadRoom()
+        // itself no-ops when there is already valid rendered content (same
+        // rule as the Home watcher). If the retried load fails again (the
+        // edge fired before routes/DNS were usable), the retryable error
+        // state stays — manual Retry remains available; no polling loop.
+        netWatcher = ConnectivityWatcher.register(this, () -> runOnUiThread(() -> {
+            if (isFinishing() || isDestroyed()) return;
+            if (page == null && !fetching) {
+                loadRoom();
+            }
+        }));
+
         loadRoom();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        // v1.5.46: stop watching connectivity — no recovery callbacks after
+        // destruction, no leaked callback registration.
+        ConnectivityWatcher.unregister(this, netWatcher);
+        netWatcher = null;
     }
 
     @Override
@@ -108,6 +141,11 @@ public class RoomActivity extends AppCompatActivity {
         // are reflected immediately. Meetings tab stays where the user was.
         if (entering) entering = false;
         if (roomSlug != null && page != null) loadRoom();
+        // v1.5.46: room still in its error state (e.g. airplane mode was on
+        // when opened, since turned off) — one resume attempt covers the
+        // case where the watcher edge fired while another screen was in
+        // front and its 2s re-arm already elapsed.
+        if (roomSlug != null && page == null && !fetching) loadRoom();
     }
 
     private void bindViews() {
@@ -326,9 +364,17 @@ public class RoomActivity extends AppCompatActivity {
     private void loadRoom() {
         if (fetching || roomSlug == null) return;
         fetching = true;
+        // v1.5.46: every load runs under a new generation; late results
+        // from an older generation (activity recreated, superseded load)
+        // are dropped at delivery time.
+        final int gen = loadGeneration.incrementAndGet();
         showError(false);
+        // v1.5.46: visible loading state on Retry — skeletons for the tab
+        // panes AND the content scroll hidden, so a retry never looks like
+        // a dead tap (airplane-mode cycle: retry fails fast, silently).
         setVisible(meetingsSkeleton, true);
         setVisible(tasksSkeleton, true);
+        if (page == null) setVisible(contentScroll, false);
 
         QolabWebViewTransport transport = QolabWebViewTransport.get();
         if (transport == null) {
@@ -340,6 +386,9 @@ public class RoomActivity extends AppCompatActivity {
             return;
         }
         transport.getJson("/office/rooms/" + roomSlug, r -> runOnUiThread(() -> {
+            if (gen != loadGeneration.get() || isFinishing() || isDestroyed()) {
+                return; // stale delivery — superseded or destroyed
+            }
             fetching = false;
             Log.d(TAG, "room page status=" + r.status
                     + " bodyLen=" + (r.body == null ? -1 : r.body.length()));
@@ -391,6 +440,11 @@ public class RoomActivity extends AppCompatActivity {
             setVisible(meetingsSkeleton, false);
             setVisible(tasksSkeleton, false);
             setVisible(contentScroll, false);
+        } else {
+            // v1.5.46 FIX: error cleared → content scroll must come back so
+            // a successful Retry after a full-error state actually renders
+            // (showError(true) hid it; nothing ever re-showed it).
+            if (page != null) setVisible(contentScroll, true);
         }
     }
 

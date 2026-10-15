@@ -96,6 +96,21 @@ public class HomeActivity extends AppCompatActivity {
     private static HomeDataClient.HomeData cachedData;
     private static long cachedForUserId = Long.MIN_VALUE;
 
+    /** v1.5.46: read-only peek at the session-scoped Home cache for
+     *  sibling screens (Notifications deep-link needs the current user
+     *  id). Never hands out a mutable reference to another ACCOUNT — the
+     *  cache is per-USER and cleared on logout/session loss. */
+    public static Object peekCachedHomeData() {
+        return cachedData;
+    }
+
+    /** v1.5.46: current global request generation — bumped on logout.
+     *  Sibling screens capture it at creation and drop every late
+     *  callback when it changes (post-logout / cross-account staleness). */
+    public static int currentRequestGeneration() {
+        return REQUEST_GENERATION.get();
+    }
+
     /** v1.5.41: automatic network recovery (ConnectivityWatcher). */
     private Object netWatcher;
 
@@ -351,7 +366,12 @@ public class HomeActivity extends AppCompatActivity {
         menu.setOnClickListener(v -> showMenuSheet());
 
         ImageButton notifications = findViewById(R.id.home_btn_notifications);
-        notifications.setOnClickListener(v -> showComingSoon(getString(R.string.home_menu_notifications)));
+        // v1.5.46: the bell now opens the native Notifications screen
+        // (was Coming Soon). Unread badge behaviour unchanged.
+        notifications.setOnClickListener(v -> {
+            Intent i = new Intent(this, NotificationsActivity.class);
+            startActivity(i);
+        });
 
         ImageButton search = findViewById(R.id.home_btn_search);
         search.setOnClickListener(v ->

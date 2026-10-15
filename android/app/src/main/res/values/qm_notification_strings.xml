@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resources for the native Notifications screen (v1.5.46). -->
+<resources>
+    <string name="notif_title">Notifications</string>
+    <string name="notif_cd_back">Back</string>
+    <string name="notif_mark_all">Mark all read</string>
+    <string name="notif_error">Couldn\u2019t load notifications</string>
+    <string name="notif_retry">Retry</string>
+    <string name="notif_empty">You\u2019re all caught up \u2014 no notifications yet.</string>
+    <string name="notif_load_more">Load more</string>
+    <string name="notif_loading_more">Loading\u2026</string>
+    <string name="notif_mark_failed">Couldn\u2019t mark as read \u2014 please try again</string>
+    <string name="notif_mark_all_failed">Couldn\u2019t mark all as read \u2014 please try again</string>
+    <string name="notif_load_more_failed">Couldn\u2019t load more \u2014 tap Load more to retry</string>
+    <string name="notif_channel_unavailable">This channel is no longer available</string>
+    <string name="notif_row_unread_cd">Unread</string>
+</resources>
