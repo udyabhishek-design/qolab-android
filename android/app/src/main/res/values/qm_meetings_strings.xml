@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- v1.5.49: native Meetings list (GET /meetings, Inertia
+         Meetings/Index). Hamburger Meetings destination. -->
+    <string name="meetings_wordmark">Qolab</string>
+    <string name="meetings_title">Meetings</string>
+    <string name="meetings_subtitle">Upcoming and past meetings</string>
+    <string name="meetings_empty">No meetings yet</string>
+    <string name="meetings_section_upcoming">Upcoming</string>
+    <string name="meetings_section_past">Past meetings</string>
+    <string name="meetings_upcoming_empty">No upcoming meetings</string>
+    <string name="meetings_past_empty">No past meetings</string>
+    <string name="meetings_participants_n">%1$d participants</string>
+</resources>

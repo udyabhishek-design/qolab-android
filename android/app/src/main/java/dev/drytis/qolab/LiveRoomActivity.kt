@@ -5,6 +5,7 @@ import android.content.pm.PackageManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -46,6 +47,10 @@ class LiveRoomActivity : AppCompatActivity() {
         const val EXTRA_MEETING_ID = "dev.drytis.qolab.MEETING_ID"
         const val EXTRA_MEETING_TITLE = "dev.drytis.qolab.MEETING_TITLE"
         private const val PERM_REQ = 4101
+        /** v1.5.49: Development-only diagnostic logging tag. Never logs
+         *  tokens, credentials or meeting content — identities and state
+         *  transitions only. */
+        private const val TAG = "QolabLive"
     }
 
     private val transport by lazy { QolabWebViewTransport.get() }
@@ -57,9 +62,23 @@ class LiveRoomActivity : AppCompatActivity() {
     private var meetingTitle: String? = null
     private var leaving = false
 
+    // v1.5.49: activity lifecycle guard — no renderer work after destroy.
+    private var destroyed = false
+
     private var room: Room? = null
     private var micOn = false
     private var camOn = false
+
+    // v1.5.49: renderer → owning VideoTrack registry. LiveKit's
+    // VideoTrack keeps a VideoSink list; releasing a SurfaceViewRenderer
+    // WITHOUT removeRenderer() leaves a dead sink registered on the track
+    // — the v1.5.48 multi-participant freeze (frames pushed into a
+    // released EGL surface). Every teardown must go through
+    // destroyRenderer() which removes the sink BEFORE release.
+    private val rendererTracks =
+        java.util.concurrent.ConcurrentHashMap<io.livekit.android.renderer.SurfaceViewRenderer,
+                io.livekit.android.room.track.VideoTrack>()
+
 
     private lateinit var grid: LinearLayout
     private lateinit var localFrame: FrameLayout
@@ -313,6 +332,10 @@ class LiveRoomActivity : AppCompatActivity() {
                 runOnUiThread {
                     connecting.visibility = View.GONE
                     publishDefaults()
+                    // v1.5.49: participants already in the room when we
+                    // joined never fire ParticipantConnected — seed their
+                    // tiles (with video when already publishing) now.
+                    seedExistingParticipants()
                     refreshPeople()
                     // v1.5.41: toolbar icons start from real track state
                     syncTrackState()
@@ -320,7 +343,9 @@ class LiveRoomActivity : AppCompatActivity() {
                     // the camera-off placeholder immediately instead of an
                     // empty black slot.
                     syncLocalPreview()
+                    Log.i(TAG, "connected to room, remote participants=${r.remoteParticipants.size}")
                 }            } catch (e: Exception) {
+                Log.w(TAG, "connect failed: ${e.message}", e)
                 runOnUiThread {
                     Toast.makeText(
                         this@LiveRoomActivity,
@@ -338,19 +363,28 @@ class LiveRoomActivity : AppCompatActivity() {
             is RoomEvent.TrackSubscribed -> {
                 val t = ev.track
                 if (t is RemoteVideoTrack) {
-                    val identity = ev.participant.identity?.value ?: return
-                    onRemoteVideo(
-                        t,
-                        identity,
-                        ev.participant.name,
-                        alreadyMuted = ev.publication?.muted ?: false
-                    )
+                    // v1.5.49: skip only the video work when identity is
+                    // unknown — refreshPeople() must still run below.
+                    ev.participant.identity?.value?.let { id ->
+                        onRemoteVideo(
+                            t,
+                            id,
+                            ev.participant.name,
+                            alreadyMuted = ev.publication?.muted ?: false
+                        )
+                    }
                 }
                 refreshPeople()
             }
-            is RoomEvent.ParticipantConnected -> refreshPeople()
+            is RoomEvent.ParticipantConnected -> {
+                // v1.5.49: the participant tile exists from the moment
+                // they join — camera state only affects the renderer
+                // inside it, never the tile itself.
+                ev.participant.identity?.value?.let { ensureRemoteTile(it) }
+                refreshPeople()
+            }
             is RoomEvent.ParticipantDisconnected -> {
-                // v1.5.48: drop the remote slot when they leave — no
+                // v1.5.48: drop the remote tile when they leave — no
                 // orphaned renderer surfaces for departed participants.
                 ev.participant.identity?.value?.let { onRemoteGone(it) }
                 refreshPeople()
@@ -369,8 +403,9 @@ class LiveRoomActivity : AppCompatActivity() {
                 ) {
                     // v1.5.48: remote camera OFF — no frozen frame for them
                     // on our screen either.
-                    val id = ev.participant.identity?.value ?: return
-                    onRemoteCameraOff(id, ev.participant.name)
+                    ev.participant.identity?.value?.let { id ->
+                        onRemoteCameraOff(id, ev.participant.name)
+                    }
                 }
                 refreshPeople()
             }
@@ -388,14 +423,16 @@ class LiveRoomActivity : AppCompatActivity() {
                 refreshPeople()
             }
             is RoomEvent.TrackUnsubscribed -> {
-                // v1.5.48: drop the slot entirely on unsubscribe — no
-                // orphaned renderer surfaces.
+                // v1.5.49: unsubscribe drops the VIDEO renderer but keeps
+                // the participant tile + placeholder while they stay
+                // connected (mute/unpublish of the camera publication).
                 if (ev.track is RemoteVideoTrack) {
-                    ev.participant.identity?.value?.let { onRemoteGone(it) }
+                    ev.participant.identity?.value?.let { onRemoteTrackDropped(it) }
                 }
                 refreshPeople()
             }
             is RoomEvent.Disconnected -> {
+                Log.w(TAG, "room disconnected (leaving=$leaving)")
                 if (!leaving) {
                     Toast.makeText(this, R.string.live_disconnected, Toast.LENGTH_LONG).show()
                     finish()
@@ -463,19 +500,19 @@ class LiveRoomActivity : AppCompatActivity() {
                             ViewGroup.LayoutParams.MATCH_PARENT
                         )
                     )
-                    videoTrack!!.addRenderer(renderer)
+                    attachRenderer(videoTrack!!, renderer)
                 }
                 // Remove any stale placeholder left over from a prior OFF.
                 localFrame.findViewWithTag<View>("cam-placeholder")?.let { localFrame.removeView(it) }
             } else {
-                // Camera OFF (or no publication): remove + RELEASE the
+                // Camera OFF (or no publication): unregister + release the
                 // renderer (a muted, capture-stopped track leaves the
                 // SurfaceViewRenderer holding its final frame forever),
                 // then show the placeholder.
                 val existing = localFrame.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer?>(
                     "local-renderer")
                 if (existing != null) {
-                    try { existing.release() } catch (_: Exception) { }
+                    destroyRenderer(existing)
                     localFrame.removeView(existing)
                 }
                 if (localFrame.findViewWithTag<View>("cam-placeholder") == null) {
@@ -504,8 +541,60 @@ class LiveRoomActivity : AppCompatActivity() {
      * principles as the local fix apply: a muted remote publication (their
      * camera OFF) must not keep a frozen frame on our screen, and an
      * unsubscribed/gone track must drop the slot entirely.
+     *
+     * v1.5.49: participant tiles now exist INDEPENDENTLY of camera state —
+     * [ensureRemoteTile] creates an identity-keyed placeholder tile on
+     * ParticipantConnected and in the post-connect sweep of existing
+     * participants; video renderers attach/detach inside it as the camera
+     * publishes/mutes/unsubscribes.
      */
     private fun remoteSlotTag(identity: String) = "remote-${identity}"
+
+    /**
+     * v1.5.49: creates (or returns) the identity-keyed participant tile
+     * with a camera-off placeholder. Idempotent — never duplicates a tile,
+     * never stacks on resubscribe.
+     */
+    private fun ensureRemoteTile(identity: String): FrameLayout {
+        val tag = remoteSlotTag(identity)
+        grid.findViewWithTag<FrameLayout>(tag)?.let { return it }
+        val slot = FrameLayout(this).apply {
+            this.tag = tag
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
+            )
+        }
+        val ph = layoutInflater.inflate(R.layout.live_cam_placeholder, slot, false)
+        ph.tag = "cam-placeholder"
+        slot.addView(ph, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        ))
+        grid.addView(slot, 1)
+        Log.d(TAG, "remote tile created for $identity")
+        return slot
+    }
+
+    /**
+     * v1.5.49: post-connect sweep — participants already in the room when
+     * we joined (they never fire ParticipantConnected for us).
+     */
+    private fun seedExistingParticipants() {
+        val r = room ?: return
+        r.remoteParticipants.values.forEach { p ->
+            val id = p.identity?.value ?: return@forEach
+            ensureRemoteTile(id)
+            // If their camera is already publishing, attach video now —
+            // TrackSubscribed for pre-existing publications may have
+            // fired before this activity's grid was ready, or the event
+            // ordering placed it before connect() returned.
+            val pub = p.getTrackPublication(io.livekit.android.room.track.Track.Source.CAMERA)
+            val track = pub?.track as? RemoteVideoTrack
+            if (track != null && pub?.muted == false) {
+                onRemoteVideo(track, id, p.name, alreadyMuted = false)
+            }
+        }
+    }
 
     private fun onRemoteVideo(
         track: RemoteVideoTrack,
@@ -514,21 +603,11 @@ class LiveRoomActivity : AppCompatActivity() {
         alreadyMuted: Boolean
     ) {
         val tag = remoteSlotTag(identity)
-        // If a slot already exists for this participant (resubscribe),
-        // replace its contents rather than stacking a second tile.
-        var slot = grid.findViewWithTag<FrameLayout>(tag)
-        if (slot == null) {
-            slot = FrameLayout(this).apply {
-                this.tag = tag
-                layoutParams = LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
-                )
-            }
-            grid.addView(slot, 1)
-        } else {
-            releaseRenderers(slot)
-            slot.removeAllViews()
-        }
+        // The tile always exists (ensureRemoteTile / ParticipantConnected /
+        // post-connect sweep); replace its contents rather than stacking.
+        val slot = ensureRemoteTile(identity)
+        releaseRenderers(slot)
+        slot.removeAllViews()
         val renderer = makeRenderer(mirror = false)
         renderer.tag = tag
         slot.addView(
@@ -538,7 +617,7 @@ class LiveRoomActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT
             )
         )
-        track.addRenderer(renderer)
+        attachRenderer(track, renderer)
         // The publication may already be muted at subscribe time (camera
         // OFF before we joined) — show the placeholder right away instead
         // of relying on a TrackMuted event that already fired.
@@ -552,17 +631,17 @@ class LiveRoomActivity : AppCompatActivity() {
     }
 
     /**
-     * v1.5.48: detach a remote slot's renderer and show the shared
-     * placeholder in the slot — used when the remote camera publication
-     * is muted (their camera OFF). The renderer is RELEASED, because a
-     * released SurfaceViewRenderer no longer displays its last frame.
+     * v1.5.49: detach a remote slot's renderer (unregistered from its
+     * track FIRST — the v1.5.48 dead-sink freeze) and show the shared
+     * placeholder in the tile — used when the remote camera publication
+     * is muted (their camera OFF).
      */
     private fun onRemoteCameraOff(identity: String, name: String?) {
         val tag = remoteSlotTag(identity)
         val slot = grid.findViewWithTag<FrameLayout>(tag) ?: return
         val renderer = slot.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer>(tag)
         if (renderer != null) {
-            try { renderer.release() } catch (_: Exception) { }
+            destroyRenderer(renderer)
             slot.removeView(renderer)
         }
         if (slot.findViewWithTag<View>("cam-placeholder") == null) {
@@ -576,8 +655,9 @@ class LiveRoomActivity : AppCompatActivity() {
     }
 
     /**
-     * v1.5.48: restore live video in a remote slot after it was muted —
-     * the old renderer was released on mute, so attach a fresh one.
+     * v1.5.49: restore live video in a remote tile after it was muted —
+     * the old renderer was unregistered + released on mute, so attach a
+     * fresh one.
      */
     private fun onRemoteCameraOn(ev: RoomEvent.TrackUnmuted) {
         val identity = ev.participant.identity?.value ?: return
@@ -592,19 +672,44 @@ class LiveRoomActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT,
                 ViewGroup.LayoutParams.MATCH_PARENT
             ))
-            track.addRenderer(renderer)
+            attachRenderer(track, renderer)
         }
     }
 
     /**
-     * v1.5.48: fully remove a remote slot when its track is unsubscribed
-     * or the participant disconnects — renderer released, slot removed
-     * from the grid, no orphaned video surface left behind.
+     * v1.5.49: remove the video renderer from a remote tile on
+     * unsubscribe while PRESERVING the participant placeholder tile if
+     * they remain connected (they muted the whole publication, or the
+     * track flipped to unsubscribed).
+     */
+    private fun onRemoteTrackDropped(identity: String) {
+        val tag = remoteSlotTag(identity)
+        val slot = grid.findViewWithTag<FrameLayout>(tag) ?: return
+        val renderer = slot.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer>(tag)
+        if (renderer != null) {
+            destroyRenderer(renderer)
+            slot.removeView(renderer)
+        }
+        if (slot.findViewWithTag<View>("cam-placeholder") == null) {
+            val ph = layoutInflater.inflate(R.layout.live_cam_placeholder, slot, false)
+            ph.tag = "cam-placeholder"
+            slot.addView(ph, FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ))
+        }
+    }
+
+    /**
+     * v1.5.48: fully remove a remote tile when the participant
+     * disconnects — renderer unregistered + released, tile removed from
+     * the grid, no orphaned video surface left behind.
      */
     private fun onRemoteGone(identity: String) {
         val slot = grid.findViewWithTag<FrameLayout>(remoteSlotTag(identity)) ?: return
         releaseRenderers(slot)
         grid.removeView(slot)
+        Log.d(TAG, "remote tile removed for $identity")
     }
 
     private fun makeRenderer(mirror: Boolean): SurfaceViewRenderer =
@@ -623,7 +728,16 @@ class LiveRoomActivity : AppCompatActivity() {
                 // v1.5.41: derive the icon from actual track state — the
                 // UI can never drift from what LiveKit is really doing.
                 syncTrackState()
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                // v1.5.49: silent catches hid real failures — surface a
+                // concise message and re-sync the icon to the TRUE state.
+                Log.w(TAG, "mic toggle failed: ${e.message}")
+                runOnUiThread {
+                    syncTrackState()
+                    Toast.makeText(this@LiveRoomActivity,
+                        R.string.live_mic_toggle_failed, Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -639,7 +753,20 @@ class LiveRoomActivity : AppCompatActivity() {
                 // attaches (ON) or is removed+released with a placeholder
                 // (OFF). Called AFTER the state change settles.
                 syncLocalPreview()
-            } catch (_: Exception) { }
+            } catch (e: Exception) {
+                // v1.5.49: camera init failures (device busy after a
+                // force-close, permission revoked, hardware error) were
+                // swallowed — the user saw nothing and the icon could
+                // drift. Keep the icon honest with the real state, show a
+                // concise message, leave the meeting usable for retry.
+                Log.w(TAG, "camera toggle failed: ${e.message}", e)
+                runOnUiThread {
+                    syncTrackState()
+                    syncLocalPreview()
+                    Toast.makeText(this@LiveRoomActivity,
+                        R.string.live_cam_toggle_failed, Toast.LENGTH_LONG).show()
+                }
+            }
         }
     }
 
@@ -722,6 +849,7 @@ class LiveRoomActivity : AppCompatActivity() {
         // /leave POST fired, stranding the meeting as live (see memory
         // stranded-live-meetings-incident). Also release the coroutine scope
         // (events collector leaked) and any SurfaceViewRenderers.
+        destroyed = true
         if (!leaving) {
             leaving = true
             try { room?.disconnect() } catch (_: Exception) { }
@@ -731,15 +859,61 @@ class LiveRoomActivity : AppCompatActivity() {
             val root = findViewById<android.view.ViewGroup>(android.R.id.content)
             releaseRenderers(root)
         } catch (_: Exception) { }
+        // v1.5.49: clear the renderer→track registry (every registered
+        // renderer was destroyed by the sweep above).
+        rendererTracks.clear()
         super.onDestroy()
     }
 
+    /**
+     * v1.5.49: THE canonical renderer teardown. Required sequence:
+     *   1. unregister the renderer as a video sink from its track
+     *      (while the track association is still known — see
+     *      rendererTracks);
+     *   2. release the renderer (frees the EGL surface; the released
+     *      view stops displaying its last frame);
+     *   3. detach the renderer reference from its slot (caller).
+     * Idempotent: safe to call repeatedly on the same renderer
+     * (removeRenderer on an unregistered sink and release() on a
+     * released renderer are guarded). Never touches a renderer that
+     * belongs to another participant — the registry is keyed by renderer
+     * instance, and each renderer is tagged to exactly one slot.
+     */
+    private fun destroyRenderer(renderer: io.livekit.android.renderer.SurfaceViewRenderer?) {
+        renderer ?: return
+        val track = rendererTracks.remove(renderer)
+        if (track != null) {
+            try { track.removeRenderer(renderer) } catch (e: Exception) {
+                Log.w(TAG, "removeRenderer failed: ${e.message}")
+            }
+        }
+        try { renderer.release() } catch (e: Exception) {
+            Log.w(TAG, "renderer release failed: ${e.message}")
+        }
+        Log.d(TAG, "renderer destroyed (track=${track != null})")
+    }
+
+    /** Attaches a renderer to a track AND registers the association. */
+    private fun attachRenderer(
+        track: io.livekit.android.room.track.VideoTrack,
+        renderer: io.livekit.android.renderer.SurfaceViewRenderer
+    ) {
+        track.addRenderer(renderer)
+        rendererTracks[renderer] = track
+        Log.d(TAG, "renderer attached (registered=${rendererTracks.size})")
+    }
+
+    /**
+     * v1.5.49: recursively destroys every registered renderer under a
+     * view group (including views not in our registry — they are only
+     * released, which is safe post-disconnect).
+     */
     private fun releaseRenderers(group: android.view.ViewGroup?) {
         group ?: return
         for (i in 0 until group.childCount) {
             val child = group.getChildAt(i)
             if (child is io.livekit.android.renderer.SurfaceViewRenderer) {
-                try { child.release() } catch (_: Exception) { }
+                destroyRenderer(child)
             } else if (child is android.view.ViewGroup) {
                 releaseRenderers(child)
             }

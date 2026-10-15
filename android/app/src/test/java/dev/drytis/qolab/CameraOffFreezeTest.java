@@ -114,12 +114,19 @@ public class CameraOffFreezeTest {
         String src = read("app/src/main/java/dev/drytis/qolab/LiveRoomActivity.kt");
         int sync = src.indexOf("private fun syncLocalPreview()");
         int elseBranch = src.indexOf("} else {", src.indexOf("SlotState.LIVE", sync));
-        // OFF branch: release + remove renderer, then placeholder.
-        int release = src.indexOf("existing.release()", elseBranch);
+        // v1.5.49: OFF branch destroys the renderer via the canonical
+        // helper (unregisters the video sink BEFORE release) + removes it,
+        // then shows the placeholder.
+        int destroy = src.indexOf("destroyRenderer(existing)", elseBranch);
         int remove = src.indexOf("localFrame.removeView(existing)", elseBranch);
         int placeholder = src.indexOf("live_cam_placeholder", elseBranch);
-        assertTrue(release > 0 && remove > 0 && placeholder > 0);
-        assertTrue("release must precede removal", release < remove);
+        assertTrue(destroy > 0 && remove > 0 && placeholder > 0);
+        assertTrue("destroy must precede removal", destroy < remove);
+        // The canonical helper itself: removeRenderer before release.
+        int helper = src.indexOf("private fun destroyRenderer");
+        int sinkRemove = src.indexOf("track.removeRenderer(renderer)", helper);
+        int rel = src.indexOf("renderer.release()", helper);
+        assertTrue(sinkRemove > 0 && rel > 0 && sinkRemove < rel);
     }
 
     @Test
@@ -130,7 +137,9 @@ public class CameraOffFreezeTest {
         assertTrue(src.contains("\"local-renderer\""));
         int sync = src.indexOf("private fun syncLocalPreview()");
         int guard = src.indexOf("findViewWithTag", sync);
-        int add = src.indexOf("videoTrack!!.addRenderer(renderer)", sync);
+        // v1.5.49: attach goes through attachRenderer() (registers the
+        // renderer→track association).
+        int add = src.indexOf("attachRenderer(videoTrack!!, renderer)", sync);
         assertTrue("tag guard must run before attaching", guard > 0 && guard < add);
         // ON must also clear a stale placeholder from a prior OFF.
         int stalePh = src.indexOf(

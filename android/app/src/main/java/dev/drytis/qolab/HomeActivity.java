@@ -496,8 +496,13 @@ public class HomeActivity extends AppCompatActivity {
             item.setPadding(0, itemPad, 0, itemPad);
             item.setOnClickListener(v -> {
                 sheet.dismiss();
-                // v1.5.16: native Coming Soon — never route to web pages
-                showComingSoon(dest);
+                // v1.5.49: Meetings now opens the native list — the other
+                // destinations remain native Coming Soon (never web).
+                if (getString(R.string.home_menu_meetings).equals(dest)) {
+                    startActivity(new Intent(this, MeetingsListActivity.class));
+                } else {
+                    showComingSoon(dest);
+                }
             });
             box.addView(item);
         }
@@ -917,6 +922,24 @@ public class HomeActivity extends AppCompatActivity {
         meetingAvatars.removeAllViews();
         renderAvatarRow(meetingAvatars, m.participants, m.participantsCount, true);
         meetingOverflow.setText(overflowText(m.participants.size(), m.participantsCount));
+
+        // v1.5.49: the Today's/Next Meeting card was inert — it now opens
+        // the existing native MeetingDetailActivity using the card's real
+        // id/title from the Home payload (no API change). Invalid ids
+        // never navigate.
+        if (m.id > 0) {
+            meetingCard.setOnClickListener(v -> {
+                Intent i = new Intent(this, MeetingDetailActivity.class);
+                i.putExtra(MeetingDetailActivity.EXTRA_MEETING_ID, m.id);
+                i.putExtra(MeetingDetailActivity.EXTRA_MEETING_TITLE,
+                        m.title != null ? m.title : "");
+                startActivity(i);
+            });
+            meetingCard.setClickable(true);
+        } else {
+            meetingCard.setOnClickListener(null);
+            meetingCard.setClickable(false);
+        }
     }
 
     private void renderRooms() {

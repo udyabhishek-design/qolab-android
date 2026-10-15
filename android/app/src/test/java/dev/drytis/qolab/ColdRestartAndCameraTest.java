@@ -109,8 +109,10 @@ public class ColdRestartAndCameraTest {
                 java.nio.charset.StandardCharsets.UTF_8);
         // OFF must REMOVE + RELEASE the renderer (the freeze) and show a
         // placeholder instead.
-        assertTrue("camera OFF must release the old renderer",
-                src.contains("existing.release()"));
+        // v1.5.49: OFF releases via destroyRenderer() — which unregisters
+        // the sink from the track BEFORE release (dead-sink fix).
+        assertTrue("camera OFF must destroy the old renderer",
+                src.contains("destroyRenderer(existing)"));
         assertTrue("camera OFF must show a placeholder",
                 src.contains("live_cam_placeholder"));
         // ON must be idempotent (tag guard) — no duplicate renderers on

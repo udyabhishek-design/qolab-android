@@ -34,4 +34,8 @@
     <!-- Meeting list contextual action -->
     <string name="room_meeting_join">Join</string>
     <string name="room_meeting_start">Start</string>
+    <!-- v1.5.49: user-visible toggle failure feedback (was silently
+         swallowed — camera init failures left the icon dishonest). -->
+    <string name="live_mic_toggle_failed">Couldn\'t change the microphone. Please try again.</string>
+    <string name="live_cam_toggle_failed">Couldn\'t switch the camera. Please try again.</string>
 </resources>
