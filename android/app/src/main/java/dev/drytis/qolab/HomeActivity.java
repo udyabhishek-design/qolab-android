@@ -496,10 +496,14 @@ public class HomeActivity extends AppCompatActivity {
             item.setPadding(0, itemPad, 0, itemPad);
             item.setOnClickListener(v -> {
                 sheet.dismiss();
-                // v1.5.49: Meetings now opens the native list — the other
-                // destinations remain native Coming Soon (never web).
+                // v1.5.53: Meetings opens the user's Department Room
+                // with the Meetings tab preselected (was the standalone
+                // native meetings list). Directory now opens the native
+                // Directory. Everything else stays native Coming Soon.
                 if (getString(R.string.home_menu_meetings).equals(dest)) {
-                    startActivity(new Intent(this, MeetingsListActivity.class));
+                    openDepartmentRoomMeetings();
+                } else if (getString(R.string.home_menu_directory).equals(dest)) {
+                    startActivity(new Intent(this, DirectoryActivity.class));
                 } else {
                     showComingSoon(dest);
                 }
@@ -1112,6 +1116,34 @@ public class HomeActivity extends AppCompatActivity {
         i.putExtra(RoomActivity.EXTRA_ROOM_NAME, dept.name);
         i.putExtra(RoomActivity.EXTRA_ROOM_SLUG, slug);
         startActivity(i);
+    }
+
+    /**
+     * v1.5.53 — hamburger → Meetings: opens the USER'S department room
+     * with the Meetings tab preselected (reuses the existing
+     * RoomActivity + all meeting functionality). Department resolution:
+     * the CURRENT Home data first; when Home hasn't loaded yet, the
+     * per-user session cache (cleared on logout — same keying rule as
+     * Home's own instant paint). An unresolvable department NEVER opens
+     * an unrelated room — an explicit dialog states the problem instead.
+     */
+    private void openDepartmentRoomMeetings() {
+        HomeDataClient.HomeData d = data != null ? data : cachedData;
+        if (d != null && d.departmentRoom != null
+                && d.departmentRoom.roomSlug != null
+                && !d.departmentRoom.roomSlug.isEmpty()) {
+            Intent i = new Intent(this, RoomActivity.class);
+            i.putExtra(RoomActivity.EXTRA_ROOM_NAME, d.departmentRoom.name);
+            i.putExtra(RoomActivity.EXTRA_ROOM_SLUG, d.departmentRoom.roomSlug);
+            i.putExtra(RoomActivity.EXTRA_INITIAL_TAB, 1);
+            startActivity(i);
+            return;
+        }
+        new android.app.AlertDialog.Builder(this)
+                .setTitle(R.string.directory_error_no_department_title)
+                .setMessage(R.string.directory_error_no_department_msg)
+                .setPositiveButton(android.R.string.ok, null)
+                .show();
     }
 
     private void renderContinue() {

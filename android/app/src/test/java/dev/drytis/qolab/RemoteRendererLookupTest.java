@@ -175,15 +175,17 @@ public class RemoteRendererLookupTest {
     public void meetingsNavigationPreserved() throws Exception {
         String home = new String(Files.readAllBytes(new File(
                 "/home/coder/qolab-android/android/app/src/main/java/dev/drytis/qolab/HomeActivity.java").toPath()));
-        assertTrue(home.contains("MeetingsListActivity.class"));
+        // v1.5.53: hamburger Meetings deep-links into the department room;
+        // the meeting detail / join chain is unchanged.
+        assertTrue(home.contains("openDepartmentRoomMeetings()"));
         assertTrue(home.contains("MeetingDetailActivity.class"));
     }
 
     @Test
     public void versionBumped() throws Exception {
         String g = repoFile("app/build.gradle");
-        assertTrue(g.contains("versionCode 68"));
-        assertTrue(g.contains("versionName \"1.5.52\""));
+        assertTrue(g.contains("versionCode 69"));
+        assertTrue(g.contains("versionName \"1.5.53\""));
     }
 
     private static int count(String haystack, String needle) {

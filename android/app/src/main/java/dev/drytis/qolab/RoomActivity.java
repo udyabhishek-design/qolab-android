@@ -41,6 +41,12 @@ public class RoomActivity extends AppCompatActivity {
     private static final String TAG = "RoomActivity";
     public static final String EXTRA_ROOM_NAME = "room_name";
     public static final String EXTRA_ROOM_SLUG = "room_slug";
+    /** v1.5.53: optional initial tab index (0 Overview, 1 Meetings,
+     *  2 Tasks) — the hamburger Meetings destination opens the user's
+     *  department room directly on its Meetings tab. Default remains
+     *  Overview for every existing entry point. */
+    public static final String EXTRA_INITIAL_TAB = "initial_tab";
+    private static final int INITIAL_TAB_MEETINGS = 1;
 
     private TextView titleView, avatar, notificationBadge;
     private TextView tabOverview, tabMeetings, tabTasks;
@@ -103,7 +109,13 @@ public class RoomActivity extends AppCompatActivity {
         circle.setColor(HomeActivity.avatarColorOf(userName));
         avatar.setBackground(circle);
 
-        showTab(0);
+        // v1.5.53: optional initial tab (hamburger Meetings deep-link).
+        // Bounded to 0..2; unknown/absent keeps the Overview default so
+        // every existing entry point (dept card, rooms, back stack) is
+        // unchanged.
+        int initialTab = Math.max(0, Math.min(2,
+                getIntent().getIntExtra(EXTRA_INITIAL_TAB, 0)));
+        showTab(initialTab);
 
         // v1.5.46: automatic network recovery — airplane-mode cycles. When
         // connectivity returns while the room shows its error state (page

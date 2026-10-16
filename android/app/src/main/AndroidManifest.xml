@@ -117,9 +117,31 @@
 
         <!-- Native Meetings list (v1.5.49) — hamburger Meetings
              destination. GET /meetings (Inertia), rows open the existing
-             MeetingDetailActivity. -->
+             MeetingDetailActivity.
+             v1.5.53: no longer reachable from the hamburger menu (Meetings
+             now deep-links into the Department Room's Meetings tab); kept
+             registered — MeetingDetailActivity rows remain its consumers'
+             contract and it is still referenced by tests. -->
         <activity
             android:name=".MeetingsListActivity"
+            android:exported="false"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar" />
+
+        <!-- Native Directory (v1.5.53) — hamburger Directory destination.
+             GET /directory + GET /directory/{id} (Inertia), via the
+             authenticated WebView transport. -->
+        <activity
+            android:name=".DirectoryActivity"
+            android:exported="false"
+            android:label="@string/title_activity_main"
+            android:theme="@style/AppTheme.NoActionBar"
+            android:windowSoftInputMode="adjustResize" />
+
+        <!-- Native member profile (v1.5.53) — opened from Directory rows.
+             GET /directory/{id} (Inertia Directory/Show). -->
+        <activity
+            android:name=".MemberDetailActivity"
             android:exported="false"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBar" />

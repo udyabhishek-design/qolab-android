@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- v1.5.53: native Directory (GET /directory Inertia Index/Show).
+         Hamburger Directory destination. Real members only. -->
+    <string name="directory_wordmark">Qolab</string>
+    <string name="directory_title">Directory</string>
+    <string name="directory_subtitle">Find your colleagues</string>
+    <string name="directory_search_hint">Search by name</string>
+    <string name="directory_empty">No members to show yet</string>
+    <string name="directory_no_results">No members match “%1$s”</string>
+    <string name="directory_load_more">Load more</string>
+    <string name="directory_loading_more">Loading…</string>
+    <string name="directory_detail_title">Member</string>
+    <string name="directory_detail_bio">About</string>
+    <string name="directory_status_online">Active now</string>
+    <string name="directory_status_away">Away</string>
+    <string name="directory_status_offline">Offline</string>
+    <string name="directory_status_unknown">Status unavailable</string>
+    <string name="directory_row_email">Email</string>
+    <string name="directory_row_phone">Phone</string>
+    <string name="directory_row_department">Department</string>
+    <string name="directory_row_designation">Designation</string>
+    <string name="directory_row_shift">Shift</string>
+    <string name="directory_row_timezone">Time zone</string>
+    <string name="directory_row_joined">Joined</string>
+    <string name="directory_row_languages">Languages</string>
+    <string name="directory_row_you">%1$s (You)</string>
+    <string name="directory_error_no_department_title">No department</string>
+    <string name="directory_error_no_department_msg">Your department room couldn\'t be found, so Meetings isn\'t available here. Please contact your administrator.</string>
+    <string name="directory_cd_back">Back</string>
+</resources>

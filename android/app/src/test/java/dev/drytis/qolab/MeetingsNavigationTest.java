@@ -99,14 +99,18 @@ public class MeetingsNavigationTest {
     // ── wiring ────────────────────────────────────────────────────────
 
     @Test
-    public void hamburgerMeetingsOpensNativeList() throws IOException {
+    public void hamburgerMeetingsOpensDepartmentRoomDeepLink() throws IOException {
         String src = read("app/src/main/java/dev/drytis/qolab/HomeActivity.java");
         int menu = src.indexOf("private void showMenuSheet()");
         assertTrue(menu > 0);
-        int wiring = src.indexOf("home_menu_meetings", menu);
-        int nav = src.indexOf("MeetingsListActivity.class", menu);
-        assertTrue("Meetings menu item must open MeetingsListActivity", nav > 0);
-        assertTrue("wiring inside the menu sheet", wiring > 0 && nav > wiring);
+        // v1.5.53: hamburger Meetings no longer opens the standalone
+        // list — it deep-links into the user's Department Room on the
+        // Meetings tab (openDepartmentRoomMeetings, pinned by
+        // DirectoryAndMeetingsNavTest). The standalone list itself is
+        // untouched below.
+        assertFalse("menu must NOT open the standalone meetings list",
+                src.substring(menu, src.indexOf("private void loadHome", menu))
+                        .contains("startActivity(new Intent(this, MeetingsListActivity.class))"));
         // Other destinations still Coming Soon (untouched).
         assertTrue(src.contains("showComingSoon(dest)"));
     }

@@ -252,7 +252,7 @@ public class RoomLobbyRecoveryTest {
     @Test
     public void versionBumped() throws Exception {
         String g = read("android/app/build.gradle");
-        assertTrue(g.contains("versionCode 68"));
-        assertTrue(g.contains("versionName \"1.5.52\""));
+        assertTrue(g.contains("versionCode 69"));
+        assertTrue(g.contains("versionName \"1.5.53\""));
     }
 }

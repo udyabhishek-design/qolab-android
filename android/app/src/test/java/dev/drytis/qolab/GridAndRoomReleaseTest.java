@@ -244,11 +244,15 @@ public class GridAndRoomReleaseTest {
 
     @Test
     public void meetingsNavigationPreserved() {
-        // v1.5.49's passing Meetings navigation must survive this release.
+        // v1.5.53: hamburger Meetings deep-links into the user's
+        // Department Room on the Meetings tab (reusing RoomActivity);
+        // the meeting detail / join chain is unchanged.
         String home = repoFile(
                 "android/app/src/main/java/dev/drytis/qolab/HomeActivity.java");
-        assertTrue("hamburger Meetings still opens MeetingsListActivity",
-                home.contains("MeetingsListActivity.class"));
+        assertTrue("hamburger Meetings opens the department room deep-link",
+                home.contains("openDepartmentRoomMeetings()"));
+        assertTrue("deep-link reuses RoomActivity with Meetings tab",
+                home.contains("EXTRA_INITIAL_TAB, 1"));
         int card = home.indexOf("meetingCard.setOnClickListener");
         if (card > 0) {
             String wiring = home.substring(card, Math.min(home.length(), card + 800));
@@ -271,7 +275,7 @@ public class GridAndRoomReleaseTest {
     @Test
     public void versionBumped() throws Exception {
         String g = repoFile("android/app/build.gradle");
-        assertTrue(g.contains("versionCode 68"));
-        assertTrue(g.contains("versionName \"1.5.52\""));
+        assertTrue(g.contains("versionCode 69"));
+        assertTrue(g.contains("versionName \"1.5.53\""));
     }
 }
