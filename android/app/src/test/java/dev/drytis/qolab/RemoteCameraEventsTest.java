@@ -278,7 +278,7 @@ public class RemoteCameraEventsTest {
     @Test
     public void versionBumped() throws Exception {
         String g = repoFile("app/build.gradle");
-        assertTrue(g.contains("versionCode 67"));
-        assertTrue(g.contains("versionName \"1.5.51\""));
+        assertTrue(g.contains("versionCode 68"));
+        assertTrue(g.contains("versionName \"1.5.52\""));
     }
 }

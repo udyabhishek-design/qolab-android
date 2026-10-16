@@ -655,6 +655,31 @@ class LiveRoomActivity : AppCompatActivity() {
     private fun remoteSlotTag(identity: String) = "remote-${identity}"
 
     /**
+     * v1.5.52 FIX (ClassCastException, logcat 2026-10-16 12:42:51):
+     * `View.findViewWithTag()` matches the view ITSELF first, and the
+     * remote slot (FrameLayout) carries the SAME tag as the renderer
+     * placed inside it (both `remoteSlotTag(identity)`), so
+     * `slot.findViewWithTag<SurfaceViewRenderer>(tag)` returned the SLOT
+     * — an unchecked generic cast that crashed in onRemoteCameraOff()
+     * and silently skipped renderer reattachment in onRemoteCameraOn()
+     * (non-null slot ≠ no renderer). Scan the slot's DIRECT children
+     * (the renderer is always a direct child) with an explicit
+     * type+tag check — no unsafe casts.
+     */
+    private fun findRemoteRenderer(
+        slot: FrameLayout,
+        tag: String
+    ): io.livekit.android.renderer.SurfaceViewRenderer? {
+        for (i in 0 until slot.childCount) {
+            val child = slot.getChildAt(i)
+            if (child is io.livekit.android.renderer.SurfaceViewRenderer && child.tag == tag) {
+                return child
+            }
+        }
+        return null
+    }
+
+    /**
      * v1.5.49: creates (or returns) the identity-keyed participant tile
      * with a camera-off placeholder. Idempotent — never duplicates a tile,
      * never stacks on resubscribe.
@@ -747,7 +772,9 @@ class LiveRoomActivity : AppCompatActivity() {
     private fun onRemoteCameraOff(identity: String, name: String?) {
         val tag = remoteSlotTag(identity)
         val slot = grid.findViewWithTag<FrameLayout>(tag) ?: return
-        val renderer = slot.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer>(tag)
+        // v1.5.52: typed child-scan (findViewWithTag matched the slot
+        // itself — same tag — and crashed on the unsafe cast).
+        val renderer = findRemoteRenderer(slot, tag)
         if (renderer != null) {
             destroyRenderer(renderer)
             slot.removeView(renderer)
@@ -772,7 +799,8 @@ class LiveRoomActivity : AppCompatActivity() {
         val tag = remoteSlotTag(identity)
         val slot = grid.findViewWithTag<FrameLayout>(tag) ?: return
         slot.findViewWithTag<View>("cam-placeholder")?.let { slot.removeView(it) }
-        if (slot.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer>(tag) == null) {
+        // v1.5.52: typed child-scan (see findRemoteRenderer).
+        if (findRemoteRenderer(slot, tag) == null) {
             val renderer = makeRenderer(mirror = false)
             renderer.tag = tag
             slot.addView(renderer, FrameLayout.LayoutParams(
@@ -792,7 +820,8 @@ class LiveRoomActivity : AppCompatActivity() {
     private fun onRemoteTrackDropped(identity: String) {
         val tag = remoteSlotTag(identity)
         val slot = grid.findViewWithTag<FrameLayout>(tag) ?: return
-        val renderer = slot.findViewWithTag<io.livekit.android.renderer.SurfaceViewRenderer>(tag)
+        // v1.5.52: typed child-scan (see findRemoteRenderer).
+        val renderer = findRemoteRenderer(slot, tag)
         if (renderer != null) {
             destroyRenderer(renderer)
             slot.removeView(renderer)
