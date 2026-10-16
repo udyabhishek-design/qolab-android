@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.5.51: visible camera-off participant tile. The v1.5.50 grid
+     weight fix split the space correctly, but a camera-off tile was a
+     near-invisible dark TextView on the dark root (#331A1A1A on
+     #1A1A1A) — two camera-off participants read as one black screen.
+     This replaces it: distinct tile background + separation, avatar
+     initial circle, display name and a camera-off caption. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/live_tile_placeholder"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:background="@drawable/qm_bg_video_tile">
+
+    <TextView
+        android:id="@+id/tile_avatar"
+        android:layout_width="56dp"
+        android:layout_height="56dp"
+        android:gravity="center"
+        android:textSize="22sp"
+        android:textStyle="bold"
+        android:textColor="@color/qm_cream_on_wine"
+        android:background="@drawable/qm_bg_tile_avatar" />
+
+    <TextView
+        android:id="@+id/tile_name"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:maxLines="1"
+        android:ellipsize="end"
+        android:textSize="14sp"
+        android:textStyle="bold"
+        android:textColor="@color/qm_cream_on_wine" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical">
+
+        <ImageView
+            android:layout_width="14dp"
+            android:layout_height="14dp"
+            android:src="@drawable/qm_ic_videocam_off"
+            android:importantForAccessibility="no"
+            android:contentDescription="@null" />
+
+        <TextView
+            android:id="@+id/tile_caption"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="6dp"
+            android:textSize="12sp"
+            android:textColor="#99FBF6EF" />
+    </LinearLayout>
+</LinearLayout>

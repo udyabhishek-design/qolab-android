@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- v1.5.51: avatar-initial circle for camera-off participant tiles
+     (wine circle + cream initial — matches the approved design system:
+     qm_bg_pin_circle / qm_bg_chat_fab precedent). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <solid android:color="@color/qm_wine" />
+</shape>

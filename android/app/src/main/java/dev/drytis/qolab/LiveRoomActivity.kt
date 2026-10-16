@@ -408,11 +408,11 @@ class LiveRoomActivity : AppCompatActivity() {
                     // v1.5.42: a muted camera track must also clear the
                     // local preview (frozen-frame fix).
                     syncLocalPreview()
-                } else if (
-                    ev.publication?.source == io.livekit.android.room.track.Track.Source.CAMERA
-                ) {
-                    // v1.5.48: remote camera OFF — no frozen frame for them
-                    // on our screen either.
+                } else if (isRemoteCameraVideo(ev.publication)) {
+                    // v1.5.51: consistent type+source classification (the
+                    // v1.5.50 source-only gate missed UNKNOWN-source
+                    // publications → frozen last frame). Remote camera OFF —
+                    // no frozen frame for them on our screen either.
                     ev.participant.identity?.value?.let { id ->
                         onRemoteCameraOff(id, ev.participant.name)
                     }
@@ -423,11 +423,10 @@ class LiveRoomActivity : AppCompatActivity() {
                 if (ev.participant is io.livekit.android.room.participant.LocalParticipant) {
                     syncTrackState()
                     syncLocalPreview()
-                } else if (
-                    ev.publication?.source == io.livekit.android.room.track.Track.Source.CAMERA
-                ) {
-                    // v1.5.48: remote camera back ON — re-attach a fresh
-                    // renderer (the old one was released on mute).
+                } else if (isRemoteCameraVideo(ev.publication)) {
+                    // v1.5.51: same consistent classification as Muted.
+                    // Remote camera back ON — re-attach a fresh renderer
+                    // (the old one was released on mute).
                     onRemoteCameraOn(ev)
                 }
                 refreshPeople()
@@ -437,6 +436,25 @@ class LiveRoomActivity : AppCompatActivity() {
                 // the participant tile + placeholder while they stay
                 // connected (mute/unpublish of the camera publication).
                 if (ev.track is RemoteVideoTrack) {
+                    ev.participant.identity?.value?.let { onRemoteTrackDropped(it) }
+                }
+                refreshPeople()
+            }
+            is RoomEvent.TrackUnpublished -> {
+                // v1.5.51: unpublish was previously unhandled. When a
+                // remote camera track is unpublished (web client camera
+                // off can unpublish), detach + release the renderer, KEEP
+                // the tile with a camera-off placeholder while the
+                // participant remains connected. onRemoteTrackDropped is
+                // idempotent, so a following TrackUnsubscribed for the
+                // same track cannot double-clean or touch another
+                // participant's renderer (identity-keyed slots).
+                // (TrackUnpublished exposes ONLY `publication` — the
+                // track is gone by the time this event fires.)
+                if (ev.participant !is io.livekit.android.room.participant.LocalParticipant &&
+                    ev.publication?.track is RemoteVideoTrack
+                ) {
+                    Log.d(TAG, "remote track unpublished sid=${ev.publication?.sid}")
                     ev.participant.identity?.value?.let { onRemoteTrackDropped(it) }
                 }
                 refreshPeople()
@@ -548,10 +566,12 @@ class LiveRoomActivity : AppCompatActivity() {
                     localFrame.removeView(existing)
                 }
                 if (localFrame.findViewWithTag<View>("cam-placeholder") == null) {
-                    val ph = layoutInflater.inflate(R.layout.live_cam_placeholder, localFrame, false)
-                    ph.tag = "cam-placeholder"
+                    // v1.5.51: local tile uses the same visible
+                    // avatar/name placeholder as remote tiles; the local
+                    // participant's name comes from LiveKit when set.
+                    val localName = room?.localParticipant?.name
                     localFrame.addView(
-                        ph,
+                        makeTilePlaceholder(localName),
                         FrameLayout.LayoutParams(
                             ViewGroup.LayoutParams.MATCH_PARENT,
                             ViewGroup.LayoutParams.MATCH_PARENT
@@ -580,6 +600,58 @@ class LiveRoomActivity : AppCompatActivity() {
      * participants; video renderers attach/detach inside it as the camera
      * publishes/mutes/unsubscribes.
      */
+    /**
+     * v1.5.51: builds the VISIBLE camera-off placeholder (avatar
+     * initial + display name + camera-off caption) used in every local
+     * and remote tile. Replaces the near-invisible v1.5.50 TextView
+     * (#331A1A1A on #1A1A1A) — two camera-off participants now read as
+     * two distinct tiles.
+     */
+    private fun makeTilePlaceholder(displayName: String?): View =
+        layoutInflater.inflate(R.layout.live_tile_placeholder, null, false).apply {
+            tag = "cam-placeholder"
+            val content = RemoteCameraEventRules.placeholderFor(
+                displayName,
+                getString(R.string.live_tile_you),
+                getString(R.string.live_tile_camera_off)
+            )
+            findViewById<TextView>(R.id.tile_avatar).text = content.initial
+            findViewById<TextView>(R.id.tile_name).text = content.name
+            findViewById<TextView>(R.id.tile_caption).text = content.caption
+        }
+
+    /**
+     * v1.5.51: single consistent remote-camera-video predicate. The
+     * v1.5.50 defect: TrackSubscribed keyed on TRACK TYPE while
+     * TrackMuted/TrackUnmuted keyed only on publication.source ==
+     * CAMERA — publications with UNKNOWN/missing source (web peers,
+     * event-ordering races) attached a renderer on subscribe but never
+     * tore it down on mute → frozen last frame. Every remote video
+     * branch now classifies through [RemoteCameraEventRules].
+     */
+    private fun isRemoteCameraVideo(pub: io.livekit.android.room.track.TrackPublication?): Boolean {
+        val trackKind = when (pub?.track) {
+            is RemoteVideoTrack -> RemoteCameraEventRules.TrackKind.REMOTE_VIDEO
+            null -> RemoteCameraEventRules.TrackKind.MISSING
+            else -> RemoteCameraEventRules.TrackKind.OTHER
+        }
+        val source = when (pub?.source) {
+            io.livekit.android.room.track.Track.Source.CAMERA -> RemoteCameraEventRules.SourceKind.CAMERA
+            io.livekit.android.room.track.Track.Source.MICROPHONE -> RemoteCameraEventRules.SourceKind.MICROPHONE
+            io.livekit.android.room.track.Track.Source.SCREEN_SHARE -> RemoteCameraEventRules.SourceKind.SCREEN_SHARE
+            io.livekit.android.room.track.Track.Source.UNKNOWN -> RemoteCameraEventRules.SourceKind.UNKNOWN
+            null -> RemoteCameraEventRules.SourceKind.MISSING
+            else -> RemoteCameraEventRules.SourceKind.UNKNOWN
+        }
+        Log.d(TAG, "classify pub sid=${pub?.sid} source=$source trackKind=$trackKind")
+        return RemoteCameraEventRules.isRemoteCameraVideo(trackKind, source)
+    }
+
+    // v1.5.51: identity → display name, so camera-off placeholders can
+    // show the participant's name even after their video/track objects
+    // are gone (recorded on tile creation / subscribe / people refresh).
+    private val remoteNames = HashMap<String, String?>()
+
     private fun remoteSlotTag(identity: String) = "remote-${identity}"
 
     /**
@@ -596,12 +668,13 @@ class LiveRoomActivity : AppCompatActivity() {
                 ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f
             )
         }
-        val ph = layoutInflater.inflate(R.layout.live_cam_placeholder, slot, false)
-        ph.tag = "cam-placeholder"
-        slot.addView(ph, FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        ))
+        // v1.5.51: visible placeholder with the participant's identity —
+        // remembers the name so camera OFF can restore it later.
+        slot.addView(makeTilePlaceholder(remoteNames[identity]),
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            ))
         grid.addView(slot, 1)
         Log.d(TAG, "remote tile created for $identity")
         return slot
@@ -637,6 +710,9 @@ class LiveRoomActivity : AppCompatActivity() {
         val tag = remoteSlotTag(identity)
         // The tile always exists (ensureRemoteTile / ParticipantConnected /
         // post-connect sweep); replace its contents rather than stacking.
+        // v1.5.51: remember this participant's display name for later
+        // camera-off placeholders.
+        remoteNames[identity] = name
         val slot = ensureRemoteTile(identity)
         releaseRenderers(slot)
         slot.removeAllViews()
@@ -677,12 +753,11 @@ class LiveRoomActivity : AppCompatActivity() {
             slot.removeView(renderer)
         }
         if (slot.findViewWithTag<View>("cam-placeholder") == null) {
-            val ph = layoutInflater.inflate(R.layout.live_cam_placeholder, slot, false)
-            ph.tag = "cam-placeholder"
-            slot.addView(ph, FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            ))
+            slot.addView(makeTilePlaceholder(name ?: remoteNames[identity]),
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                ))
         }
     }
 
@@ -723,12 +798,11 @@ class LiveRoomActivity : AppCompatActivity() {
             slot.removeView(renderer)
         }
         if (slot.findViewWithTag<View>("cam-placeholder") == null) {
-            val ph = layoutInflater.inflate(R.layout.live_cam_placeholder, slot, false)
-            ph.tag = "cam-placeholder"
-            slot.addView(ph, FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.MATCH_PARENT
-            ))
+            slot.addView(makeTilePlaceholder(remoteNames[identity]),
+                FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                ))
         }
     }
 
@@ -823,6 +897,9 @@ class LiveRoomActivity : AppCompatActivity() {
         r.remoteParticipants.values.forEach { p ->
             val nm: String? = p.name
             val id: String? = p.identity?.value
+            // v1.5.51: remember the latest display name per identity for
+            // camera-off placeholders.
+            if (id != null) remoteNames[id] = nm
             names.add(
                 nm?.takeIf { it.isNotEmpty() }
                     ?: id?.takeIf { it.isNotEmpty() }

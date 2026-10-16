@@ -116,7 +116,8 @@ public class MultiParticipantStabilityTest {
         assertTrue("ensureRemoteTile is idempotent (returns existing)",
                 body.contains("grid.findViewWithTag<FrameLayout>(tag)?.let { return it }"));
         assertTrue("new tile starts with a camera-off placeholder",
-                body.contains("live_cam_placeholder"));
+                // v1.5.51: inflation centralized in makeTilePlaceholder()
+                body.contains("makeTilePlaceholder"));
     }
 
     @Test
@@ -145,7 +146,7 @@ public class MultiParticipantStabilityTest {
         int drop = src.indexOf("private fun onRemoteTrackDropped");
         String dropBody = src.substring(drop, src.indexOf("private fun onRemoteGone"));
         assertTrue("dropped video must show placeholder (tile preserved)",
-                dropBody.contains("live_cam_placeholder"));
+                dropBody.contains("makeTilePlaceholder"));
         assertFalse("dropped video must NOT remove the tile",
                 dropBody.contains("grid.removeView"));
         // ParticipantDisconnected → remove tile entirely.

@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- v1.5.42: camera-off placeholder inside the local video slot. -->
+    <!-- v1.5.51: superseded by live_tile_camera_off + avatar layout
+         (live_tile_placeholder.xml); kept for compatibility. -->
     <string name="live_cam_off_placeholder">Camera is off</string>
 </resources>

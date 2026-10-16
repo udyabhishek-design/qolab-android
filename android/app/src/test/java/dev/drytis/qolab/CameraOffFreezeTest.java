@@ -119,7 +119,7 @@ public class CameraOffFreezeTest {
         // then shows the placeholder.
         int destroy = src.indexOf("destroyRenderer(existing)", elseBranch);
         int remove = src.indexOf("localFrame.removeView(existing)", elseBranch);
-        int placeholder = src.indexOf("live_cam_placeholder", elseBranch);
+        int placeholder = src.indexOf("live_tile_placeholder", elseBranch);
         assertTrue(destroy > 0 && remove > 0 && placeholder > 0);
         assertTrue("destroy must precede removal", destroy < remove);
         // The canonical helper itself: removeRenderer before release.
@@ -170,7 +170,9 @@ public class CameraOffFreezeTest {
         int off = src.indexOf("private fun onRemoteCameraOff");
         assertTrue(off > 0);
         int release = src.indexOf("renderer.release()", off);
-        int ph = src.indexOf("live_cam_placeholder", off);
+        // v1.5.51: placeholder inflation centralized in makeTilePlaceholder
+        int ph = Math.max(src.indexOf("makeTilePlaceholder", off),
+                          src.indexOf("live_tile_placeholder", off));
         assertTrue("remote OFF must release renderer", release > 0);
         assertTrue("remote OFF must show placeholder", ph > 0);
         // Wired from the TrackMuted event for remote participants.

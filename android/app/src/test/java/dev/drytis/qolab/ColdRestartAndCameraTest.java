@@ -114,7 +114,7 @@ public class ColdRestartAndCameraTest {
         assertTrue("camera OFF must destroy the old renderer",
                 src.contains("destroyRenderer(existing)"));
         assertTrue("camera OFF must show a placeholder",
-                src.contains("live_cam_placeholder"));
+                src.contains("live_tile_placeholder"));
         // ON must be idempotent (tag guard) — no duplicate renderers on
         // repeated ON→OFF→ON cycles.
         assertTrue("renderer attachment must be tag-guarded",
@@ -144,7 +144,7 @@ public class ColdRestartAndCameraTest {
         // Layout resource must exist (R is not on the unit-test classpath;
         // assert on the file and its content-description contract).
         java.nio.file.Path p = Paths.get(System.getProperty("user.dir"), "..",
-                "app/src/main/res/layout/live_cam_placeholder.xml").normalize();
+                "app/src/main/res/layout/live_tile_placeholder.xml").normalize();
         assertTrue(Files.exists(p));
     }
 
