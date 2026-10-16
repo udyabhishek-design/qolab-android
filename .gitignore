@@ -21,13 +21,3 @@ android/app/src/main/assets/public/
 # Misc
 *.log
 .DS_Store
-
-# ── flutter-go branch: Flutter + Go ─────────────────────────────
-app/.dart_tool/
-app/.flutter-plugins*
-app/.metadata
-app/android/.gradle/
-app/android/local.properties
-app/build/
-*.iml
-server/qolab-server
