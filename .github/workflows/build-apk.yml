@@ -44,7 +44,7 @@ jobs:
         run: flutter test
 
       - name: Build debug APK (Development)
-        run: flutter build apk --debug
+        run: flutter build apk --debug --dart-define=QOLAB_ORIGIN=https://workpulse-gbpedt.drytis.dev
 
       - uses: actions/upload-artifact@v4
         with:

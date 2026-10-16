@@ -1,4 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- HTTPS-only networking to the Qolab backend. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="qolab_app"
         android:name="${applicationName}"
