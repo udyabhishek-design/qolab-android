@@ -33,7 +33,7 @@ class HomeScreen extends StatelessWidget {
                     color: QolabTheme.wine,
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: Center(
+                  child: const Center(
                     child: Text(
                       'Q',
                       style: TextStyle(

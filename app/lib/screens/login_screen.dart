@@ -121,7 +121,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 28),
                         _loginButton(inFlight),
                         const SizedBox(height: 24),
-                        Text(
+                        const Text(
                           'Use your existing Qolab account.',
                           textAlign: TextAlign.center,
                           style: QolabTheme.caption,
@@ -156,9 +156,9 @@ class _LoginScreenState extends State<LoginScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          Text('Qolab', style: QolabTheme.headline),
+          const Text('Qolab', style: QolabTheme.headline),
           const SizedBox(height: 6),
-          Text('Sign in to your workspace',
+          const Text('Sign in to your workspace',
               style: QolabTheme.caption),
         ],
       );
