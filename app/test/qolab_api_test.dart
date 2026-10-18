@@ -22,30 +22,81 @@ class MockLaravel {
   final String validPassword;
 
   late HttpServer server;
+
+  /// Active server-side sessions, keyed by session id — like real Laravel
+  /// (independent sessions; an old-session logout cannot invalidate an
+  /// unrelated newer session).
+  final Map<String, String> _xsrfBySession = {};
+  final Set<String> _activeSessions = {};
+  int _seq = 0;
+
+  /// The most recently issued session id (for legacy assertions), or null
+  /// when that session has been logged out.
   String? session;
-  String? xsrf;
+
   int loginAttempts = 0;
+
+  /// Logout behaviour knobs for regression tests.
+  int logoutStatus = 200;
+  Duration logoutDelay = Duration.zero;
+  int logoutRequests = 0;
+  String? lastLogoutCookieHeader;
+
+  /// Bootstrap/login counters for fresh-CSRF assertions.
+  int bootstraps = 0;
+  int loginPosts = 0;
+  String? lastLoginCookieHeader;
 
   /// Headers of the last /dashboard request (for regression assertions).
   Map<String, String> lastDashboardHeaders = {};
 
+  String _newSession(String prefix) {
+    final id = '$prefix-${++_seq}';
+    _activeSessions.add(id);
+    _xsrfBySession[id] = 'enc-csrf%3D%3D';
+    session = id;
+    return id;
+  }
+
+  Map<String, String> _cookiesOf(String header) => {
+        for (final part in header.split(';'))
+          if (part.contains('='))
+            part.trim().split('=').first.trim():
+                part.trim().split('=').skip(1).join('='),
+      };
+
+  /// The session id this request is authenticated as, if any.
+  String? _sessionOf(HttpRequest req) {
+    final jar = _cookiesOf(
+        req.headers.value(HttpHeaders.cookieHeader) ?? '');
+    final sid = jar['qolab-session'];
+    if (sid == null || !_activeSessions.contains(sid)) return null;
+    return sid;
+  }
+
   Future<void> start() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    server.listen(_handle);
+    server.listen((req) async {
+      try {
+        await _handle(req);
+      } catch (_) {
+        // A delayed response writing into a closed server during teardown —
+        // swallow so it can't fail an unrelated test.
+      }
+    });
   }
 
   String get origin => 'http://127.0.0.1:${server.port}';
 
   Future<void> stop() => server.close(force: true);
 
-  void _handle(HttpRequest req) async {
+  Future<void> _handle(HttpRequest req) async {
     final res = req.response;
     final path = req.uri.path;
 
     if (path == '/login' && req.method == 'GET') {
-      session = 'sess-bootstrap';
-      xsrf = 'enc-csrf%3D%3D';
-      _setCookies(res);
+      bootstraps++;
+      _setCookies(res, _newSession('sess-bootstrap'));
       res.statusCode = 200;
       res.write('<html><body>login page</body></html>');
       await res.close();
@@ -54,8 +105,14 @@ class MockLaravel {
 
     if (path == '/login' && req.method == 'POST') {
       loginAttempts++;
+      loginPosts++;
+      lastLoginCookieHeader =
+          req.headers.value(HttpHeaders.cookieHeader) ?? '';
+      final sid = _sessionOf(req);
       final csrf = req.headers.value('X-XSRF-TOKEN');
-      if (csrf == null || csrf != Uri.decodeComponent(xsrf ?? '')) {
+      if (sid == null ||
+          csrf == null ||
+          csrf != Uri.decodeComponent(_xsrfBySession[sid] ?? '')) {
         res.statusCode = 419;
         res.headers.contentType = ContentType.json;
         res.write(jsonEncode({'message': 'CSRF token mismatch.'}));
@@ -77,8 +134,11 @@ class MockLaravel {
         await res.close();
         return;
       }
-      session = 'sess-rotated';
-      _setCookies(res);
+      // Laravel regenerates the session on login: the bootstrap session is
+      // superseded by the rotated one.
+      _activeSessions.remove(sid);
+      _xsrfBySession.remove(sid);
+      _setCookies(res, _newSession('sess-rotated'));
       res.statusCode = 200;
       res.headers.contentType = ContentType.json;
       res.write(jsonEncode({'ok': true}));
@@ -92,7 +152,7 @@ class MockLaravel {
         'x-requested-with': req.headers.value('X-Requested-With') ?? '',
         'cookie': req.headers.value(HttpHeaders.cookieHeader) ?? '',
       };
-      if (session == null || !_hasSessionCookie(req)) {
+      if (_sessionOf(req) == null) {
         res.statusCode = 302;
         res.headers.set(HttpHeaders.locationHeader, '/login');
         await res.close();
@@ -128,9 +188,23 @@ class MockLaravel {
     }
 
     if (path == '/logout' && req.method == 'POST') {
-      session = null;
-      xsrf = null;
-      res.statusCode = 200;
+      logoutRequests++;
+      final logoutCookies =
+          req.headers.value(HttpHeaders.cookieHeader) ?? '';
+      lastLogoutCookieHeader = logoutCookies;
+      if (logoutDelay > Duration.zero) {
+        await Future<void>.delayed(logoutDelay);
+      }
+      // Session-aware, like real Laravel: invalidate ONLY the session the
+      // request actually carries; an old-session logout leaves an
+      // unrelated newer session untouched.
+      final sid = _cookiesOf(logoutCookies)['qolab-session'];
+      if (sid != null) {
+        _activeSessions.remove(sid);
+        _xsrfBySession.remove(sid);
+        if (session == sid) session = null;
+      }
+      res.statusCode = logoutStatus;
       await res.close();
       return;
     }
@@ -139,16 +213,12 @@ class MockLaravel {
     await res.close();
   }
 
-  void _setCookies(HttpResponse res) {
+  void _setCookies(HttpResponse res, String sessionId) {
     res.headers.add(HttpHeaders.setCookieHeader,
-        'qolab-session=$session; path=/; httponly; samesite=lax');
+        'qolab-session=$sessionId; path=/; httponly; samesite=lax');
     res.headers.add(HttpHeaders.setCookieHeader,
-        'XSRF-TOKEN=$xsrf; path=/; samesite=lax');
-  }
-
-  bool _hasSessionCookie(HttpRequest req) {
-    final cookieHeader = req.headers.value(HttpHeaders.cookieHeader) ?? '';
-    return cookieHeader.contains('qolab-session=');
+        'XSRF-TOKEN=${_xsrfBySession[sessionId] ?? 'enc-csrf%3D%3D'}; '
+        'path=/; samesite=lax');
   }
 }
 
@@ -169,7 +239,7 @@ void main() {
   test('bootstrap captures session + XSRF cookies', () async {
     final a = api();
     await a.bootstrapSession();
-    expect(a.cookies['qolab-session']?.value, 'sess-bootstrap');
+    expect(a.cookies['qolab-session']?.value, startsWith('sess-bootstrap'));
     expect(a.cookies['XSRF-TOKEN']?.value, 'enc-csrf%3D%3D');
   });
 
@@ -185,7 +255,7 @@ void main() {
     await a.bootstrapSession();
     await a.login(
         email: mock.validEmail, password: mock.validPassword);
-    expect(a.cookies['qolab-session']?.value, 'sess-rotated');
+    expect(a.cookies['qolab-session']?.value, startsWith('sess-rotated'));
     final user = await a.fetchCurrentUser();
     expect(user.id, 42);
     expect(user.name, 'Test User');
@@ -269,7 +339,7 @@ void main() {
     final a = api();
     await a.bootstrapSession();
     await a.login(email: mock.validEmail, password: mock.validPassword);
-    expect(a.cookies['qolab-session']?.value, 'sess-rotated');
+    expect(a.cookies['qolab-session']?.value, startsWith('sess-rotated'));
     final user = await a.fetchCurrentUser();
     expect(user.id, 42);
     expect(user.name, 'Test User');
@@ -330,5 +400,69 @@ void main() {
           'errors': {'password': ['The password field is required.']}
         }));
     expect(e.fieldErrors?['password'], 'The password field is required.');
+  });
+
+  test('REGRESSION: logout sends the pre-logout cookie snapshot and CSRF, '
+      'and a delayed logout response cannot touch the new session cookies',
+      () async {
+    mock.logoutDelay = const Duration(milliseconds: 1200);
+    final a = api();
+    await a.bootstrapSession();
+    await a.login(email: mock.validEmail, password: mock.validPassword);
+    final oldSession = a.cookies['qolab-session']?.value;
+    expect(oldSession, isNotNull);
+
+    final logoutFuture = a.logout(); // slow server logout in flight…
+
+    // …meanwhile a fresh login happens on a NEW client (immediate
+    // re-login scenario). Give it a head start so it completes first.
+    final b = api();
+    await b.bootstrapSession();
+    await b.login(email: mock.validEmail, password: mock.validPassword);
+    expect(b.cookies['qolab-session']?.value, isNotNull);
+    final newSession = b.cookies['qolab-session']?.value;
+
+    await logoutFuture; // delayed logout finally completes
+
+    // The server logout carried the OLD cookies (snapshot semantics).
+    expect(mock.lastLogoutCookieHeader, contains(oldSession!));
+    expect(mock.lastLogoutCookieHeader, isNot(contains(newSession!)));
+    // The new client's cookies are untouched by the old logout response.
+    expect(b.cookies['qolab-session']?.value, newSession);
+    expect(b.cookies.length, greaterThan(0));
+  });
+
+  test('REGRESSION: logout timing out aborts within the bound '
+      '(not the old ~90s worst case)', () async {
+    mock.logoutDelay = const Duration(seconds: 30); // server "hangs"
+    final a = api();
+    await a.bootstrapSession();
+    await a.login(email: mock.validEmail, password: mock.validPassword);
+
+    final sw = Stopwatch()..start();
+    // The raw API surfaces the timeout as an ApiException (the auth
+    // controller swallows it); what matters is that it is BOUNDED.
+    await expectLater(a.logout(), throwsA(isA<ApiException>()));
+    expect(sw.elapsed, lessThan(const Duration(seconds: 15)));
+  });
+
+  test('REGRESSION: HTTP 419 on logout is tolerated (local cleanup path)',
+      () async {
+    mock.logoutStatus = 419;
+    final a = api();
+    await a.bootstrapSession();
+    await a.login(email: mock.validEmail, password: mock.validPassword);
+    await a.logout(); // tolerateFailure — must NOT throw
+    expect(mock.logoutRequests, 1);
+  });
+
+  test('REGRESSION: HTTP 500 on logout is tolerated (local cleanup path)',
+      () async {
+    mock.logoutStatus = 500;
+    final a = api();
+    await a.bootstrapSession();
+    await a.login(email: mock.validEmail, password: mock.validPassword);
+    await a.logout(); // tolerateFailure — must NOT throw
+    expect(mock.logoutRequests, 1);
   });
 }

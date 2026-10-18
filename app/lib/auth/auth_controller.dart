@@ -16,7 +16,9 @@ enum AuthStatus { unknown, restoring, signedOut, signingIn, signedIn, offline }
 /// - restore(): load stored cookies → validate against /dashboard →
 ///   signedIn (valid) | signedOut (expired/invalid) | offline (network
 ///   unavailable — stored session KEPT, user offered retry).
-/// - logout(): POST /logout (best-effort) → always clear local state.
+/// - logout(): clear local state IMMEDIATELY (UI switches to Login), then
+///   run a bounded, isolated POST /logout in the background. Generation
+///   counter prevents stale operations from touching a newer session.
 class AuthController extends ChangeNotifier {
   AuthController({required this.api, required this.store});
 
@@ -26,6 +28,11 @@ class AuthController extends ChangeNotifier {
   AuthStatus status = AuthStatus.unknown;
   QolabUser? user;
   bool _busy = false;
+
+  /// Monotonic auth generation. Incremented on every local state clear
+  /// (logout) so any still-in-flight server operation from an older
+  /// generation cannot mutate cookies/storage of a newer session.
+  int _generation = 0;
 
   bool get busy => _busy;
 
@@ -93,17 +100,55 @@ class AuthController extends ChangeNotifier {
     }
   }
 
+  /// Sign out.
+  ///
+  /// Design (fixes: multi-tap logout, Home lingering ~90s, zombie logout
+  /// clearing a re-login):
+  /// 1. Single-flight: a second tap while a logout is in flight is ignored.
+  /// 2. LOCAL state is cleared and the UI notified IMMEDIATELY — the user
+  ///    sees Login at once and repeated taps are impossible.
+  /// 3. The server POST /logout runs in the background, bounded by 8s, on a
+  ///    dedicated connection with a cookie snapshot. It never touches the
+  ///    shared jar, so a late (or timed-out) response cannot overwrite a
+  ///    newer session's cookies — no cookie/state races with re-login.
+  /// 4. Local cleanup completes before the background task is spawned, so
+  ///    the store can never hold the OLD session again after this returns.
+  ///
+  /// Limitation (documented, not hidden): if the server logout cannot be
+  /// confirmed within the bound (slow/unreachable backend), the device is
+  /// signed out but the server-side session lives until its natural
+  /// expiry — we do NOT claim confirmed server invalidation.
   Future<void> logout() async {
-    // Best-effort server logout; local state cleared regardless.
-    try {
-      await api.logout();
-    } catch (_) {
-      // Network failure does not block local sign-out.
-    }
+    if (_busy) return; // single-flight: rapid taps → one operation
+    _busy = true;
+    notifyListeners();
+
+    final gen = ++_generation;
+
+    // Fire the server logout FIRST: QolabApi.logout() runs synchronously up
+    // to its first await, capturing the cookie/CSRF snapshot BEFORE any
+    // local clearing below — the request keeps the session's cookies
+    // intact as Laravel expects. catchError is attached immediately so no
+    // unhandled async error can escape if it fails while we clean up.
+    final serverLogout = api.logout().catchError((Object _) {
+      // Network failure / timeout / 5xx — local sign-out still proceeds.
+    });
+
+    // ---- Local cleanup (must fully succeed before reporting signedOut).
     await store.clear();
     api.cookies.clear();
     user = null;
     status = AuthStatus.signedOut;
+    notifyListeners();
+
+    if (gen != _generation) return; // a newer logout already superseded us
+
+    // The bounded, isolated server logout continues in the background.
+    unawaited(serverLogout);
+
+    // Release the busy flag SYNCHRONOUSLY before this future completes so
+    // an immediately following login() is never swallowed by the guard.
+    _busy = false;
     notifyListeners();
   }
 

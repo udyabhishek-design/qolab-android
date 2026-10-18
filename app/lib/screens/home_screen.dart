@@ -51,10 +51,22 @@ class HomeScreen extends StatelessWidget {
               ],
             ),
             actions: [
-              TextButton(
-                onPressed: auth.busy ? null : () => auth.logout(),
-                child: const Text('Sign out',
-                    style: TextStyle(color: QolabTheme.wine)),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: auth.busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: Center(
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2.2,
+                                color: QolabTheme.wine)),
+                      )
+                    : TextButton(
+                        onPressed: () => auth.logout(),
+                        child: const Text('Sign out',
+                            style: TextStyle(color: QolabTheme.wine)),
+                      ),
               ),
             ],
           ),

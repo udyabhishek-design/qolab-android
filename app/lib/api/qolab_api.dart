@@ -46,6 +46,11 @@ class QolabApi {
 
   Duration requestTimeout = const Duration(seconds: 30);
 
+  /// Overall bound for the logout request ONLY — deliberately short so a
+  /// slow or unreachable backend cannot stall sign-out. Login and other
+  /// requests keep the generous [requestTimeout] untouched.
+  Duration logoutTimeout = const Duration(seconds: 8);
+
   /// URL-decode the XSRF-TOKEN cookie value for use in X-XSRF-TOKEN.
   String? get csrfToken {
     final xsrf = cookies['XSRF-TOKEN'];
@@ -107,17 +112,39 @@ class QolabApi {
   Future<QolabUser> validateSession() => fetchCurrentUser();
 
   /// 12: server-side logout; caller clears local state afterwards.
+  ///
+  /// Bounded and ISOLATED from the shared cookie jar: the request uses a
+  /// snapshot of the current cookies taken at call time, so a late response
+  /// can never rotate/delete cookies of a session started afterwards
+  /// (immediate re-login after logout). If the server cannot be reached in
+  /// time, the request is aborted — but the caller has already cleared the
+  /// local session, so the old one is never silently reused. NOTE: when
+  /// this throws (timeout/network/5xx) the server-side session may still be
+  /// alive until its natural expiry; only the device-side session is
+  /// guaranteed gone.
   Future<void> logout() async {
+    final snapshot = cookies.cookieHeader();
+    final token = csrfToken; // captured BEFORE any local clearing
+    // Dedicated, short-lived client: closing it (in the finally below or on
+    // timeout) tears the logout connection down completely — no zombie
+    // request can keep the server-side session lock busy.
+    final client = HttpClient();
+    client.connectionTimeout = const Duration(seconds: 15);
     try {
-      await _request('POST', '/logout',
-          isMutation: true,
-          followRedirects: false,
-          expectJson: true,
-          tolerateFailure: true);
+      await _request(
+        'POST',
+        '/logout',
+        isMutation: true,
+        followRedirects: false,
+        expectJson: true,
+        tolerateFailure: true,
+        cookieHeaderOverride: snapshot,
+        csrfTokenOverride: token,
+        overallTimeout: logoutTimeout,
+        isolatedClient: client,
+      );
     } finally {
-      // Local clearing happens in the auth controller regardless of the
-      // server response — a failed network logout must still sign the user
-      // out of this device.
+      client.close(force: true);
     }
   }
 
@@ -129,28 +156,76 @@ class QolabApi {
     bool followRedirects = true,
     bool expectJson = false,
     bool tolerateFailure = false,
-  }) async {    final uri = Uri.parse('$origin$path');
-    HttpClientRequest req;
+    String? cookieHeaderOverride,
+    String? csrfTokenOverride,
+    Duration? overallTimeout,
+    HttpClient? isolatedClient,
+  }) async {
+    // Overall timeout bounds the WHOLE request (connect + headers + body).
+    // On timeout the isolated client (when present) is force-closed so the
+    // socket is aborted, not abandoned. For shared-client requests the
+    // await simply stops waiting; the per-request connection is left to
+    // the HttpClient's own idle handling.
+    final bound = overallTimeout ?? requestTimeout;
+    final reqFuture = _doRequest(
+      method,
+      path,
+      body: body,
+      isMutation: isMutation,
+      followRedirects: followRedirects,
+      expectJson: expectJson,
+      tolerateFailure: tolerateFailure,
+      cookieHeaderOverride: cookieHeaderOverride,
+      csrfTokenOverride: csrfTokenOverride,
+      isolatedClient: isolatedClient,
+    );
     try {
-      req = await _client.openUrl(method, uri).timeout(requestTimeout,
-          onTimeout: () => throw _timeoutException());
-    } on SocketException catch (e) {
-      throw apiErrorFromNetwork(e);
+      return await reqFuture.timeout(bound, onTimeout: () {
+        if (isolatedClient != null) {
+          isolatedClient.close(force: true);
+        }
+        throw _timeoutException();
+      });
     } on TimeoutException {
       throw _timeoutException();
+    }
+  }
+
+  Future<ApiResult> _doRequest(
+    String method,
+    String path, {
+    String? body,
+    bool isMutation = false,
+    bool followRedirects = true,
+    bool expectJson = false,
+    bool tolerateFailure = false,
+    String? cookieHeaderOverride,
+    String? csrfTokenOverride,
+    HttpClient? isolatedClient,
+  }) async {
+    final uri = Uri.parse('$origin$path');
+    final client = isolatedClient ?? _client;
+    HttpClientRequest req;
+    try {
+      req = await client.openUrl(method, uri);
+    } on SocketException catch (e) {
+      throw apiErrorFromNetwork(e);
     }
     req.followRedirects = followRedirects;
     req.maxRedirects = 0;
 
-    final cookieHeader = cookies.cookieHeader();
-    if (cookieHeader != null) req.headers.set(HttpHeaders.cookieHeader, cookieHeader);
+    final cookieHeader =
+        cookieHeaderOverride ?? cookies.cookieHeader();
+    if (cookieHeader != null) {
+      req.headers.set(HttpHeaders.cookieHeader, cookieHeader);
+    }
     req.headers.set(HttpHeaders.acceptHeader,
         expectJson ? 'application/json' : 'text/html,application/json');
     if (expectJson) {
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
     }
     if (isMutation) {
-      final token = csrfToken;
+      final token = csrfTokenOverride ?? csrfToken;
       if (token != null) req.headers.set('X-XSRF-TOKEN', token);
       req.headers.set('X-Requested-With', 'XMLHttpRequest');
     }
@@ -161,26 +236,25 @@ class QolabApi {
 
     HttpClientResponse resp;
     try {
-      resp = await req.close().timeout(requestTimeout,
-          onTimeout: () => throw _timeoutException());
+      resp = await req.close();
     } on SocketException catch (e) {
       throw apiErrorFromNetwork(e);
-    } on TimeoutException {
-      throw _timeoutException();
     } on HttpException catch (e) {
       throw apiErrorFromNetwork(e);
     }
 
-    // 7: capture Set-Cookie — including rotated session cookies.
-    final setCookies = resp.headers[HttpHeaders.setCookieHeader] ?? const [];
-    if (setCookies.isNotEmpty) {
-      cookies.storeFrom(setCookies);
+    // 7: capture Set-Cookie — including rotated session cookies. Requests
+    // using a cookie OVERRIDE (logout) deliberately do NOT merge responses
+    // back into the shared jar: a late logout response must never
+    // overwrite/delete cookies belonging to a newer session.
+    if (cookieHeaderOverride == null) {
+      final setCookies = resp.headers[HttpHeaders.setCookieHeader] ?? const [];
+      if (setCookies.isNotEmpty) {
+        cookies.storeFrom(setCookies);
+      }
     }
 
-    final text = await resp
-        .transform(utf8.decoder)
-        .join()
-        .timeout(requestTimeout, onTimeout: () => throw _timeoutException());
+    final text = await resp.transform(utf8.decoder).join();
 
     if (tolerateFailure) {
       return ApiResult(status: resp.statusCode, body: text);
