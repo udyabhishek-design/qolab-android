@@ -28,6 +28,12 @@ enum ApiErrorKind {
   /// or invalid. Stored credentials must be cleared.
   unauthenticated,
 
+  /// 409 with X-Inertia-Location: Inertia asset-version mismatch.
+  inertiaVersionMismatch,
+
+  /// 409 without X-Inertia-Location: unrelated conflict.
+  conflict,
+
   /// Anything unexpected.
   unknown,
 }
@@ -47,12 +53,27 @@ class ApiException implements Exception {
 
 /// Map an HTTP status + context to an [ApiException].
 ApiException apiErrorFromStatus(int status,
-    {String? body, bool redirectedToLogin = false}) {
+    {String? body,
+    bool redirectedToLogin = false,
+    String? inertiaLocation}) {
   if (redirectedToLogin || status == 401) {
     return const ApiException(ApiErrorKind.unauthenticated,
         'Your session has expired. Please sign in again.');
   }
   switch (status) {
+    case 409:
+      // Inertia's version-mismatch protocol answers 409 with an
+      // X-Inertia-Location header (server asks for a full reload).
+      // Without that header it is an unrelated conflict — still surfaced
+      // explicitly, never silently generic.
+      if (inertiaLocation != null) {
+        return const ApiException(
+            ApiErrorKind.inertiaVersionMismatch,
+            'Qolab could not load your account (app out of sync with the '
+            'server). Please try signing in again.');
+      }
+      return const ApiException(ApiErrorKind.conflict,
+          'The request conflicted with the server. Please try again.');
     case 419:
       return const ApiException(ApiErrorKind.csrfExpired,
           'Your session expired. Please try signing in again.');

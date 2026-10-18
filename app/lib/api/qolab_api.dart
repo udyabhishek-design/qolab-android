@@ -6,19 +6,24 @@ import 'api_errors.dart';
 import 'cookie_jar.dart';
 import 'inertia.dart';
 
-/// Result of an API request, with redirect destination for auth detection.
+/// Result of an API request, with redirect destination and response
+/// headers for auth/Inertia-protocol detection.
 class ApiResult {
   ApiResult({
     required this.status,
     required this.body,
     this.location,
-    this.setContentTypeJson = false,
+    this.headers = const {},
   });
 
   final int status;
   final String body;
   final String? location;
-  final bool setContentTypeJson;
+
+  /// Response headers (lowercased names) — used to distinguish Inertia's
+  /// 409 version-mismatch signal (`x-inertia-location`) from unrelated
+  /// 409 conflicts.
+  final Map<String, String> headers;
 
   bool get redirectedToLogin =>
       (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) &&
@@ -73,14 +78,21 @@ class QolabApi {
   }
 
   /// 8–9: fetch authenticated identity from an Inertia endpoint.
+  ///
+  /// Plain authenticated GET (NO `X-Inertia: true` header): an X-Inertia
+  /// request without a matching X-Inertia-Version triggers Laravel's
+  /// version-mismatch protocol (HTTP 409 + X-Inertia-Location), so we
+  /// request the ordinary HTML document and parse the embedded
+  /// `data-page` JSON payload instead.
   Future<QolabUser> fetchCurrentUser() async {
-    final r = await _request('GET', '/dashboard',
-        followRedirects: false, xInertia: true);
+    final r = await _request('GET', '/dashboard', followRedirects: false);
     if (r.redirectedToLogin || r.status == 401) {
       throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
     }
     if (r.status != 200) {
-      throw apiErrorFromStatus(r.status, body: r.body);
+      throw apiErrorFromStatus(r.status,
+          body: r.body,
+          inertiaLocation: r.headers['x-inertia-location']);
     }
     final page = InertiaPage.parse(r.body);
     final user = page?.authUser;
@@ -115,11 +127,9 @@ class QolabApi {
     String? body,
     bool isMutation = false,
     bool followRedirects = true,
-    bool xInertia = false,
     bool expectJson = false,
     bool tolerateFailure = false,
-  }) async {
-    final uri = Uri.parse('$origin$path');
+  }) async {    final uri = Uri.parse('$origin$path');
     HttpClientRequest req;
     try {
       req = await _client.openUrl(method, uri).timeout(requestTimeout,
@@ -138,10 +148,6 @@ class QolabApi {
         expectJson ? 'application/json' : 'text/html,application/json');
     if (expectJson) {
       req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
-    }
-    if (xInertia) {
-      req.headers.set('X-Inertia', 'true');
-      req.headers.set('X-Requested-With', 'XMLHttpRequest');
     }
     if (isMutation) {
       final token = csrfToken;
@@ -179,10 +185,15 @@ class QolabApi {
     if (tolerateFailure) {
       return ApiResult(status: resp.statusCode, body: text);
     }
+    final Map<String, String> respHeaders = {};
+    resp.headers.forEach((name, values) {
+      if (values.isNotEmpty) respHeaders[name.toLowerCase()] = values.first;
+    });
     return ApiResult(
       status: resp.statusCode,
       body: text,
       location: resp.headers.value(HttpHeaders.locationHeader),
+      headers: respHeaders,
     );
   }
 

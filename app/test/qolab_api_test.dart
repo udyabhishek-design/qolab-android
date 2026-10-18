@@ -26,6 +26,9 @@ class MockLaravel {
   String? xsrf;
   int loginAttempts = 0;
 
+  /// Headers of the last /dashboard request (for regression assertions).
+  Map<String, String> lastDashboardHeaders = {};
+
   Future<void> start() async {
     server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     server.listen(_handle);
@@ -84,34 +87,30 @@ class MockLaravel {
     }
 
     if (path == '/dashboard' && req.method == 'GET') {
+      lastDashboardHeaders = {
+        'x-inertia': req.headers.value('X-Inertia') ?? '',
+        'x-requested-with': req.headers.value('X-Requested-With') ?? '',
+        'cookie': req.headers.value(HttpHeaders.cookieHeader) ?? '',
+      };
       if (session == null || !_hasSessionCookie(req)) {
         res.statusCode = 302;
         res.headers.set(HttpHeaders.locationHeader, '/login');
         await res.close();
         return;
       }
-      if (req.headers.value('X-Inertia') != 'true') {
-        res.statusCode = 200;
-        res.headers.contentType = ContentType.html;
-        res.write(
-            '<html><script data-page="app" type="application/json">${jsonEncode({
-          'component': 'Dashboard',
-          'props': {
-            'auth': {
-              'user': {
-                'id': 42,
-                'name': 'Test User',
-                'email': 'user@qolab.test'
-              }
-            }
-          }
-        })}</script></html>');
+      // Mirrors real Inertia middleware: an X-Inertia request with a
+      // missing/stale version triggers the version-mismatch protocol.
+      if (req.headers.value('X-Inertia') == 'true') {
+        res.statusCode = 409;
+        res.headers.set('X-Inertia-Location', '$origin/dashboard');
         await res.close();
         return;
       }
+      // Plain authenticated GET -> HTML document with the data-page blob.
       res.statusCode = 200;
-      res.headers.contentType = ContentType.json;
-      res.write(jsonEncode({
+      res.headers.contentType = ContentType.html;
+      res.write(
+          '<html><script data-page="app" type="application/json">${jsonEncode({
         'component': 'Dashboard',
         'props': {
           'auth': {
@@ -123,7 +122,7 @@ class MockLaravel {
             }
           }
         }
-      }));
+      })}</script></html>');
       await res.close();
       return;
     }
@@ -253,6 +252,76 @@ void main() {
   test('connection refused maps to network kind', () {
     final e = apiErrorFromNetwork(const SocketException('refused'));
     expect(e.kind, ApiErrorKind.network);
+  });
+
+  test('REGRESSION: fetchCurrentUser does NOT send X-Inertia: true '
+      '(which would trigger 409 version mismatch)', () async {
+    final a = api();
+    await a.bootstrapSession();
+    await a.login(email: mock.validEmail, password: mock.validPassword);
+    await a.fetchCurrentUser();
+    expect(mock.lastDashboardHeaders['x-inertia'], isNot('true'));
+    expect(mock.lastDashboardHeaders['x-inertia'] ?? '', isEmpty);
+  });
+
+  test('REGRESSION: full flow — login rotates session, then HTML identity '
+      'retrieval succeeds and reaches authenticated state', () async {
+    final a = api();
+    await a.bootstrapSession();
+    await a.login(email: mock.validEmail, password: mock.validPassword);
+    expect(a.cookies['qolab-session']?.value, 'sess-rotated');
+    final user = await a.fetchCurrentUser();
+    expect(user.id, 42);
+    expect(user.name, 'Test User');
+    expect(user.jobTitle, 'Developer');
+  });
+
+  test('REGRESSION: an authenticated X-Inertia GET without a version header '
+      'receives 409 from the Inertia-shaped mock (documents the server '
+      'contract that broke login)', () async {
+    final a = api();
+    await a.bootstrapSession();
+    await a.login(email: mock.validEmail, password: mock.validPassword);
+    // Raw request mimicking the OLD buggy client: X-Inertia without version.
+    final client = HttpClient();
+    final req =
+        await client.openUrl('GET', Uri.parse('${mock.origin}/dashboard'));
+    req.followRedirects = false;
+    final jar = a.cookies.cookieHeader();
+    if (jar != null) {
+      req.headers.set(HttpHeaders.cookieHeader, jar);
+    }
+    req.headers.set('X-Inertia', 'true');
+    req.headers.set('X-Requested-With', 'XMLHttpRequest');
+    final resp = await req.close();
+    expect(resp.statusCode, 409);
+    expect(resp.headers.value('X-Inertia-Location'), isNotNull);
+    client.close(force: true);
+  });
+
+  test('REGRESSION: HTTP 409 is handled explicitly '
+      '(Inertia mismatch vs unrelated conflict)', () {
+    final mismatch = apiErrorFromStatus(409,
+        inertiaLocation: 'https://example.test/dashboard');
+    expect(mismatch.kind, ApiErrorKind.inertiaVersionMismatch);
+    expect(mismatch.message, contains('out of sync'));
+
+    final conflict = apiErrorFromStatus(409);
+    expect(conflict.kind, ApiErrorKind.conflict);
+    expect(conflict.message, contains('conflicted'));
+  });
+
+  test('REGRESSION: wrong-credentials behavior unchanged after 409 fix',
+      () async {
+    final a = api();
+    await a.bootstrapSession();
+    await expectLater(
+      a.login(email: mock.validEmail, password: 'wrong'),
+      throwsA(isA<ApiException>()
+          .having((e) => e.kind, 'kind', ApiErrorKind.validation)
+          .having((e) => e.fieldErrors?['email'], 'field error',
+              'These credentials do not match our records.')),
+    );
   });
 
   test('422 body with field errors parses', () {
