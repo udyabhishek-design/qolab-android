@@ -81,16 +81,33 @@ void main() {
               'last_message_at': '2026-10-19T10:00:00.000000Z',
               'members_count': 2,
               'unread_count': 0,
-            }
+            },
+            {
+              'id': 12,
+              'name': 'Old DM',
+              'type': 'dm',
+              // no last_message_at → sorts last (stable)
+              'members_count': 2,
+              'unread_count': 0,
+            },
           ],
           'group': [
             {
               'id': 21,
               'name': 'Design Team',
               'type': 'group',
+              // NEWEST activity of all → first in All tab
+              'last_message_at': '2026-10-19T12:00:00.000000Z',
               'members_count': 5,
               'unread_count': 0,
-            }
+            },
+            {
+              'id': 22,
+              'name': 'Company Channel',
+              'type': 'company',
+              'members_count': 30,
+              'unread_count': 0,
+            },
           ],
           'company': [],
           'department': [],
@@ -259,6 +276,154 @@ void main() {
     )));
     await tester.pump();
     expect(find.text('Priya Sharma'), findsOneWidget);
+    c.dispose();
+  });
+
+  // ── Phase 4A.1.1: All / Direct / Groups tabs ───────────────────────
+
+  testWidgets('All tab (default): mixed DMs+groups sorted newest first, nulls last',
+      (tester) async {
+    final c = seededList();
+    await tester.pumpWidget(wrap(ChatListScreen(
+      auth: auth,
+      api: auth.api,
+      controller: c,
+    )));
+    await tester.pump();
+
+    // Default = All: every conversation visible.
+    expect(find.text('All'), findsOneWidget); // tab row present
+    expect(find.text('Direct'), findsOneWidget);
+    expect(find.text('Groups'), findsOneWidget);
+
+    // Activity order: Design Team (12:00) → Priya Sharma (10:00) →
+    // Old DM (null) → Company Channel (null, id 22 > 12).
+    final order = tester
+        .widgetList<Text>(find.byType(Text))
+        .where((t) => ['Priya Sharma', 'Design Team', 'Old DM', 'Company Channel']
+            .contains(t.data))
+        .map((t) => t.data)
+        .toList();
+    expect(order,
+        ['Design Team', 'Priya Sharma', 'Old DM', 'Company Channel']);
+    c.dispose();
+  });
+
+  testWidgets('Direct tab shows only DMs, sorted by activity', (tester) async {
+    final c = seededList();
+    await tester.pumpWidget(wrap(ChatListScreen(
+      auth: auth,
+      api: auth.api,
+      controller: c,
+    )));
+    await tester.pump();
+
+    await tester.tap(find.text('Direct'));
+    await tester.pump();
+
+    expect(find.text('Priya Sharma'), findsOneWidget);
+    expect(find.text('Old DM'), findsOneWidget);
+    expect(find.text('Design Team'), findsNothing);
+    expect(find.text('Company Channel'), findsNothing);
+    c.dispose();
+  });
+
+  testWidgets('Groups tab shows only group-like channels', (tester) async {
+    final c = seededList();
+    await tester.pumpWidget(wrap(ChatListScreen(
+      auth: auth,
+      api: auth.api,
+      controller: c,
+    )));
+    await tester.pump();
+
+    await tester.tap(find.text('Groups'));
+    await tester.pump();
+
+    expect(find.text('Design Team'), findsOneWidget);
+    expect(find.text('Company Channel'), findsOneWidget);
+    expect(find.text('Priya Sharma'), findsNothing);
+    expect(find.text('Old DM'), findsNothing);
+    c.dispose();
+  });
+
+  testWidgets('search filters within the selected tab', (tester) async {
+    final c = seededList();
+    await tester.pumpWidget(wrap(ChatListScreen(
+      auth: auth,
+      api: auth.api,
+      controller: c,
+    )));
+    await tester.pump();
+
+    // Switch to Groups first, then search a DM-only term → nothing.
+    await tester.tap(find.text('Groups'));
+    await tester.pump();
+    await tester.enterText(find.byType(TextField).first, 'priya');
+    await tester.pump();
+
+    expect(find.text('Design Team'), findsNothing);
+    expect(find.text('Priya Sharma'), findsNothing); // not in this tab
+    expect(find.text('No conversations match'), findsOneWidget);
+
+    // Clear search, search a group term → group visible.
+    await tester.enterText(find.byType(TextField).first, 'design');
+    await tester.pump();
+    expect(find.text('Design Team'), findsOneWidget);
+    c.dispose();
+  });
+
+  testWidgets('switching tabs does not trigger a backend request',
+      (tester) async {
+    final c = seededList();
+    await tester.pumpWidget(wrap(ChatListScreen(
+      auth: auth,
+      api: auth.api,
+      controller: c,
+    )));
+    await tester.pump();
+
+    // No request was fired: same value object, never loading.
+    final valueBefore = c.index.value;
+    expect(c.index.isLoading, isFalse);
+
+    await tester.tap(find.text('Direct'));
+    await tester.pump();
+    await tester.tap(find.text('Groups'));
+    await tester.pump();
+    await tester.tap(find.text('All'));
+    await tester.pump();
+
+    // No request was fired: same value object, never loading.
+    expect(identical(c.index.value, valueBefore), isTrue);
+    expect(c.index.isLoading, isFalse);
+    c.dispose();
+  });
+
+  testWidgets('selected tab survives opening and returning from a conversation',
+      (tester) async {
+    final c = seededList();
+    final opened = <int>[];
+    await tester.pumpWidget(MaterialApp(
+      home: ChatListScreen(
+        auth: auth,
+        api: auth.api,
+        controller: c,
+        onOpenConversation: (context, conv) => opened.add(conv.id),
+      ),
+    ));
+    await tester.pump();
+
+    // Switch to Groups, then "open" a conversation (captured, not pushed).
+    await tester.tap(find.text('Groups'));
+    await tester.pump();
+    await tester.tap(find.text('Design Team'));
+    await tester.pump();
+    expect(opened, [21]);
+
+    // Returning from the conversation: same screen State → still Groups.
+    expect(find.text('Design Team'), findsOneWidget);
+    expect(find.text('Priya Sharma'), findsNothing); // DM hidden → Groups active
     c.dispose();
   });
 }

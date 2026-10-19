@@ -11,6 +11,13 @@ import 'new_chat_screen.dart';
 /// Phase 4A.1 Chat tab: conversation list (DMs + group/channel chats) with
 /// search, unread badges, and new-conversation flow. Warm-light Qolab
 /// design matching Home.
+///
+/// Phase 4A.1.1: All / Direct / Groups selectable tabs below the heading;
+/// tab switching filters the loaded list client-side (no backend requests)
+/// and sorts by latest conversation activity (last_message_at, newest
+/// first; conversations without a timestamp sort last, stably).
+enum _ChatTab { all, direct, groups }
+
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({
     super.key,
@@ -37,6 +44,7 @@ class ChatListScreen extends StatefulWidget {
 class _ChatListScreenState extends State<ChatListScreen> {
   late final ChatListController chat;
   String _query = '';
+  _ChatTab _tab = _ChatTab.all; // default; survives push/pop navigation
 
   @override
   void initState() {
@@ -119,6 +127,30 @@ class _ChatListScreenState extends State<ChatListScreen> {
         .toList();
   }
 
+  /// Conversations for the selected tab, activity-sorted: newest first.
+  /// Null timestamps (never any activity) sort last; ties keep a stable
+  /// order by id so rows don't jump between renders.
+  List<Conversation> _tabConversations(ChatIndex data) {
+    final list = switch (_tab) {
+      _ChatTab.all => [...data.direct, ...data.groups],
+      _ChatTab.direct => data.direct,
+      _ChatTab.groups => data.groups,
+    };
+    list.sort((a, b) {
+      final at = a.lastMessageAt;
+      final bt = b.lastMessageAt;
+      if (at != null && bt != null) {
+        final cmp = bt.compareTo(at); // newest first
+        if (cmp != 0) return cmp;
+        return a.id.compareTo(b.id);
+      }
+      if (at != null) return -1; // has activity → first
+      if (bt != null) return 1;
+      return a.id.compareTo(b.id); // both null → stable
+    });
+    return list;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -134,6 +166,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('Chat', style: QolabTheme.headline),
+                  const SizedBox(height: 10),
+                  _TabRow(
+                    tab: _tab,
+                    onChanged: (t) => setState(() => _tab = t),
+                  ),
                   const SizedBox(height: 12),
                   Row(
                     children: [
@@ -185,10 +222,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return const _EmptyChat();
     }
     final data = s.value!;
-    final dm = _filter(data.direct);
-    final groups = _filter(data.groups);
-    if (dm.isEmpty && groups.isEmpty) {
-      return const _EmptyChat(searching: true);
+    final conversations = _filter(_tabConversations(data));
+    if (conversations.isEmpty) {
+      // Query active or this tab simply has no conversations.
+      return _EmptyChat(searching: _query.isNotEmpty);
     }
     return RefreshIndicator(
       color: QolabTheme.wine,
@@ -196,40 +233,91 @@ class _ChatListScreenState extends State<ChatListScreen> {
       child: ListView(
         padding: const EdgeInsets.only(bottom: 24),
         children: [
-          if (dm.isNotEmpty) ...[
-            _sectionLabel('Direct messages'),
-            ...dm.map((c) => _ConversationTile(
-                  conversation: c,
-                  unread: chat.unread?[c.id] ?? c.unreadCount,
-                  onTap: () => _openConversation(context, c),
-                )),
-          ],
-          if (groups.isNotEmpty) ...[
-            _sectionLabel('Groups & channels'),
-            ...groups.map((c) => _ConversationTile(
-                  conversation: c,
-                  unread: chat.unread?[c.id] ?? c.unreadCount,
-                  onTap: () => _openConversation(context, c),
-                )),
-          ],
+          ...conversations.map((c) => _ConversationTile(
+                conversation: c,
+                unread: chat.unread?[c.id] ?? c.unreadCount,
+                onTap: () => _openConversation(context, c),
+              )),
         ],
       ),
     );
   }
-
-  Widget _sectionLabel(String text) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 14, 20, 6),
-        child: Text(text,
-            style: const TextStyle(
-              color: QolabTheme.textSoft,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-              letterSpacing: 0.4,
-            )),
-      );
 }
 
 // ─────────────────────────────────────────────────────────────────────
+
+class _TabRow extends StatelessWidget {
+  const _TabRow({required this.tab, required this.onChanged});
+
+  final _ChatTab tab;
+  final ValueChanged<_ChatTab> onChanged;
+
+  static const _labels = ['All', 'Direct', 'Groups'];
+
+  @override
+  Widget build(BuildContext context) {
+    final values = _ChatTab.values;
+    return Row(
+      children: [
+        for (var i = 0; i < values.length; i++)
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(right: i < values.length - 1 ? 6 : 0),
+              child: _TabChip(
+                label: _labels[i],
+                selected: values[i] == tab,
+                onTap: () => onChanged(values[i]),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _TabChip extends StatelessWidget {
+  const _TabChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? QolabTheme.wine : QolabTheme.canvas,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 9),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? QolabTheme.wine : QolabTheme.wineFaded,
+              width: 1.2,
+            ),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                color: selected ? Colors.white : QolabTheme.textSoft,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _NewChatButton extends StatelessWidget {
   const _NewChatButton({required this.onTap});
