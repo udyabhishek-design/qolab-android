@@ -567,7 +567,9 @@ class HomeScreen extends StatelessWidget {
     final today = DateTime.now();
     if (d.year == today.year &&
         d.month == today.month &&
-        d.day == today.day) return 'Today';
+        d.day == today.day) {
+      return 'Today';
+    }
     if (d.isBefore(DateTime(today.year, today.month, today.day))) {
       return 'Overdue';
     }
