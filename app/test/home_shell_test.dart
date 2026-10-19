@@ -164,4 +164,82 @@ void main() {
     expect(find.text('Sign out'), findsNothing);
     expect(auth.status, AuthStatus.signedOut);
   });
+
+  // ---- Notification bell (Phase 3.1) ----
+
+  /// Semantics labels are only materialized when the semantics tree is on,
+  /// so assert against the Semantics widget properties directly.
+  Finder unreadLabel([String? exact]) => find.byWidgetPredicate((w) =>
+      w is Semantics &&
+      (exact == null
+          ? (w.properties.label ?? '').contains('unread')
+          : w.properties.label == exact));
+
+  /// Pump HomeShell with loaded sections, then set the unread count AFTER
+  /// initState's refresh has settled (the dead-port API fails instantly and
+  /// would otherwise overwrite unreadCount back to null). This simulates
+  /// the unread-fetch outcome the way a live API would deliver it.
+  Future<HomeController> pumpHome(
+      WidgetTester tester, HomeController h, int? unread) async {
+    h.dashboard.setLoaded(dashFromProps());
+    h.rooms.setLoaded(const RoomsData(departmentRoom: null));
+    await tester.pumpWidget(
+        wrap(HomeShell(auth: auth, api: auth.api, homeController: h)));
+    await tester.pump(); // let the dead-port refresh fail and settle
+    h.unreadCount = unread;
+    h.notifyListeners(); // same signal the real fetch path emits
+    await tester.pump();
+    return h;
+  }
+
+  testWidgets('bell visible at zero unread; badge hidden', (tester) async {
+    await pumpHome(tester, HomeController(api: auth.api), 0);
+
+    final bell = find.byTooltip('Notifications');
+    expect(bell, findsOneWidget); // permanent — never depends on the count
+    expect(find.text('0'), findsNothing); // zero never fabricates a badge
+  });
+
+  testWidgets('bell visible with positive count; badge shows the number',
+      (tester) async {
+    await pumpHome(tester, HomeController(api: auth.api), 4);
+
+    expect(find.byTooltip('Notifications'), findsOneWidget);
+    expect(find.text('4'), findsOneWidget); // exact badge count
+  });
+
+  testWidgets('badge count of 1 renders correctly', (tester) async {
+    await pumpHome(tester, HomeController(api: auth.api), 1);
+
+    expect(find.byTooltip('Notifications'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget);
+  });
+
+  testWidgets('bell visible when count is unknown (null: loading/failure); '
+      'no fabricated badge', (tester) async {
+    await pumpHome(tester, HomeController(api: auth.api), null);
+
+    expect(find.byTooltip('Notifications'), findsOneWidget);
+    // No badge at all — count unknown is never guessed.
+    expect(unreadLabel(), findsNothing);
+  });
+
+  testWidgets('bell is accessible and communicates unread count when positive',
+      (tester) async {
+    await pumpHome(tester, HomeController(api: auth.api), 7);
+
+    expect(unreadLabel('Notifications, 7 unread'), findsOneWidget);
+  });
+
+  testWidgets('tapping the bell shows the Notifications coming-soon feedback',
+      (tester) async {
+    final h = await pumpHome(tester, HomeController(api: auth.api), 2);
+
+    await tester.tap(find.byTooltip('Notifications'));
+    await tester.pump(); // snackbar appears
+    expect(
+        find.textContaining('Notifications'), findsWidgets); // snackbar text
+    expect(find.text('Coming soon'), findsNothing);
+    expect(h.unreadCount, 2); // tapping never mutated state
+  });
 }

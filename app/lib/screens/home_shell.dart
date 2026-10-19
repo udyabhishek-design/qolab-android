@@ -179,7 +179,7 @@ class HomeScreen extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: 20, vertical: 12),
               children: [
-                _header(first),
+                _header(context, first),
                 const SizedBox(height: 18),
                 _nextMeetingCard(),
                 const SizedBox(height: 18),
@@ -199,7 +199,7 @@ class HomeScreen extends StatelessWidget {
 
   // ── Header ──────────────────────────────────────────────────────────
 
-  Widget _header(String firstName) {
+  Widget _header(BuildContext context, String firstName) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -225,29 +225,14 @@ class HomeScreen extends StatelessWidget {
                 style: TextStyle(
                     color: QolabTheme.ink, fontWeight: FontWeight.bold)),
             const Spacer(),
-            // Unread indicator — independent, never blocks content.
-            if (home.unreadCount != null && home.unreadCount! > 0)
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                decoration: BoxDecoration(
-                  color: QolabTheme.wine,
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.notifications_none_rounded,
-                        size: 13, color: Colors.white),
-                    const SizedBox(width: 4),
-                    Text('${home.unreadCount}',
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
+            // Permanent notification bell — never depends on the unread
+            // count (visible at zero, loading, and failure). The numeric
+            // badge overlays the bell only when the count is positive and
+            // a known value; unknown (null) is never fabricated.
+            _NotificationBell(
+              unreadCount: home.unreadCount,
+              onTap: () => _comingSoon(context, 'Notifications'),
+            ),
             const SizedBox(width: 6),
             // Logout preserved: single tap, immediate feedback.
             auth.busy
@@ -709,6 +694,75 @@ class _SkeletonCard extends StatelessWidget {
           child: CircularProgressIndicator(
               strokeWidth: 2.2, color: QolabTheme.wineFaded),
         ),
+      ),
+    );
+  }
+}
+
+/// Permanent notification bell with a conditional unread badge.
+///
+/// The bell is ALWAYS visible (zero / loading / failure / positive); the
+/// compact badge overlays the top-right corner of the bell only when
+/// [unreadCount] is a known positive value. Unknown (null) never renders
+/// a fabricated count.
+class _NotificationBell extends StatelessWidget {
+  const _NotificationBell({required this.unreadCount, required this.onTap});
+
+  final int? unreadCount;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final count = unreadCount;
+    final showBadge = count != null && count > 0;
+    return Semantics(
+      button: true,
+      label: showBadge
+          ? 'Notifications, $count unread'
+          : 'Notifications',
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          IconButton(
+            onPressed: onTap,
+            icon: const Icon(Icons.notifications_none_rounded,
+                size: 22, color: QolabTheme.wine),
+            padding: const EdgeInsets.all(8),
+            constraints: const BoxConstraints(
+                minWidth: 40, minHeight: 40), // good touch target
+            tooltip: 'Notifications',
+            visualDensity: VisualDensity.compact,
+          ),
+          if (showBadge)
+            Positioned(
+              right: 2,
+              top: 2,
+              child: IgnorePointer(
+                // Badge must not intercept the bell's tap.
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 4.5, vertical: 1.5),
+                  constraints: const BoxConstraints(minWidth: 16),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: QolabTheme.wine,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                        color: QolabTheme.canvas, width: 1.4),
+                  ),
+                  child: Text(
+                    '$count',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      height: 1.1,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
