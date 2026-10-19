@@ -5,7 +5,7 @@ Branch layout:
 - `flutter-go`  — NEW stack (option B): Flutter UI (`app/`) + Go backend (`server/`). All new work happens here.
 
 ## Flutter app (`app/`)
-- Flutter 3.24 stable, Material 3, org `dev.qolab`, app id `dev.qolab.qolab_app`.
+- Flutter 3.27.4 stable (Dart 3.6.2), Material 3, org `dev.qolab`, app id `dev.qolab.qolab_app`.
 - Build locally (container has small `/home/coder` — caches are redirected):
   ```
   export PATH=$PATH:/home/coder/flutter/bin
