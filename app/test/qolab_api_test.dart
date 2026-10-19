@@ -50,6 +50,14 @@ class MockLaravel {
   /// Headers of the last /dashboard request (for regression assertions).
   Map<String, String> lastDashboardHeaders = {};
 
+  /// Home-content mock knobs.
+  Map<String, dynamic>? dashboardPropsOverride;
+  Map<String, dynamic>? roomsChannelsOverride;
+  int roomsStatus = 200;
+  int unreadStatus = 200;
+  int unreadValue = 0;
+  Duration unreadDelay = Duration.zero;
+
   String _newSession(String prefix) {
     final id = '$prefix-${++_seq}';
     _activeSessions.add(id);
@@ -167,22 +175,79 @@ class MockLaravel {
         return;
       }
       // Plain authenticated GET -> HTML document with the data-page blob.
+      // Custom dashboard props (Home tests) or the default identity page.
+      final homeProps = dashboardPropsOverride;
       res.statusCode = 200;
       res.headers.contentType = ContentType.html;
+      final props = homeProps ??
+          {
+            'auth': {
+              'user': {
+                'id': 42,
+                'name': 'Test User',
+                'email': 'user@qolab.test',
+                'job_title': 'Developer',
+              }
+            }
+          };
       res.write(
           '<html><script data-page="app" type="application/json">${jsonEncode({
         'component': 'Dashboard',
+        'props': props,
+      })}</script></html>');
+      await res.close();
+      return;
+    }
+
+    if (path == '/rooms' && req.method == 'GET') {
+      if (_sessionOf(req) == null) {
+        res.statusCode = 302;
+        res.headers.set(HttpHeaders.locationHeader, '/login');
+        await res.close();
+        return;
+      }
+      res.statusCode = roomsStatus;
+      res.headers.contentType = ContentType.html;
+      res.write(
+          '<html><script data-page="app" type="application/json">${jsonEncode({
+        'component': 'Rooms',
         'props': {
-          'auth': {
-            'user': {
-              'id': 42,
-              'name': 'Test User',
-              'email': 'user@qolab.test',
-              'job_title': 'Developer',
-            }
-          }
+          'channels': roomsChannelsOverride ??
+              {
+                'department': [
+                  {
+                    'id': 50,
+                    'name': 'Engineering Room',
+                    'room_type': 'department',
+                    'room_slug': 'engineering',
+                    'members_count': 12,
+                    'department_id': 7,
+                  }
+                ],
+                'group': [],
+                'company': [],
+                'dm': [],
+              }
         }
       })}</script></html>');
+      await res.close();
+      return;
+    }
+
+    if (path == '/notifications/unread-count' &&
+        req.method == 'GET') {
+      if (_sessionOf(req) == null) {
+        res.statusCode = 302;
+        res.headers.set(HttpHeaders.locationHeader, '/login');
+        await res.close();
+        return;
+      }
+      res.statusCode = unreadStatus;
+      res.headers.contentType = ContentType.json;
+      if (unreadDelay > Duration.zero) {
+        await Future<void>.delayed(unreadDelay);
+      }
+      res.write(jsonEncode({'unread_count': unreadValue}));
       await res.close();
       return;
     }

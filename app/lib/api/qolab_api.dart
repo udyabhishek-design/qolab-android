@@ -111,6 +111,57 @@ class QolabApi {
   /// Validate a restored session: returns the user when still authenticated.
   Future<QolabUser> validateSession() => fetchCurrentUser();
 
+  /// Fetch the dashboard Inertia page (HTML, plain GET — same protocol as
+  /// [fetchCurrentUser]; never send X-Inertia without version negotiation).
+  /// Caller parses props via InertiaPage.parse().
+  Future<String> fetchDashboardHtml() async {
+    final r = await _request('GET', '/dashboard', followRedirects: false);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status,
+          body: r.body,
+          inertiaLocation: r.headers['x-inertia-location']);
+    }
+    return r.body;
+  }
+
+  /// Fetch the rooms Inertia page (HTML, plain GET).
+  Future<String> fetchRoomsHtml() async {
+    final r = await _request('GET', '/rooms', followRedirects: false);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status,
+          body: r.body,
+          inertiaLocation: r.headers['x-inertia-location']);
+    }
+    return r.body;
+  }
+
+  /// JSON unread-notification count. Independent of Home primary content —
+  /// failures must never block rendering (callers treat as "unknown").
+  Future<int> fetchUnreadCount() async {
+    final r = await _request('GET', '/notifications/unread-count',
+        followRedirects: false, expectJson: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status, body: r.body);
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is Map<String, dynamic>) {
+      final count = decoded['unread_count'];
+      if (count is int) return count;
+      if (count is num) return count.toInt();
+    }
+    throw const ApiException(ApiErrorKind.unknown,
+        'Unread count response was not readable.');
+  }
+
   /// 12: server-side logout; caller clears local state afterwards.
   ///
   /// Bounded and ISOLATED from the shared cookie jar: the request uses a
