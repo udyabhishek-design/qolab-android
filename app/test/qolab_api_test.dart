@@ -58,6 +58,40 @@ class MockLaravel {
   int unreadValue = 0;
   Duration unreadDelay = Duration.zero;
 
+  // ── Phase 4A.1 chat knobs ────────────────────────────────────────
+
+  /// Props for GET /chat (Chat/Index Inertia page).
+  Map<String, dynamic>? chatIndexPropsOverride;
+
+  /// Props for GET /chat/channels/{id} (Chat/Show page).
+  Map<String, dynamic>? channelDetailPropsOverride;
+  int channelDetailStatus = 200;
+
+  /// Message pages for GET /chat/channels/{id}/messages: page number →
+  /// JSON body map (data + meta), newest-first like the real endpoint.
+  Map<int, Map<String, dynamic>> messagePages = {};
+  int messagesStatus = 200;
+  Duration messagesDelay = Duration.zero;
+
+  /// Recorded POSTs to /chat/channels/{id}/messages.
+  List<Map<String, String>> messagePosts = [];
+  int messagePostStatus = 201;
+  String Function(String body)? messagePostResponse;
+
+  /// Recorded POST /chat/dm/{userId} + redirect target.
+  List<int> dmPosts = [];
+  int dmRedirectToChannel = 77; // 0 → error redirect back
+
+  /// Recorded PATCH /chat/channels/{id}/read bodies.
+  List<Map<String, dynamic>> readPatches = [];
+
+  /// Response body for GET /chat/unread-counts.
+  Map<String, dynamic> chatUnreadBody = const {'data': {}};
+  int chatUnreadStatus = 200;
+
+  /// Status override for GET /chat (0 = normal 200).
+  int chatStatusOverride = 0;
+
   String _newSession(String prefix) {
     final id = '$prefix-${++_seq}';
     _activeSessions.add(id);
@@ -96,7 +130,9 @@ class MockLaravel {
 
   String get origin => 'http://127.0.0.1:${server.port}';
 
-  Future<void> stop() => server.close(force: true);
+  Future<void> stop() async {
+    await server.close(force: true);
+  }
 
   Future<void> _handle(HttpRequest req) async {
     final res = req.response;
@@ -249,6 +285,173 @@ class MockLaravel {
       }
       res.write(jsonEncode({'unread_count': unreadValue}));
       await res.close();
+      return;
+    }
+
+    // ── Phase 4A.1 chat routes ──────────────────────────────────────
+
+    // Redirect responses closed outside the handler await chain (the
+    // requiresSession() helper can't await — it returns bool synchronously).
+    final List<Future<void>> pendingCloses = [];
+
+    bool requiresSession() {
+      if (_sessionOf(req) == null) {
+        res.statusCode = 302;
+        res.headers.set(HttpHeaders.locationHeader, '/login');
+        pendingCloses.add(res.close());
+        return true;
+      }
+      return false;
+    }
+
+    Future<void> writeJson(Object body, [int status = 200]) async {
+      res.statusCode = status;
+      res.headers.contentType = ContentType.json;
+      res.write(body is String ? body : jsonEncode(body));
+      await res.close();
+    }
+
+    Future<void> writeInertiaPage(
+        String component, Map<String, dynamic> props,
+        [int status = 200]) async {
+      res.statusCode = status;
+      res.headers.contentType = ContentType.html;
+      res.write(
+          '<html><script data-page="app" type="application/json">${jsonEncode({
+        'component': component,
+        'props': props,
+      })}</script></html>');
+      await res.close();
+    }
+
+    if (path == '/chat' && req.method == 'GET') {
+      if (requiresSession()) return;
+      if (chatStatusOverride != 0) {
+        res.statusCode = chatStatusOverride;
+        await res.close();
+        return;
+      }
+      await writeInertiaPage('Chat/Index', chatIndexPropsOverride ??
+          const {
+            'channels': {
+              'dm': [],
+              'group': [],
+              'company': [],
+              'department': [],
+            },
+            'available_users': [],
+            'employees': [],
+          });
+      return;
+    }
+
+    final channelMatch =
+        RegExp(r'^/chat/channels/(\d+)$').firstMatch(path);
+    if (channelMatch != null && req.method == 'GET') {
+      if (requiresSession()) return;
+      if (channelDetailStatus != 200) {
+        res.statusCode = channelDetailStatus;
+        await res.close();
+        return;
+      }
+      await writeInertiaPage('Chat/Show', channelDetailPropsOverride ??
+          const {'channel': null, 'channels': {}, 'employees': []});
+      return;
+    }
+
+    final messagesMatch =
+        RegExp(r'^/chat/channels/(\d+)/messages$').firstMatch(path);
+    if (messagesMatch != null && req.method == 'GET') {
+      if (requiresSession()) return;
+      if (messagesStatus != 200) {
+        await writeJson({'error': 'unavailable'}, messagesStatus);
+        return;
+      }
+      if (messagesDelay > Duration.zero) {
+        await Future<void>.delayed(messagesDelay);
+      }
+      final page = int.tryParse(req.uri.queryParameters['page'] ?? '1') ?? 1;
+      final body =
+          messagePages[page] ?? const {'data': [], 'meta': {}};
+      await writeJson(body);
+      return;
+    }
+
+    if (messagesMatch != null && req.method == 'POST') {
+      if (requiresSession()) return;
+      final raw = await utf8.decoder.bind(req).join();
+      final fields = jsonDecode(raw) as Map<String, dynamic>;
+      messagePosts.add({
+        'body': fields['body']?.toString() ?? '',
+        'csrf': req.headers.value('X-XSRF-TOKEN') ?? '',
+      });
+      if (messagePostStatus != 201) {
+        await writeJson({'message': 'rejected'}, messagePostStatus);
+        return;
+      }
+      final text = fields['body']?.toString() ?? '';
+      await writeJson(
+          messagePostResponse?.call(text) ??
+              {
+                'message': {
+                  'id': 900 + messagePosts.length,
+                  'channel_id':
+                      int.parse(messagesMatch.group(1) ?? '0'),
+                  'user_id': 42,
+                  'body': text,
+                  'type': 'text',
+                  'parent_message_id': null,
+                  'parent': null,
+                  'edited_at': null,
+                  'created_at':
+                      '2026-10-19T12:00:00.000000Z',
+                  'user': {
+                    'id': 42,
+                    'name': 'Test User',
+                    'avatar_path': null,
+                    'job_title': 'Developer',
+                    'department': {'id': 7, 'name': 'Engineering'},
+                    'shift': 'day',
+                    'timezone': 'UTC',
+                  },
+                  'attachments': [],
+                  'replies': [],
+                }
+              },
+          201);
+      return;
+    }
+
+    final readMatch =
+        RegExp(r'^/chat/channels/(\d+)/read$').firstMatch(path);
+    if (readMatch != null && req.method == 'PATCH') {
+      if (requiresSession()) return;
+      final raw = await utf8.decoder.bind(req).join();
+      readPatches.add(
+          jsonDecode(raw) as Map<String, dynamic>);
+      await writeJson({'success': true});
+      return;
+    }
+
+    final dmMatch = RegExp(r'^/chat/dm/(\d+)$').firstMatch(path);
+    if (dmMatch != null && req.method == 'POST') {
+      if (requiresSession()) return;
+      dmPosts.add(int.parse(dmMatch.group(1)!));
+      if (dmRedirectToChannel > 0) {
+        res.statusCode = 302;
+        res.headers.set(
+            HttpHeaders.locationHeader, '/chat/$dmRedirectToChannel');
+      } else {
+        res.statusCode = 302;
+        res.headers.set(HttpHeaders.locationHeader, '/chat');
+      }
+      await res.close();
+      return;
+    }
+
+    if (path == '/chat/unread-counts' && req.method == 'GET') {
+      if (requiresSession()) return;
+      await writeJson(chatUnreadBody, chatUnreadStatus);
       return;
     }
 

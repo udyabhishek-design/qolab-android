@@ -119,7 +119,7 @@ void main() {
     expect(find.text('Department Room'), findsNothing);
   });
 
-  testWidgets('bottom navigation: Home | Chat | Ask Drytis, placeholders '
+  testWidgets('bottom navigation: Home | Chat, Ask Drytis placeholders '
       'open and return, Home data preserved', (tester) async {
     final h = HomeController(api: auth.api);
     h.dashboard.setLoaded(dashFromProps());
@@ -127,14 +127,18 @@ void main() {
     await tester.pumpWidget(wrap(HomeShell(auth: auth, api: auth.api, homeController: h)));
     await tester.pump();
 
-    // Chat placeholder
+    // Chat tab is now the functional Chat list screen (Phase 4A.1).
+    // Dead-port API → it settles on its retryable error state, never a
+    // placeholder and never a crash.
     await tester.tap(find.text('Chat'));
-    await tester.pumpAndSettle();
-    expect(find.text('Coming soon'), findsOneWidget);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Chat'), findsWidgets); // chat heading rendered
+    expect(find.text('Coming soon'), findsNothing); // not a placeholder
 
     // Back to Home — data still there (IndexedStack keeps state).
     await tester.tap(find.text('Home'));
-    await tester.pumpAndSettle();
+    await tester.pump();
     expect(find.text('Sprint Review'), findsOneWidget);
 
     // Ask Drytis placeholder

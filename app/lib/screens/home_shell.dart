@@ -5,6 +5,7 @@ import '../auth/auth_controller.dart';
 import '../home/home_controller.dart';
 import '../home/home_models.dart';
 import '../theme.dart';
+import 'chat_list_screen.dart';
 import 'coming_soon_screen.dart';
 
 /// Phase 3 Home: greeting, Next Meeting, Social Rooms, Department Room,
@@ -57,11 +58,7 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final pages = [
       HomeScreen(auth: widget.auth, home: home),
-      const ComingSoonScreen(
-        title: 'Chat',
-        description: 'Conversations, rooms chat and direct messages.',
-        icon: Icons.chat_bubble_outline_rounded,
-      ),
+      ChatListScreen(auth: widget.auth, api: widget.api),
       const ComingSoonScreen(
         title: 'Ask Drytis',
         description: 'Your AI assistant for meetings, tasks and knowledge.',

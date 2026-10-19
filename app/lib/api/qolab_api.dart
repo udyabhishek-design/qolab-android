@@ -162,6 +162,139 @@ class QolabApi {
         'Unread count response was not readable.');
   }
 
+  // ── Phase 4A.1: Chat endpoints ────────────────────────────────────
+
+  /// GET /chat — Inertia HTML (plain GET, same protocol as /dashboard).
+  Future<String> fetchChatIndexHtml() async {
+    final r = await _request('GET', '/chat', followRedirects: false);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status,
+          body: r.body, inertiaLocation: r.headers['x-inertia-location']);
+    }
+    return r.body;
+  }
+
+  /// GET /chat/channels/{channel} — Inertia HTML channel detail.
+  Future<String> fetchChannelDetailHtml(int channelId) async {
+    final r = await _request('GET', '/chat/channels/$channelId',
+        followRedirects: false);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status == 301 || r.status == 302) {
+      // A room channel redirects to the Room experience — not a chat
+      // destination; surface a conflict rather than following it.
+      throw const ApiException(
+          ApiErrorKind.conflict, 'This conversation is not available in Chat.');
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status,
+          body: r.body, inertiaLocation: r.headers['x-inertia-location']);
+    }
+    return r.body;
+  }
+
+  /// GET /chat/channels/{channel}/messages?page=N — JSON, newest-first.
+  Future<String> fetchMessagesJson(int channelId,
+      {int page = 1, int perPage = 50}) async {
+    final r = await _request(
+        'GET', '/chat/channels/$channelId/messages?page=$page&per_page=$perPage',
+        followRedirects: false, expectJson: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status, body: r.body);
+    }
+    return r.body;
+  }
+
+  /// POST /chat/channels/{channel}/messages — send a text message.
+  /// Returns the raw JSON body ({"message": formatMessage}).
+  Future<String> sendMessageJson(int channelId, String body) async {
+    final r = await _request('POST', '/chat/channels/$channelId/messages',
+        body: _jsonBody({'body': body}),
+        isMutation: true,
+        followRedirects: false,
+        expectJson: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 201 && r.status != 200) {
+      throw apiErrorFromStatus(r.status, body: r.body);
+    }
+    return r.body;
+  }
+
+  /// POST /chat/dm/{user} — start or reopen a DM. Returns the channel id
+  /// parsed from the redirect Location (`/chat/{id}`).
+  Future<int> startDm(int userId) async {
+    final r = await _request('POST', '/chat/dm/$userId',
+        isMutation: true, followRedirects: false);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status == 301 || r.status == 302 || r.status == 303) {
+      final loc = r.location ?? '';
+      // chat.show route: /chat/{channel}
+      final match = RegExp(r'^/chat/(\d+)$').firstMatch(loc);
+      if (match != null) {
+        return int.parse(match.group(1)!);
+      }
+      // Redirect back with an error (self-DM / inactive / cross-company).
+      throw const ApiException(ApiErrorKind.conflict,
+          'This conversation cannot be started.');
+    }
+    if (r.status == 403) {
+      throw const ApiException(ApiErrorKind.conflict,
+          'You can only message users in your company.');
+    }
+    throw apiErrorFromStatus(r.status, body: r.body);
+  }
+
+  /// PATCH /chat/channels/{channel}/read — mark read up to a message.
+  Future<void> markRead(int channelId, int lastReadMessageId) async {
+    final r = await _request('PATCH', '/chat/channels/$channelId/read',
+        body: _jsonBody({'last_read_message_id': lastReadMessageId}),
+        isMutation: true,
+        followRedirects: false,
+        expectJson: true,
+        tolerateFailure: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+  }
+
+  /// GET /chat/unread-counts — JSON {data: {channelId: count}}.
+  Future<Map<int, int>> fetchChatUnreadCounts() async {
+    final r = await _request('GET', '/chat/unread-counts',
+        followRedirects: false, expectJson: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status, body: r.body);
+    }
+    final decoded = jsonDecode(r.body);
+    if (decoded is Map<String, dynamic>) {
+      final data = decoded['data'];
+      if (data is Map) {
+        final out = <int, int>{};
+        data.forEach((k, v) {
+          final id = int.tryParse(k.toString());
+          final n = v is int ? v : (v is num ? v.toInt() : null);
+          if (id != null && n != null) out[id] = n;
+        });
+        return out;
+      }
+    }
+    throw const ApiException(ApiErrorKind.unknown,
+        'Unread counts response was not readable.');
+  }
+
   /// 12: server-side logout; caller clears local state afterwards.
   ///
   /// Bounded and ISOLATED from the shared cookie jar: the request uses a
@@ -322,7 +455,7 @@ class QolabApi {
     );
   }
 
-  String _jsonBody(Map<String, String> fields) => jsonEncode(fields);
+  String _jsonBody(Map<String, Object> fields) => jsonEncode(fields);
 
   ApiException _timeoutException() => const ApiException(
       ApiErrorKind.timeout, 'The connection timed out. Please try again.');
