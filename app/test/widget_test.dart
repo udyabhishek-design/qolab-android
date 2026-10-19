@@ -5,6 +5,7 @@ import 'package:qolab_app/api/qolab_api.dart';
 import 'package:qolab_app/auth/auth_controller.dart';
 import 'package:qolab_app/auth/session_store.dart';
 import 'package:qolab_app/auth_gate.dart';
+import 'package:qolab_app/home/session_socket.dart';
 import 'package:qolab_app/main.dart';
 
 void main() {
@@ -13,7 +14,7 @@ void main() {
     final auth = AuthController(
         api: QolabApi(origin: 'http://127.0.0.1:9'),
         store: MemorySessionStore());
-    await tester.pumpWidget(QolabApp(auth: auth));
+    await tester.pumpWidget(QolabApp(auth: auth, socket: QolabChatSocket(api: auth.api, origin: 'http://127.0.0.1:9')));
     await tester.pump();
     // Before restore resolves we show the splash (or login) — never blank.
     expect(find.byType(Scaffold), findsOneWidget);

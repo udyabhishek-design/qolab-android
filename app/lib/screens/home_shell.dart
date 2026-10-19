@@ -4,6 +4,7 @@ import '../api/qolab_api.dart';
 import '../auth/auth_controller.dart';
 import '../home/home_controller.dart';
 import '../home/home_models.dart';
+import '../home/session_socket.dart';
 import '../theme.dart';
 import 'chat_list_screen.dart';
 import 'coming_soon_screen.dart';
@@ -15,13 +16,16 @@ import 'coming_soon_screen.dart';
 /// per-section loading/empty/error states; unread badge is independent.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.auth, required this.api,
-      this.homeController});
+      this.homeController, this.socket});
 
   final AuthController auth;
   final QolabApi api;
 
   /// Optional pre-built controller (tests seed loaded state directly).
   final HomeController? homeController;
+
+  /// Realtime chat socket (Phase 4A.2). Optional — omitted in tests.
+  final QolabChatSocket? socket;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -58,7 +62,8 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final pages = [
       HomeScreen(auth: widget.auth, home: home),
-      ChatListScreen(auth: widget.auth, api: widget.api),
+      ChatListScreen(
+          auth: widget.auth, api: widget.api, socket: widget.socket?.service),
       const ComingSoonScreen(
         title: 'Ask Drytis',
         description: 'Your AI assistant for meetings, tasks and knowledge.',

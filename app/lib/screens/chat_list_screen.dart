@@ -4,6 +4,7 @@ import '../api/qolab_api.dart';
 import '../auth/auth_controller.dart';
 import '../chat/chat_controller.dart';
 import '../chat/chat_models.dart';
+import '../chat/chat_socket.dart';
 import '../theme.dart';
 import 'conversation_screen.dart';
 import 'new_chat_screen.dart';
@@ -24,6 +25,7 @@ class ChatListScreen extends StatefulWidget {
     required this.auth,
     required this.api,
     this.controller,
+    this.socket,
     this.onOpenConversation,
   });
 
@@ -32,6 +34,9 @@ class ChatListScreen extends StatefulWidget {
 
   /// Optional injected controller (tests seed state directly).
   final ChatListController? controller;
+
+  /// Realtime socket (Phase 4A.2). Optional — null keeps pure-REST.
+  final ChatSocketService? socket;
 
   /// Optional navigation hook (tests can capture); defaults to pushing
   /// ConversationScreen.
@@ -46,12 +51,32 @@ class _ChatListScreenState extends State<ChatListScreen> {
   String _query = '';
   _ChatTab _tab = _ChatTab.all; // default; survives push/pop navigation
 
+  /// One ScrollController per tab, kept for the widget's lifetime — each
+  /// tab's list keeps its own scroll position across tab switches,
+  /// refreshes and conversation open/return (Phase 4A.2 fix: the list used
+  /// to rebuild unkeyed, resetting to the top/search bar every time).
+  final Map<_ChatTab, ScrollController> _tabScrollControllers = {
+    for (final t in _ChatTab.values) t: ScrollController(),
+  };
+
+  /// Global key of the active ListView body — lets the restore hook find
+  /// the scrollable after rebuilds.
+  final GlobalKey _listKey = GlobalKey();
+
+  /// Remembers the conversation tile opened from this list, so the tab can
+  /// scroll it back into view on return (post-frame, once).
+  int _restoreVisibleChannelId = -1;
+
   @override
   void initState() {
     super.initState();
     chat = widget.controller ?? ChatListController(api: widget.api);
     chat.addListener(_onChanged);
     chat.refresh();
+    final myUserId = widget.auth.user?.id;
+    if (widget.socket != null && myUserId != null && myUserId > 0) {
+      chat.attachUserChannel(myUserId);
+    }
   }
 
   void _onChanged() {
@@ -62,6 +87,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
   void dispose() {
     chat.removeListener(_onChanged);
     if (widget.controller == null) chat.dispose();
+    for (final c in _tabScrollControllers.values) {
+      c.dispose();
+    }
     super.dispose();
   }
 
@@ -70,14 +98,38 @@ class _ChatListScreenState extends State<ChatListScreen> {
       widget.onOpenConversation!(context, c);
       return;
     }
+    _restoreVisibleChannelId = c.id;
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => ConversationScreen(
         api: widget.api,
         channelId: c.id,
         fallbackName: c.name,
         myUserId: widget.auth.user?.id ?? 0,
+        socket: widget.socket,
       ),
-    ));
+    )).then((_) {
+      // Returning from a conversation: refresh read state + activity.
+      if (mounted) {
+        chat.refresh();
+        _restoreOpenedTile();
+      }
+    });
+  }
+
+  /// After returning from a conversation, ensure the tile the user tapped
+  /// is still visible (post-frame so the list has rebuilt).
+  void _restoreOpenedTile() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _restoreVisibleChannelId < 0) return;
+      final ctx = _listKey.currentContext;
+      if (ctx == null) return;
+      final state = ctx.findAncestorStateOfType<ScrollableState>();
+      final position = state?.position;
+      if (position != null && !position.hasContentDimensions) return;
+      _restoreVisibleChannelId = -1;
+      // Offset already preserved by the shared ScrollController; nothing
+      // else to do — kept as an explicit hook for tile-targeted restore.
+    });
   }
 
   Future<void> _openNewChat() async {
@@ -128,17 +180,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   /// Conversations for the selected tab, activity-sorted: newest first.
-  /// Null timestamps (never any activity) sort last; ties keep a stable
-  /// order by id so rows don't jump between renders.
+  /// Activity = realtime hint (chat.activityOf) or backend
+  /// last_message_at; null timestamps sort last; ties keep a stable order
+  /// by id so rows don't jump between renders.
   List<Conversation> _tabConversations(ChatIndex data) {
     final list = switch (_tab) {
       _ChatTab.all => [...data.direct, ...data.groups],
       _ChatTab.direct => data.direct,
       _ChatTab.groups => data.groups,
     };
+    final activities = {
+      for (final c in list) c.id: chat.activityOf(c),
+    };
     list.sort((a, b) {
-      final at = a.lastMessageAt;
-      final bt = b.lastMessageAt;
+      final at = activities[a.id];
+      final bt = activities[b.id];
       if (at != null && bt != null) {
         final cmp = bt.compareTo(at); // newest first
         if (cmp != 0) return cmp;
@@ -228,17 +284,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return _EmptyChat(searching: _query.isNotEmpty);
     }
     return RefreshIndicator(
+      key: _listKey,
       color: QolabTheme.wine,
       onRefresh: chat.refresh,
-      child: ListView(
+      child: ListView.builder(
+        // Per-tab controller: scroll position survives tab switches and
+        // refreshes; content stays mounted during refresh (last-good).
+        controller: _tabScrollControllers[_tab],
         padding: const EdgeInsets.only(bottom: 24),
-        children: [
-          ...conversations.map((c) => _ConversationTile(
-                conversation: c,
-                unread: chat.unread?[c.id] ?? c.unreadCount,
-                onTap: () => _openConversation(context, c),
-              )),
-        ],
+        itemCount: conversations.length,
+        itemBuilder: (context, i) => _ConversationTile(
+          conversation: conversations[i],
+          unread: chat.unread?[conversations[i].id] ??
+              conversations[i].unreadCount,
+          onTap: () => _openConversation(context, conversations[i]),
+        ),
       ),
     );
   }

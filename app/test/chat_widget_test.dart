@@ -426,4 +426,142 @@ void main() {
     expect(find.text('Priya Sharma'), findsNothing); // DM hidden → Groups active
     c.dispose();
   });
+
+  scrollRestorationTests();
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// Phase 4A.2 scroll restoration
+// ─────────────────────────────────────────────────────────────────────
+
+void scrollRestorationTests() {
+  group('Chat list scroll restoration', () {
+    final auth = AuthController(
+        api: _FakeChatApi() as QolabApi, store: MemorySessionStore())
+      ..user = const QolabUser(
+          id: 42,
+          name: 'Test User',
+          email: 'user@qolab.test',
+          jobTitle: 'Developer',
+          departmentName: 'Engineering');
+
+    ChatListController manyList() {
+      final c = ChatListController(api: auth.api);
+      final dm = List.generate(
+          30,
+          (i) => {
+                'id': 100 + i,
+                'name': 'Person $i',
+                'type': 'dm',
+                'members_count': 2,
+                'unread_count': 0,
+                'last_message_at': null,
+              });
+      c.index.setLoaded(ChatIndex.fromPage(InertiaPage(
+        component: 'Chat/Index',
+        props: {
+          'channels': {
+            'dm': dm,
+            'group': [],
+            'company': [],
+            'department': [],
+          },
+          'available_users': [],
+          'employees': [],
+        },
+      )));
+      return c;
+    }
+
+    testWidgets('returning from a conversation keeps the scroll position '
+        '(list no longer snaps back to the search bar)', (tester) async {
+      final c = manyList();
+      await tester.pumpWidget(MaterialApp(
+        home: ChatListScreen(
+          auth: auth,
+          api: auth.api,
+          controller: c,
+          onOpenConversation: (ctx, conv) {
+            Navigator.of(ctx).push(MaterialPageRoute(
+                builder: (_) => const Scaffold(body: SizedBox())));
+          },
+        ),
+      ));
+      await tester.pump();
+
+      // Scroll down a screenful.
+      await tester.drag(find.byType(ListView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+      final offsetBefore = _listOffset(tester);
+      expect(offsetBefore, greaterThan(0));
+
+      // "Open" a conversation that is VISIBLE at this scroll position and
+      // come back.
+      final visible = find
+          .descendant(
+              of: find.byType(ListView), matching: find.text('Person 8'))
+          .evaluate()
+          .isNotEmpty
+          ? find.text('Person 8')
+          : find.text('Person 9');
+      await tester.tap(visible);
+      await tester.pumpAndSettle();
+      final nav = tester.state<NavigatorState>(find.byType(Navigator).first);
+      nav.pop();
+      await tester.pumpAndSettle();
+
+      expect(_listOffset(tester), offsetBefore,
+          reason: 'scroll position preserved across open/return');
+      c.dispose();
+    });
+
+    testWidgets('switching tabs and back preserves each tab position',
+        (tester) async {
+      final c = manyList();
+      await tester.pumpWidget(MaterialApp(
+        home: ChatListScreen(auth: auth, api: auth.api, controller: c),
+      ));
+      await tester.pump();
+
+      await tester.drag(find.byType(ListView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+      final offsetBefore = _listOffset(tester);
+
+      await tester.tap(find.text('Direct'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('All'));
+      await tester.pumpAndSettle();
+
+      expect(_listOffset(tester), offsetBefore,
+          reason: 'All tab position restored after tab round-trip');
+      c.dispose();
+    });
+
+    testWidgets('live reordering keeps the visible content mounted '
+        '(no jump to top)', (tester) async {
+      final c = manyList();
+      await tester.pumpWidget(MaterialApp(
+        home: ChatListScreen(auth: auth, api: auth.api, controller: c),
+      ));
+      await tester.pump();
+
+      await tester.drag(find.byType(ListView), const Offset(0, -400));
+      await tester.pumpAndSettle();
+      final offsetBefore = _listOffset(tester);
+
+      // A realtime notification bumps the LAST conversation's activity —
+      // it reorders to the top; the current scroll must not jump.
+      c.debugApplyActivityHint(129);
+      await tester.pumpAndSettle();
+
+      expect(_listOffset(tester), offsetBefore);
+      c.dispose();
+    });
+  });
+}
+
+double _listOffset(WidgetTester tester) {
+  final scrollable = find.descendant(
+      of: find.byType(ListView), matching: find.byType(Scrollable));
+  return tester.state<ScrollableState>(scrollable).position.pixels;
 }

@@ -82,6 +82,12 @@ class MockLaravel {
   List<int> dmPosts = [];
   int dmRedirectToChannel = 77; // 0 → error redirect back
 
+  /// Phase 4A.2 broadcasting-auth knobs.
+  /// Verifies the Laravel contract: FORM-encoded body required; JSON → 403.
+  Map<String, String> allowedChannels = {};
+  List<Map<String, String>> broadcastAuthRequests = [];
+  int broadcastAuthStatus = 0; // 0 = normal handling
+
   /// Recorded PATCH /chat/channels/{id}/read bodies.
   List<Map<String, dynamic>> readPatches = [];
 
@@ -452,6 +458,38 @@ class MockLaravel {
     if (path == '/chat/unread-counts' && req.method == 'GET') {
       if (requiresSession()) return;
       await writeJson(chatUnreadBody, chatUnreadStatus);
+      return;
+    }
+
+    if (path == '/broadcasting/auth' && req.method == 'POST') {
+      final sid = _sessionOf(req);
+      final csrf = req.headers.value('X-XSRF-TOKEN');
+      if (sid == null ||
+          csrf == null ||
+          csrf != Uri.decodeComponent(_xsrfBySession[sid] ?? '')) {
+        await writeJson({'message': 'CSRF token mismatch.'}, 419);
+        return;
+      }
+      final contentType =
+          req.headers.value(HttpHeaders.contentTypeHeader) ?? '';
+      if (!contentType.startsWith('application/x-www-form-urlencoded')) {
+        await writeJson({'message': 'forbidden'}, 403);
+        return;
+      }
+      final raw = await utf8.decoder.bind(req).join();
+      final fields = Uri.splitQueryString(raw);
+      broadcastAuthRequests.add(fields.cast<String, String>());
+      if (broadcastAuthStatus != 0) {
+        res.statusCode = broadcastAuthStatus;
+        await res.close();
+        return;
+      }
+      final channel = fields['channel_name'] ?? '';
+      if (allowedChannels.isNotEmpty && !allowedChannels.containsKey(channel)) {
+        await writeJson({'message': 'forbidden'}, 403);
+        return;
+      }
+      await writeJson({'auth': 'TESTKEY:${fields['socket_id']}sig'});
       return;
     }
 

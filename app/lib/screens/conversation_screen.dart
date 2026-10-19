@@ -4,10 +4,17 @@ import '../api/api_errors.dart';
 import '../api/qolab_api.dart';
 import '../chat/chat_controller.dart';
 import '../chat/chat_models.dart';
+import '../chat/chat_socket.dart';
 import '../theme.dart';
 
 /// A single conversation: message history (chronological, paginated),
 /// composer, send. No call buttons (calling is a later phase).
+///
+/// Phase 4A.2: with [socket] provided, subscribes to the conversation's
+/// private channel — message.sent arrives in real time (deduped against
+/// the REST send response by id), message.edited/deleted update history,
+/// and a reconnect triggers a REST catch-up. Without a socket the screen
+/// behaves exactly like Phase 4A.1 REST chat.
 class ConversationScreen extends StatefulWidget {
   const ConversationScreen({
     super.key,
@@ -15,6 +22,7 @@ class ConversationScreen extends StatefulWidget {
     required this.channelId,
     required this.fallbackName,
     required this.myUserId,
+    this.socket,
     this.controller,
     this.onSessionExpired,
   });
@@ -23,6 +31,10 @@ class ConversationScreen extends StatefulWidget {
   final int channelId;
   final String fallbackName;
   final int myUserId;
+
+  /// Realtime socket (Phase 4A.2). Optional — null keeps pure-REST.
+  final ChatSocketService? socket;
+
   final ConversationController? controller;
   final void Function()? onSessionExpired;
 
@@ -35,6 +47,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final TextEditingController _composer = TextEditingController();
   final ScrollController _scroll = ScrollController();
   String? _sendError;
+  int _lastSeenCount = 0;
 
   @override
   void initState() {
@@ -44,14 +57,35 @@ class _ConversationScreenState extends State<ConversationScreen> {
           api: widget.api,
           channelId: widget.channelId,
           myUserId: widget.myUserId,
+          socket: widget.socket,
           onSessionExpired: widget.onSessionExpired,
         );
     chat.addListener(_onChanged);
     _scroll.addListener(_onScroll);
+    _lastSeenCount = chat.messages.length;
     chat.load();
   }
 
   void _onChanged() {
+    // Realtime message arrived (or send appended) → follow the tail if the
+    // user is already at/near the bottom; otherwise preserve their
+    // reading position (no jump).
+    if (chat.messages.length > _lastSeenCount && _scroll.hasClients) {
+      final atBottom = _scroll.position.pixels >=
+          _scroll.position.maxScrollExtent - 120;
+      if (atBottom) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && _scroll.hasClients) {
+            _scroll.animateTo(
+              _scroll.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+          }
+        });
+      }
+    }
+    _lastSeenCount = chat.messages.length;
     if (mounted) setState(() {});
   }
 
@@ -73,6 +107,17 @@ class _ConversationScreenState extends State<ConversationScreen> {
     _scroll.dispose();
     if (widget.controller == null) chat.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // After the first layout with history, land at the newest message.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _scroll.hasClients) {
+        _scroll.jumpTo(_scroll.position.maxScrollExtent);
+      }
+    });
   }
 
   Future<void> _send() async {

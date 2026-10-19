@@ -127,9 +127,26 @@ class QolabApi {
     return r.body;
   }
 
+  /// POST /broadcasting/auth — Reverb private-channel authorization.
+  /// [formBody] must be form-encoded `channel_name=…&socket_id=…` (a JSON
+  /// body is rejected 403 — verified against the dev backend).
+  Future<String> broadcastingAuth(String formBody) async {    final r = await _request('POST', '/broadcasting/auth',
+        body: formBody,
+        isMutation: true,
+        followRedirects: false,
+        expectJson: true,
+        formEncoded: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status, body: r.body);
+    }
+    return r.body;
+  }
+
   /// Fetch the rooms Inertia page (HTML, plain GET).
-  Future<String> fetchRoomsHtml() async {
-    final r = await _request('GET', '/rooms', followRedirects: false);
+  Future<String> fetchRoomsHtml() async {    final r = await _request('GET', '/rooms', followRedirects: false);
     if (r.redirectedToLogin || r.status == 401) {
       throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
     }
@@ -344,6 +361,7 @@ class QolabApi {
     String? csrfTokenOverride,
     Duration? overallTimeout,
     HttpClient? isolatedClient,
+    bool formEncoded = false,
   }) async {
     // Overall timeout bounds the WHOLE request (connect + headers + body).
     // On timeout the isolated client (when present) is force-closed so the
@@ -362,6 +380,7 @@ class QolabApi {
       cookieHeaderOverride: cookieHeaderOverride,
       csrfTokenOverride: csrfTokenOverride,
       isolatedClient: isolatedClient,
+      formEncoded: formEncoded,
     );
     try {
       return await reqFuture.timeout(bound, onTimeout: () {
@@ -386,6 +405,7 @@ class QolabApi {
     String? cookieHeaderOverride,
     String? csrfTokenOverride,
     HttpClient? isolatedClient,
+    bool formEncoded = false,
   }) async {
     final uri = Uri.parse('$origin$path');
     final client = isolatedClient ?? _client;
@@ -406,7 +426,8 @@ class QolabApi {
     req.headers.set(HttpHeaders.acceptHeader,
         expectJson ? 'application/json' : 'text/html,application/json');
     if (expectJson) {
-      req.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+      req.headers.set(HttpHeaders.contentTypeHeader,
+          formEncoded ? 'application/x-www-form-urlencoded' : 'application/json');
     }
     if (isMutation) {
       final token = csrfTokenOverride ?? csrfToken;

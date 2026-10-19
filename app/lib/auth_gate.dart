@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'api/qolab_api.dart';
 import 'auth/auth_controller.dart';
+import 'home/session_socket.dart';
 import 'screens/home_shell.dart';
 import 'screens/login_screen.dart';
 import 'theme.dart';
@@ -12,13 +13,16 @@ import 'theme.dart';
 /// - signedOut → Login
 /// - offline → recoverable connection state with Retry (session kept)
 class AuthGate extends StatelessWidget {
-  const AuthGate({super.key, required this.auth, this.api});
+  const AuthGate({super.key, required this.auth, this.api, this.socket});
 
   final AuthController auth;
 
   /// API client for the Home data controller. Defaults to the auth
   /// controller's own client — one session, one cookie jar.
   final QolabApi? api;
+
+  /// Realtime chat socket (Phase 4A.2). Optional — tests pass null.
+  final QolabChatSocket? socket;
 
   @override
   Widget build(BuildContext context) {
@@ -30,7 +34,8 @@ class AuthGate extends StatelessWidget {
           case AuthStatus.restoring:
             return const _Splash();
           case AuthStatus.signedIn:
-            return HomeShell(auth: auth, api: api ?? auth.api);
+            return HomeShell(
+                auth: auth, api: api ?? auth.api, socket: socket);
           case AuthStatus.offline:
             return _Offline(auth: auth);
           case AuthStatus.signedOut:
