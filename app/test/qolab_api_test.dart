@@ -82,6 +82,10 @@ class MockLaravel {
   List<int> dmPosts = [];
   int dmRedirectToChannel = 77; // 0 → error redirect back
 
+  /// true → redirect uses the CURRENT backend format /chat/channels/{id}
+  /// (ChannelController::startDm). false → legacy /chat/{id}.
+  bool dmRedirectChannelsPath = false;
+
   /// Phase 4A.2 broadcasting-auth knobs.
   /// Verifies the Laravel contract: FORM-encoded body required; JSON → 403.
   Map<String, String> allowedChannels = {};
@@ -446,7 +450,10 @@ class MockLaravel {
       if (dmRedirectToChannel > 0) {
         res.statusCode = 302;
         res.headers.set(
-            HttpHeaders.locationHeader, '/chat/$dmRedirectToChannel');
+            HttpHeaders.locationHeader,
+            dmRedirectChannelsPath
+                ? '/chat/channels/$dmRedirectToChannel'
+                : '/chat/$dmRedirectToChannel');
       } else {
         res.statusCode = 302;
         res.headers.set(HttpHeaders.locationHeader, '/chat');

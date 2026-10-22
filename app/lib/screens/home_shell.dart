@@ -31,13 +31,14 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   late final HomeController home;
   int _tab = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     home = widget.homeController ??
         HomeController(
           api: widget.api,
@@ -51,8 +52,23 @@ class _HomeShellState extends State<HomeShell> {
     home.refresh();
   }
 
+  /// Foreground-resume synchronization (Phase 4A.2.1): when the app returns
+  /// from background, the OS may have frozen or silently dropped the
+  /// websocket. Force a lightweight check: reconnect if the socket thinks it
+  /// is down; ALWAYS fire a REST catch-up (the socket's onResync consumers
+  /// refresh messages/unread with id-dedupe, so this is safe even when the
+  /// socket is healthy).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    final service = widget.socket?.service;
+    if (service == null) return;
+    service.resume();
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // Only dispose a controller we own (tests manage their own).
     if (widget.homeController == null) home.dispose();
     super.dispose();

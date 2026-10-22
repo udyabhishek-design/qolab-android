@@ -81,6 +81,19 @@ class ChatSocketService {
     _client.disconnect();
   }
 
+  /// Foreground-resume synchronization. If the socket is down, reconnect
+  /// immediately (bypasses the reconnect backoff timer); ALWAYS fire onResync
+  /// so consumers run a REST catch-up (id-dedupe safe, covers events missed
+  /// while the process was backgrounded and the connection was frozen).
+  void resume() {
+    if (_disposed || _listeners.isEmpty) return;
+    if (!isConnected) {
+      _eventSub ??= _client.events.listen(_dispatch);
+      _client.connect(); // desired subscriptions auto-restore on connect
+    }
+    _onResync.add(null);
+  }
+
   void dispose() {
     _disposed = true;
     stop();

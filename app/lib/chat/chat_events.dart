@@ -63,14 +63,25 @@ class ChatEventParser {
   /// Extracts the conversation a notification.received belongs to.
   /// Returns null for notifications that are not chat-message notifications
   /// (meetings, tasks, other channels) or malformed payloads.
+  ///
+  /// Laravel's NotificationReceived::broadcastWith() nests the notification
+  /// payload: {id, type, title, body, data: {channel_id, message_id, ...},
+  /// read_at, created_at}. The channel id lives INSIDE `data` — the
+  /// top-level fallback keeps compatibility with flat payloads.
   ChatNotification? chatNotification(BroadcastEvent e) {
     if (!e.name.endsWith('notification.received')) return null;
-    final channelId = _intFromAny(e.data['channel_id']);
+    var channelId = _intFromAny(e.data['channel_id']);
+    channelId ??= e.data['data'] is Map
+        ? _intFromAny((e.data['data'] as Map)['channel_id'])
+        : null;
     final messageId = _intFromAny(e.data['message_id']);
+    final nestedMessageId = e.data['data'] is Map
+        ? _intFromAny((e.data['data'] as Map)['message_id'])
+        : null;
     if (channelId == null || channelId <= 0) return null;
     return ChatNotification(
       channelId: channelId,
-      messageId: messageId,
+      messageId: messageId ?? nestedMessageId,
     );
   }
 }

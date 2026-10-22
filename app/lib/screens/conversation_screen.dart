@@ -253,8 +253,20 @@ class _ConversationScreenState extends State<ConversationScreen> {
         ),
       );
     }
-    return ListView.builder(
+    return RefreshIndicator(
+      // Merge-refresh: refreshMessages() merges by id and never replaces the
+      // list, so the scroll position is preserved by construction. Only
+      // auto-snap to the new bottom when the user was already there.
+      onRefresh: () async {
+        final wasAtBottom = _isAtBottom();
+        await chat.refreshMessages();
+        if (wasAtBottom && _scroll.hasClients) {
+          _jumpToBottom();
+        }
+      },
+      child: ListView.builder(
       controller: _scroll,
+      physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       itemCount: chat.messages.length + (chat.loadingOlder ? 1 : 0),
       itemBuilder: (context, i) {
@@ -279,7 +291,22 @@ class _ConversationScreenState extends State<ConversationScreen> {
           showSender: isGroupLike && m.userId != widget.myUserId,
         );
       },
+    ),
     );
+  }
+
+  bool _isAtBottom() {
+    if (!_scroll.hasClients) return true;
+    final pos = _scroll.position;
+    return pos.maxScrollExtent - pos.pixels <= 160;
+  }
+
+  void _jumpToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scroll.hasClients) {
+        _scroll.position.jumpTo(_scroll.position.maxScrollExtent);
+      }
+    });
   }
 
   Widget _composerBar() {

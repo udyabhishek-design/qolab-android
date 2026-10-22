@@ -347,13 +347,15 @@ class ConversationController extends ChangeNotifier {
 
   void _onSocketEvent(BroadcastEvent e) {
     if (_disposed) return;
+    _lastSocketEventAt = DateTime.now();
     final incoming = _parser.incomingMessage(e);
     if (incoming != null) {
-      if (incoming.userId != myUserId) {
-        _appendRealtime(incoming);
-      }
-      // Own messages arrive via the send() response; an event copy is a
-      // duplicate and is dropped by the id-dedupe.
+      // Cross-device delivery: a message sent by the SAME account from
+      // another device (e.g. Qolab Web) carries myUserId but MUST still be
+      // appended. The id-dedupe in _appendRealtime already suppresses the
+      // echo of this device's own REST send (send() appends the server
+      // response first).
+      _appendRealtime(incoming);
       return;
     }
     final changed = _parser.messageChanged(e);
@@ -405,15 +407,34 @@ class ConversationController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
-  /// Foreground-only fallback poll for the OPEN conversation while the
-  /// realtime socket is not connected (silent broadcast loss, Reverb/Redis
-  /// down). Conservative interval; a single timer, never accumulated.
+  /// Fallback reconciliation for the OPEN conversation.
+  ///
+  /// - Socket NOT connected (or no socket): poll every 30s — full REST
+  ///   catch-up for silent broadcast loss / Reverb outage.
+  /// - Socket connected but SILENT (no event for 2 minutes — zombie
+  ///   connection, silently dropped subscription): poll every 60s. The
+  ///   merge-dedupe in _loadMessagesPage makes this cheap and idempotent.
+  /// Single timer, never accumulated; refresh() is single-flight via the
+  /// generation counter.
+  DateTime? _lastSocketEventAt;
+
   void _startFallbackPolling() {
     _fallbackPoll?.cancel();
     _fallbackPoll = Timer.periodic(const Duration(seconds: 30), (_) {
       if (_disposed) return;
-      if (socket != null && socket!.isConnected) return; // realtime healthy
-      _loadMessagesPage(reset: true, gen: _generation);
+      final s = socket;
+      if (s == null || !s.isConnected) {
+        _loadMessagesPage(reset: true, gen: _generation);
+        return;
+      }
+      // Connected: only reconcile when the connection has been silent long
+      // enough to suspect a zombie (aligned to a 60s cadence via the 30s
+      // tick).
+      final last = _lastSocketEventAt;
+      if (last != null &&
+          DateTime.now().difference(last) >= const Duration(minutes: 2)) {
+        _loadMessagesPage(reset: true, gen: _generation);
+      }
     });
   }
 
@@ -474,13 +495,28 @@ class ConversationController extends ChangeNotifier {
       notifyListeners();
     }
     try {
-      final json =
-          await api.fetchMessagesJson(channelId, page: _nextPage);
+      // reset == true ALWAYS fetches the NEWEST page (page 1) regardless of
+      // how far the user has paginated into older history — _nextPage then
+      // resumes from page 2 and the merge dedupes any overlap.
+      final page = reset ? 1 : _nextPage;
+      final json = await api.fetchMessagesJson(channelId, page: page);
       if (_disposed || gen != _generation) return;
       final decoded = jsonDecode(json);
       final pageData = MessagesPage.fromJson(decoded);
       if (reset) {
-        messages = pageData.chronological;
+        // MERGE (id-dedupe), never replace: keeps older pages the user
+        // already scrolled up to load, and preserves reading position.
+        final byId = <int, ChatMessage>{};
+        for (final m in messages) {
+          byId[m.id] = m;
+        }
+        // Server copy wins for content (captures edits), existing ids stay
+        // (id-dedupe), and brand-new messages from the refresh are added.
+        for (final m in pageData.chronological) {
+          byId[m.id] = m;
+        }
+        final merged = byId.values.toList()..sort(_compare);
+        messages = merged;
       } else {
         final seen = messages.map((m) => m.id).toSet();
         final older = pageData.chronological
@@ -490,7 +526,12 @@ class ConversationController extends ChangeNotifier {
       }
       hasMore = pageData.currentPage < pageData.lastPage;
       _nextPage = pageData.currentPage + 1;
-      if (reset) _markReadUpToLatest();
+      if (reset) {
+        // Mark-read the newest message (fire-and-forget) after a refresh —
+        // only when the user is effectively at the bottom, i.e. the refresh
+        // didn't land older-than-loaded content (merge keeps everything).
+        _markReadUpToLatest();
+      }
     } on ApiException catch (e) {
       if (_disposed || gen != _generation) return;
       if (e.kind == ApiErrorKind.unauthenticated) {
@@ -521,6 +562,12 @@ class ConversationController extends ChangeNotifier {
 
   /// Refresh after returning to the screen (single-flight via generation).
   Future<void> refresh() => load();
+
+  /// Pull-to-refresh inside the conversation: fetches the newest page and
+  /// MERGES with id-dedupe — older loaded pages and the reading position are
+  /// preserved (never a replace-then-jump).
+  Future<void> refreshMessages() =>
+      _loadMessagesPage(reset: true, gen: _generation);
 
   /// Send a text message. Single-flight prevents duplicate sends from
   /// rapid taps; the server-returned message is appended (deduped by id).

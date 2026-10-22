@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qolab_app/chat/chat_socket.dart';
 import 'package:qolab_app/chat/chat_controller.dart';
@@ -15,6 +17,10 @@ class FakeChatSocket extends Fake implements ChatSocketService {
 
   final _listeners = <String, List<void Function(BroadcastEvent)>>{};
   final resyncers = <void Function()>[];
+  final _resync = StreamController<void>.broadcast();
+
+  /// Fire the resync signal (simulates foreground resume / reconnect).
+  void emitResync() => _resync.add(null);
 
   @override
   VoidCallback subscribe(
@@ -37,7 +43,7 @@ class FakeChatSocket extends Fake implements ChatSocketService {
   }
 
   @override
-  Stream<void> get onResync => const Stream<void>.empty();
+  Stream<void> get onResync => _resync.stream;
 
   @override
   bool isConnected = false;

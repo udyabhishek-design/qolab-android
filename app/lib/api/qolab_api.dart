@@ -256,8 +256,11 @@ class QolabApi {
     }
     if (r.status == 301 || r.status == 302 || r.status == 303) {
       final loc = r.location ?? '';
-      // chat.show route: /chat/{channel}
-      final match = RegExp(r'^/chat/(\d+)$').firstMatch(loc);
+      // chat.show route redirects to /chat/channels/{channel} (current) or
+      // the legacy /chat/{channel} — accept both.
+      final match =
+          RegExp(r'^/chat/channels/(\d+)$').firstMatch(loc) ??
+              RegExp(r'^/chat/(\d+)$').firstMatch(loc);
       if (match != null) {
         return int.parse(match.group(1)!);
       }

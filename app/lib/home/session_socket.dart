@@ -30,4 +30,9 @@ class QolabChatSocket {
   void start() => ensure().start();
   void stop() => _service?.stop();
   void dispose() => _service?.dispose();
+
+  /// Foreground-resume synchronization: reconnect immediately if the socket
+  /// is down, and ALWAYS fire a REST catch-up (onResync) — safe even when
+  /// the socket is healthy because consumers dedupe by id.
+  void resume() => _service?.resume();
 }

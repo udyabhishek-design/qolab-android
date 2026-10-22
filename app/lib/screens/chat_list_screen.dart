@@ -279,26 +279,31 @@ class _ChatListScreenState extends State<ChatListScreen> {
     }
     final data = s.value!;
     final conversations = _filter(_tabConversations(data));
-    if (conversations.isEmpty) {
-      // Query active or this tab simply has no conversations.
-      return _EmptyChat(searching: _query.isNotEmpty);
-    }
+    // Keep the scrollable subtree MOUNTED even when the filtered result is
+    // empty: swapping ListView ↔ empty-state remounts the per-tab
+    // ScrollController and resets the offset to 0 (the "snaps back to the
+    // search bar after searching" bug). The empty state renders as a single
+    // list row instead.
+    final showEmpty = conversations.isEmpty;
     return RefreshIndicator(
       key: _listKey,
       color: QolabTheme.wine,
       onRefresh: chat.refresh,
       child: ListView.builder(
-        // Per-tab controller: scroll position survives tab switches and
-        // refreshes; content stays mounted during refresh (last-good).
+        // Per-tab controller: scroll position survives tab switches,
+        // refreshes, and search transitions (list never unmounts).
         controller: _tabScrollControllers[_tab],
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.only(bottom: 24),
-        itemCount: conversations.length,
-        itemBuilder: (context, i) => _ConversationTile(
-          conversation: conversations[i],
-          unread: chat.unread?[conversations[i].id] ??
-              conversations[i].unreadCount,
-          onTap: () => _openConversation(context, conversations[i]),
-        ),
+        itemCount: showEmpty ? 1 : conversations.length,
+        itemBuilder: (context, i) => showEmpty
+            ? _EmptyChat(searching: _query.isNotEmpty)
+            : _ConversationTile(
+                conversation: conversations[i],
+                unread: chat.unread?[conversations[i].id] ??
+                    conversations[i].unreadCount,
+                onTap: () => _openConversation(context, conversations[i]),
+              ),
       ),
     );
   }
@@ -521,26 +526,31 @@ class _EmptyChat extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.chat_bubble_outline_rounded,
-                size: 40, color: QolabTheme.wineFaded),
-            const SizedBox(height: 12),
-            Text(
-              searching ? 'No conversations match' : 'No conversations yet',
-              style: QolabTheme.title,
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Start a new conversation with the pencil button.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: QolabTheme.textSoft, fontSize: 13.5),
-            ),
-          ],
+    // Sized as a list row so the surrounding ListView can render the empty
+    // state WITHOUT unmounting (scroll position survives search clearing).
+    return SizedBox(
+      height: 320,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.chat_bubble_outline_rounded,
+                  size: 40, color: QolabTheme.wineFaded),
+              const SizedBox(height: 12),
+              Text(
+                searching ? 'No conversations match' : 'No conversations yet',
+                style: QolabTheme.title,
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'Start a new conversation with the pencil button.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: QolabTheme.textSoft, fontSize: 13.5),
+              ),
+            ],
+          ),
         ),
       ),
     );

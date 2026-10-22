@@ -107,6 +107,7 @@ class ReverbClient {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _attempt = 0;
+    _clearAuthRetryState();
     (_socket as dynamic)?.close();
     _socket = null;
     socketId = null;
@@ -127,8 +128,22 @@ class ReverbClient {
     _socket = null;
     socketId = null;
     _subscribed.clear();
+    _clearAuthRetryState();
     _setState(ReverbConnectionState.disconnected);
     _scheduleReconnect();
+  }
+
+  /// Fresh retry budget AND fresh blacklist on every new connection: a
+  /// channel that exhausted retries on a dead socket is retried once the
+  /// socket is re-established (permanent-403 channels are already removed
+  /// from desired subscriptions and are not re-subscribed).
+  void _clearAuthRetryState() {
+    for (final t in _authRetryTimers.values) {
+      t.cancel();
+    }
+    _authRetryTimers.clear();
+    _authRetries.clear();
+    authFailed.clear();
   }
 
   void _scheduleReconnect() {
@@ -261,17 +276,45 @@ class ReverbClient {
       try {
         final authResult = await auth.authorize(channel: channel, socketId: sid);
         data['auth'] = authResult;
-      } on BroadcastAuthException {
-        if (!_disposed) {
+      } on BroadcastAuthException catch (e) {
+        if (_disposed) return;
+        // Permanent authorization failures (403-style) never retry; TRANSIENT
+        // failures (419 CSRF rotation, 5xx, network) retry a bounded number
+        // of times on THIS connection, and always retry once on the next
+        // reconnect — a single hiccup must not blacklist a channel forever.
+        final permanent = e.status != null && e.status! < 500 && e.status != 419;
+        if (permanent) {
           authFailed.add(channel);
           _desiredSubscriptions.remove(channel);
           _stateChanges.add(state); // notify listeners to re-read authFailed
+          return;
         }
+        final attempts = _authRetries.update(channel, (v) => v + 1,
+            ifAbsent: () => 1);
+        if (attempts > maxAuthRetries) {
+          authFailed.add(channel);
+          _stateChanges.add(state);
+          return; // stays in desired: retried on next reconnect
+        }
+        final delay = Duration(seconds: attempts); // 1s, 2s, 3s…
+        _authRetryTimers[channel]?.cancel();
+        _authRetryTimers[channel] = Timer(delay, () {
+          _authRetryTimers.remove(channel);
+          if (!_disposed && _desiredSubscriptions.contains(channel)) {
+            _subscribeOnSocket(channel);
+          }
+        });
         return;
       }
+      _authRetries.remove(channel);
     }
     _send({'event': 'pusher:subscribe', 'data': data});
   }
+
+  /// Bounded per-connection retries for TRANSIENT auth failures.
+  static const maxAuthRetries = 3;
+  final Map<String, int> _authRetries = {};
+  final Map<String, Timer> _authRetryTimers = {};
 }
 
 enum ReverbConnectionState { disconnected, connecting, connected }
