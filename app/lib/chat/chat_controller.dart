@@ -111,6 +111,10 @@ class ChatListController extends ChangeNotifier {
         refresh();
       }
     });
+    // 4A.2.2: eager unread load — a notification arriving before the counts
+    // are materialized would otherwise be dropped (the race fix in
+    // _bumpUnread covers the gap, but starting early shrinks it).
+    _loadUnread(++_generation);
     _startBackgroundTimers();
   }
 
@@ -129,7 +133,6 @@ class ChatListController extends ChangeNotifier {
     _bumpUnread(n.channelId);
     if (!_disposed) notifyListeners();
   }
-
   Conversation? _findConversation(int channelId) {
     final data = index.value;
     if (data == null) return null;
@@ -144,8 +147,28 @@ class ChatListController extends ChangeNotifier {
 
   void _bumpUnread(int channelId) {
     final current = unread?[channelId];
-    if (current == null) return; // unknown count stays unknown
+    if (current == null) {
+      // 4A.2.2 race fix: the unread map isn't loaded (or this channel is
+      // absent — e.g. fresh conversation) — a silent drop would lose the
+      // increment until the next poll. Reconcile with the server instead:
+      // single-flight, generation-guarded.
+      if (!_unreadReconcileInFlight) _reconcileUnread();
+      return;
+    }
     unread = {...unread!, channelId: current + 1};
+  }
+
+  bool _unreadReconcileInFlight = false;
+
+  /// Fetch authoritative unread counts from the server (bounded, no overlap).
+  Future<void> _reconcileUnread() async {
+    if (_unreadReconcileInFlight || _disposed) return;
+    _unreadReconcileInFlight = true;
+    try {
+      await _loadUnread(++_generation);
+    } finally {
+      _unreadReconcileInFlight = false;
+    }
   }
 
   /// Latest activity time for a conversation: real-time hint wins when
@@ -333,9 +356,13 @@ class ConversationController extends ChangeNotifier {
 
   /// Subscribe BEFORE loading history so no event can fall in the gap
   /// between subscribe and REST fetch; the id-dedupe absorbs overlaps.
+  /// 4A.2.2: attach exactly ONCE per controller lifetime — load() runs on
+  /// init AND on every refresh/resume; re-subscribing each time leaked a
+  /// ref-count and a resync listener per refresh (duplicate event handling).
   void _attachRealtime() {
     final s = socket;
     if (s == null) return;
+    if (_eventCancel != null) return; // already attached
     _eventCancel = s.subscribe('channel.$channelId', _onSocketEvent);
     _resyncSub = s.onResync.listen((_) {
       if (!_disposed) _loadMessagesPage(reset: true, gen: _generation);
@@ -377,6 +404,7 @@ class ConversationController extends ChangeNotifier {
       messages = [...messages.sublist(0, at), msg, ...messages.sublist(at)];
     }
     _markReadUpToLatest();
+    _diagAppend('conversation $channelId: appended message ${msg.id}');
     if (!_disposed) notifyListeners();
   }
 
@@ -617,6 +645,13 @@ class ConversationController extends ChangeNotifier {
     _resyncSub = null;
     super.dispose();
   }
+}
+
+void _diagAppend(String message) {
+  assert(() {
+    debugPrint(message);
+    return true;
+  }());
 }
 
 String _friendly(ApiException e) {

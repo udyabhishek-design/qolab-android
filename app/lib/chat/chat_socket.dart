@@ -81,13 +81,19 @@ class ChatSocketService {
     _client.disconnect();
   }
 
-  /// Foreground-resume synchronization. If the socket is down, reconnect
-  /// immediately (bypasses the reconnect backoff timer); ALWAYS fire onResync
-  /// so consumers run a REST catch-up (id-dedupe safe, covers events missed
-  /// while the process was backgrounded and the connection was frozen).
+  /// Foreground-resume synchronization. If the socket is down AND the app
+  /// still wants subscriptions, reconnect immediately (bypasses the
+  /// reconnect backoff timer). ALWAYS fire onResync so consumers run a REST
+  /// catch-up (id-dedupe safe, covers events missed while the process was
+  /// backgrounded and the connection was frozen) — even when no consumer is
+  /// currently subscribed (4A.2.2: the Chat tab may not be mounted yet, but
+  /// controllers listening on onResync alone still catch up).
+  ///
+  /// No WebSocket is opened when nothing is desired: with zero tracked
+  /// subscriptions a connection would be pure overhead.
   void resume() {
-    if (_disposed || _listeners.isEmpty) return;
-    if (!isConnected) {
+    if (_disposed) return;
+    if (!isConnected && _client.hasDesiredSubscriptions) {
       _eventSub ??= _client.events.listen(_dispatch);
       _client.connect(); // desired subscriptions auto-restore on connect
     }

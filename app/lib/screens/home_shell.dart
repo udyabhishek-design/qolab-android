@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../api/qolab_api.dart';
 import '../auth/auth_controller.dart';
+import '../chat/chat_controller.dart' show ChatListController;
 import '../home/home_controller.dart';
 import '../home/home_models.dart';
 import '../home/session_socket.dart';
@@ -14,15 +15,20 @@ import 'coming_soon_screen.dart';
 ///
 /// Data: HomeController fetches /dashboard and /rooms in parallel with
 /// per-section loading/empty/error states; unread badge is independent.
+///
+/// Phase 4A.2.2: the Chat tab's [ChatListController] is owned HERE (not
+/// inside ChatListScreen) so the bottom-nav unread badge can observe it
+/// from every tab. Screens with an injected controller never dispose it.
 class HomeShell extends StatefulWidget {
   const HomeShell({super.key, required this.auth, required this.api,
-      this.homeController, this.socket});
+      this.homeController, this.chatController, this.socket});
 
   final AuthController auth;
   final QolabApi api;
 
-  /// Optional pre-built controller (tests seed loaded state directly).
+  /// Optional pre-built controllers (tests seed loaded state directly).
   final HomeController? homeController;
+  final ChatListController? chatController;
 
   /// Realtime chat socket (Phase 4A.2). Optional — omitted in tests.
   final QolabChatSocket? socket;
@@ -33,6 +39,7 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   late final HomeController home;
+  late final ChatListController chat;
   int _tab = 0;
 
   @override
@@ -49,7 +56,25 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             widget.auth.restore();
           },
         );
+    // 4A.2.2: shell-owned chat controller — the socket is wired at
+    // construction (the real-time user-channel subscription depends on it)
+    // and the badge observes unread state from every tab.
+    chat = widget.chatController ??
+        ChatListController(api: widget.api, socket: widget.socket?.service);
+    // 4A.2.2: rebuild the bottom nav (badge) whenever the chat controller
+    // notifies — unread counts change on message arrival / mark-read /
+    // resync.
+    chat.addListener(_onChatChanged);
+    final myUserId = widget.auth.user?.id;
+    if (widget.socket?.service != null && myUserId != null && myUserId > 0) {
+      chat.attachUserChannel(myUserId);
+    }
     home.refresh();
+    chat.refresh();
+  }
+
+  void _onChatChanged() {
+    if (mounted) setState(() {}); // badge reacts to unread changes
   }
 
   /// Foreground-resume synchronization (Phase 4A.2.1): when the app returns
@@ -69,9 +94,22 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    chat.removeListener(_onChatChanged);
     // Only dispose a controller we own (tests manage their own).
     if (widget.homeController == null) home.dispose();
+    if (widget.chatController == null) chat.dispose();
     super.dispose();
+  }
+
+  /// Total unread messages for the Chat tab badge (null = unknown → hidden).
+  int? get _chatUnread {
+    final map = chat.unread;
+    if (map == null) return null;
+    var total = 0;
+    for (final c in map.values) {
+      total += c;
+    }
+    return total;
   }
 
   @override
@@ -79,7 +117,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     final pages = [
       HomeScreen(auth: widget.auth, home: home),
       ChatListScreen(
-          auth: widget.auth, api: widget.api, socket: widget.socket?.service),
+          auth: widget.auth,
+          api: widget.api,
+          controller: chat,
+          socket: widget.socket?.service),
       const ComingSoonScreen(
         title: 'Ask Drytis',
         description: 'Your AI assistant for meetings, tasks and knowledge.',
@@ -98,6 +139,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           setState(() => _tab = i);
           if (i == 0 && _homeIsStale) home.refresh();
         },
+        chatUnread: _chatUnread,
       ),
     );
   }
@@ -106,10 +148,17 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 }
 
 class _BottomNav extends StatelessWidget {
-  const _BottomNav({required this.current, required this.onChanged});
+  const _BottomNav({
+    required this.current,
+    required this.onChanged,
+    this.chatUnread,
+  });
 
   final int current;
   final ValueChanged<int> onChanged;
+
+  /// Total unread chat messages (Phase 4A.2.2). Null = unknown → no badge.
+  final int? chatUnread;
 
   @override
   Widget build(BuildContext context) {
@@ -125,10 +174,85 @@ class _BottomNav extends StatelessWidget {
           child: Row(
             children: [
               _item(0, 'Home', Icons.home_outlined, Icons.home_rounded),
-              _item(1, 'Chat', Icons.chat_bubble_outline_rounded,
-                  Icons.chat_bubble_rounded),
+              _chatItem(),
               _item(2, 'Ask Drytis', Icons.auto_awesome_outlined,
                   Icons.auto_awesome),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _chatItem() {
+    final count = chatUnread;
+    final showBadge = count != null && count > 0;
+    return Expanded(
+      child: Semantics(
+        label: showBadge
+            ? 'Chat, ${count > 99 ? '99+' : count} unread'
+            : 'Chat',
+        button: true,
+        child: InkWell(
+          onTap: () => onChanged(1),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Same badge pattern as _NotificationBell (Home header):
+              // wine pill on canvas border, IgnorePointer so taps reach
+              // the nav item, clipped-safe Stack.
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Icon(
+                    current == 1
+                        ? Icons.chat_bubble_rounded
+                        : Icons.chat_bubble_outline_rounded,
+                    size: 22,
+                    color:
+                        current == 1 ? QolabTheme.wine : QolabTheme.textSoft,
+                  ),
+                  if (showBadge)
+                    Positioned(
+                      key: const ValueKey('chat-nav-badge'),
+                      right: -8,
+                      top: -4,
+                      child: IgnorePointer(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 4, vertical: 1),
+                          constraints:
+                              const BoxConstraints(minWidth: 15, minHeight: 13),
+                          alignment: Alignment.center,
+                          decoration: BoxDecoration(
+                            color: QolabTheme.wine,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(
+                                color: QolabTheme.canvas, width: 1.2),
+                          ),
+                          child: Text(
+                            count > 99 ? '99+' : '$count',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w700,
+                              height: 1.1,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                'Chat',
+                style: TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: current == 1 ? FontWeight.w600 : FontWeight.w400,
+                  color: current == 1 ? QolabTheme.wine : QolabTheme.textSoft,
+                ),
+              ),
             ],
           ),
         ),

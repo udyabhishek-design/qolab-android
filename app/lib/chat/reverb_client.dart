@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
 /// Minimal Laravel Reverb (Pusher protocol 7) client over dart:io WebSocket.
 ///
 /// Handles: connection_established (socket_id capture), subscribe (with
@@ -50,8 +52,15 @@ class ReverbClient {
   /// Channels whose authorization failed — never retried automatically.
   final Set<String> authFailed = {};
 
-  /// Subscriptions to restore after a reconnect.
+  /// Subscriptions to restore after a reconnect. Duplicates must not
+  /// accumulate (4A.2.2): repeated subscribe() for one channel shares one
+  /// desired entry — otherwise every reconnect sends N subscribe frames and
+  /// ref-count teardown under-subtracts.
   final List<String> _desiredSubscriptions = [];
+
+  /// Whether any channel is currently desired (tracked). Used by callers to
+  /// decide whether a WebSocket connection is worth opening.
+  bool get hasDesiredSubscriptions => _desiredSubscriptions.isNotEmpty;
 
   Timer? _reconnectTimer;
   int _attempt = 0;
@@ -125,6 +134,7 @@ class ReverbClient {
 
   void _onDisconnected() {
     if (_disposed) return;
+    _diag('reverb: disconnected; reconnect scheduled only if subscriptions desired');
     _socket = null;
     socketId = null;
     _subscribed.clear();
@@ -216,6 +226,7 @@ class ReverbClient {
         final wasReconnect = _attempt > 0;
         _attempt = 0;
         _setState(ReverbConnectionState.connected);
+        _diag('reverb: connected${wasReconnect ? ' (reconnect)' : ''}');
         // Restore desired subscriptions (auth + subscribe) on the new socket.
         _restoreSubscriptions();
         if (wasReconnect) _resubscribed.add(null);
@@ -228,7 +239,10 @@ class ReverbClient {
       case 'pusher_internal:subscription_succeeded':
         // Server confirmed the subscribe: mark it live (the poll-based
         // integration check and tests read subscribedChannels).
-        if (channel is String) _subscribed.add(channel);
+        if (channel is String) {
+          _subscribed.add(channel);
+          _diag('reverb: subscribed $channel');
+        }
         break;
       case 'pusher_internal:member_added':
       case 'pusher_internal:member_removed':
@@ -236,6 +250,7 @@ class ReverbClient {
       default:
         if (event is String && channel is String) {
           _subscribed.add(channel);
+          _diag('reverb: event $event on $channel');
           _events.add(BroadcastEvent(
             channel: channel,
             name: event,
@@ -251,9 +266,12 @@ class ReverbClient {
     }
   }
 
-  /// Track what the app WANTS subscribed (survives reconnects).
+  /// Track what the app WANTS subscribed (survives reconnects). Idempotent:
+  /// a channel already tracked is not added twice.
   void trackSubscription(String channel) {
-    _desiredSubscriptions.add(channel);
+    if (!_desiredSubscriptions.contains(channel)) {
+      _desiredSubscriptions.add(channel);
+    }
     authFailed.remove(channel);
     if (isConnected) _subscribeOnSocket(channel);
   }
@@ -278,6 +296,7 @@ class ReverbClient {
         data['auth'] = authResult;
       } on BroadcastAuthException catch (e) {
         if (_disposed) return;
+        _diag('reverb: auth FAILED $channel (status=${e.status})');
         // Permanent authorization failures (403-style) never retry; TRANSIENT
         // failures (419 CSRF rotation, 5xx, network) retry a bounded number
         // of times on THIS connection, and always retry once on the next
@@ -309,6 +328,16 @@ class ReverbClient {
       _authRetries.remove(channel);
     }
     _send({'event': 'pusher:subscribe', 'data': data});
+    _diag('reverb: subscribe sent $channel');
+  }
+
+  /// Debug-gated diagnostic log (channel/event names only — never
+  /// credentials, tokens, auth strings, or message bodies).
+  void _diag(String message) {
+    assert(() {
+      debugPrint(message);
+      return true;
+    }());
   }
 
   /// Bounded per-connection retries for TRANSIENT auth failures.

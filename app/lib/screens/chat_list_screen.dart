@@ -70,7 +70,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   void initState() {
     super.initState();
-    chat = widget.controller ?? ChatListController(api: widget.api);
+    chat = widget.controller ??
+        ChatListController(api: widget.api, socket: widget.socket);
     chat.addListener(_onChanged);
     chat.refresh();
     final myUserId = widget.auth.user?.id;
