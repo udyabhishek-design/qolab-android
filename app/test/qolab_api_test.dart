@@ -67,6 +67,17 @@ class MockLaravel {
   Map<String, dynamic>? channelDetailPropsOverride;
   int channelDetailStatus = 200;
 
+  /// 4A.2.3 regression knob: when non-empty, GET /chat/channels/{id}
+  /// for an UNAUTHENTICATED request redirects to this Location instead
+  /// of the default relative '/login'. Mirrors Development, where APP_URL
+  /// makes Laravel emit 'https://host/login' ABSOLUTE redirect targets.
+  String? unauthenticatedChannelRedirect;
+
+  /// 4A.2.3 regression knob: override Location for a channel DETAIL
+  /// redirect regardless of auth state (room-redirect / proxy cases).
+  String? channelDetailRedirect;
+
+
   /// Message pages for GET /chat/channels/{id}/messages: page number →
   /// JSON body map (data + meta), newest-first like the real endpoint.
   Map<int, Map<String, dynamic>> messagePages = {};
@@ -358,7 +369,20 @@ class MockLaravel {
     final channelMatch =
         RegExp(r'^/chat/channels/(\d+)$').firstMatch(path);
     if (channelMatch != null && req.method == 'GET') {
-      if (requiresSession()) return;
+      if (channelDetailRedirect != null) {
+        res.statusCode = 301;
+        res.headers.set(
+            HttpHeaders.locationHeader, channelDetailRedirect!);
+        pendingCloses.add(res.close());
+        return;
+      }
+      if (_sessionOf(req) == null) {
+        res.statusCode = 302;
+        res.headers.set(HttpHeaders.locationHeader,
+            unauthenticatedChannelRedirect ?? '/login');
+        pendingCloses.add(res.close());
+        return;
+      }
       if (channelDetailStatus != 200) {
         res.statusCode = channelDetailStatus;
         await res.close();

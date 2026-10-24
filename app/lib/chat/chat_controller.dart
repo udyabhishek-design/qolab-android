@@ -467,10 +467,15 @@ class ConversationController extends ChangeNotifier {
   }
 
   /// Initial load / refresh: channel detail + first (newest) history page.
+  /// Retry (via [refresh]) re-issues a genuine new request — [load] always
+  /// fetches fresh network state; it never replays cached sections.
   Future<void> load() async {
     final gen = ++_generation;
     _attachRealtime();
-    if (!detail.hasValue) {
+    // A previous failed load may have left detail in `error` — clear it so
+    // Retry visibly transitions to loading (and stale error text does not
+    // linger under a successful reload).
+    if (detail.state == SectionState.error) {
       detail = Section<Conversation>.loading();
       notifyListeners();
     }
@@ -664,8 +669,17 @@ String _friendly(ApiException e) {
       return 'Too many requests — wait a moment and retry.';
     case ApiErrorKind.server:
       return 'The server had a problem. Please retry.';
-    case ApiErrorKind.conflict:
+    case ApiErrorKind.csrfExpired:
+      return 'Your session expired. Please sign in again.';
+    case ApiErrorKind.unauthenticated:
+      return 'Your session has expired. Please sign in again.';
+    case ApiErrorKind.forbidden:
       return 'You do not have access to this conversation.';
+    case ApiErrorKind.conflict:
+      // 4A.2.3: the only remaining conflict path is a genuine redirect to
+      // the Room experience — not a permissions problem, so never claim
+      // "no access".
+      return 'This conversation is not available in Chat.';
     default:
       return 'Something went wrong. Please try again later.';
   }

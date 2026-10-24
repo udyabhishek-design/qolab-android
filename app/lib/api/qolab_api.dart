@@ -27,7 +27,22 @@ class ApiResult {
 
   bool get redirectedToLogin =>
       (status == 301 || status == 302 || status == 303 || status == 307 || status == 308) &&
-      (location == '/login' || location?.startsWith('/login') == true);
+      _isLoginLocation(location);
+
+  /// Laravel emits redirect Locations as ABSOLUTE URLs when APP_URL is
+  /// configured (verified on Development: `Location:
+  /// https://host/login`). A relative-only check misclassified session
+  /// expiry as an unrelated redirect → bogus "You do not have access to
+  /// this conversation." Normalize scheme://host/login to /login first.
+  static bool _isLoginLocation(String? location) {
+    if (location == null) return false;
+    var path = location;
+    final uri = Uri.tryParse(location);
+    if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
+      path = uri.path.isEmpty ? '/' : uri.path;
+    }
+    return path == '/login' || path.startsWith('/login');
+  }
 }
 
 /// HTTP + CSRF + session client for the Qolab Laravel backend (Option A:
@@ -204,14 +219,40 @@ class QolabApi {
     if (r.status == 301 || r.status == 302) {
       // A room channel redirects to the Room experience — not a chat
       // destination; surface a conflict rather than following it.
-      throw const ApiException(
-          ApiErrorKind.conflict, 'This conversation is not available in Chat.');
+      // 4A.2.3: verify the destination is actually a room route. Other
+      // redirects are protocol surprises (proxies, canonical hosts) —
+      // never present them as "no access".
+      if (_isRoomLocation(r.location)) {
+        throw const ApiException(
+            ApiErrorKind.conflict, 'This conversation is not available in Chat.');
+      }
+      throw ApiException(ApiErrorKind.server,
+          'Unexpected response from the server. Please try again.');
+    }
+    if (r.status == 403) {
+      throw const ApiException(ApiErrorKind.forbidden,
+          'You do not have access to this conversation.');
     }
     if (r.status != 200) {
       throw apiErrorFromStatus(r.status,
           body: r.body, inertiaLocation: r.headers['x-inertia-location']);
     }
     return r.body;
+  }
+
+  /// A redirect to a room route (any form: /rooms/…, /room/…, or the
+  /// absolute-URL equivalent with APP_URL configured).
+  static bool _isRoomLocation(String? location) {
+    if (location == null) return false;
+    var path = location;
+    final uri = Uri.tryParse(location);
+    if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
+      path = uri.path.isEmpty ? '/' : uri.path;
+    }
+    return path == '/rooms' ||
+        path.startsWith('/rooms/') ||
+        path == '/room' ||
+        path.startsWith('/room/');
   }
 
   /// GET /chat/channels/{channel}/messages?page=N — JSON, newest-first.
@@ -269,7 +310,7 @@ class QolabApi {
           'This conversation cannot be started.');
     }
     if (r.status == 403) {
-      throw const ApiException(ApiErrorKind.conflict,
+      throw const ApiException(ApiErrorKind.forbidden,
           'You can only message users in your company.');
     }
     throw apiErrorFromStatus(r.status, body: r.body);

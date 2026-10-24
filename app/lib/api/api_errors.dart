@@ -28,6 +28,11 @@ enum ApiErrorKind {
   /// or invalid. Stored credentials must be cleared.
   unauthenticated,
 
+  /// 403 — authenticated but not permitted. Distinct from
+  /// [unauthenticated] so callers never blur "session expired" into
+  /// "no access".
+  forbidden,
+
   /// 409 with X-Inertia-Location: Inertia asset-version mismatch.
   inertiaVersionMismatch,
 
@@ -86,6 +91,9 @@ ApiException apiErrorFromStatus(int status,
     case 429:
       return const ApiException(ApiErrorKind.rateLimited,
           'Too many attempts. Please wait a minute and try again.');
+    case 403:
+      return const ApiException(ApiErrorKind.forbidden,
+          'You do not have access to this conversation.');
     case 500:
     case 502:
     case 503:
