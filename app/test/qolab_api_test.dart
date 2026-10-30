@@ -65,6 +65,9 @@ class MockLaravel {
 
   /// Props for GET /chat/channels/{id} (Chat/Show page).
   Map<String, dynamic>? channelDetailPropsOverride;
+
+  /// Optional hook fired on every messages-page GET (poll assertions).
+  void Function()? onMessagesFetched;
   int channelDetailStatus = 200;
 
   /// 4A.2.3 regression knob: when non-empty, GET /chat/channels/{id}
@@ -405,6 +408,7 @@ class MockLaravel {
         await Future<void>.delayed(messagesDelay);
       }
       final page = int.tryParse(req.uri.queryParameters['page'] ?? '1') ?? 1;
+      onMessagesFetched?.call();
       final body =
           messagePages[page] ?? const {'data': [], 'meta': {}};
       await writeJson(body);

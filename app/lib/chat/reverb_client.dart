@@ -226,7 +226,8 @@ class ReverbClient {
         final wasReconnect = _attempt > 0;
         _attempt = 0;
         _setState(ReverbConnectionState.connected);
-        _diag('reverb: connected${wasReconnect ? ' (reconnect)' : ''}');
+        _diag('reverb: connected${wasReconnect ? ' (reconnect)' : ''} '
+            '(desired=${_desiredSubscriptions.length})');
         // Restore desired subscriptions (auth + subscribe) on the new socket.
         _restoreSubscriptions();
         if (wasReconnect) _resubscribed.add(null);

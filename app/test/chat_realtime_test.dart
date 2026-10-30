@@ -48,6 +48,10 @@ class FakeChatSocket extends Fake implements ChatSocketService {
   @override
   bool isConnected = false;
 
+  /// Channels whose authorization failed permanently (wire naming: no
+  /// private- prefix) — mirrors ChatSocketService.authFailedChannels.
+  Set<String> authFailedChannels = {};
+
   @override
   Set<String> get subscribedChannels => _listeners.keys.toSet();
 

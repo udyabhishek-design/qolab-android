@@ -442,16 +442,25 @@ class ConversationController extends ChangeNotifier {
   /// - Socket connected but SILENT (no event for 2 minutes — zombie
   ///   connection, silently dropped subscription): poll every 60s. The
   ///   merge-dedupe in _loadMessagesPage makes this cheap and idempotent.
-  /// Single timer, never accumulated; refresh() is single-flight via the
-  /// generation counter.
+  ///
+  /// 4A.2.4: _lastSocketEventAt now STARTS at attach time (never null) —
+  /// a connection that delivers NOTHING used to disable the zombie check
+  /// forever (last == null), which matched the reported "messages only
+  /// appear after manual refresh". A channel whose authorization failed
+  /// permanently is treated as not-connected (30s poll) — the socket being
+  /// up says nothing about THIS channel's delivery.
   DateTime? _lastSocketEventAt;
 
   void _startFallbackPolling() {
+    _lastSocketEventAt ??= DateTime.now();
     _fallbackPoll?.cancel();
     _fallbackPoll = Timer.periodic(const Duration(seconds: 30), (_) {
       if (_disposed) return;
       final s = socket;
-      if (s == null || !s.isConnected) {
+      final channelHealthy = s != null &&
+          s.isConnected &&
+          !s.authFailedChannels.contains('channel.$channelId');
+      if (!channelHealthy) {
         _loadMessagesPage(reset: true, gen: _generation);
         return;
       }

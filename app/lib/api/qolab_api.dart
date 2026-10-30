@@ -296,9 +296,16 @@ class QolabApi {
       throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
     }
     if (r.status == 301 || r.status == 302 || r.status == 303) {
-      final loc = r.location ?? '';
-      // chat.show route redirects to /chat/channels/{channel} (current) or
-      // the legacy /chat/{channel} — accept both.
+      // Laravel emits redirect Locations as ABSOLUTE URLs when APP_URL is
+      // configured (verified on Development: `Location:
+      // https://host/chat/channels/56`). Normalize to the path first, then
+      // match chat.show's destinations — the current /chat/channels/{id} or
+      // the legacy /chat/{id}.
+      var loc = r.location ?? '';
+      final uri = Uri.tryParse(loc);
+      if (uri != null && uri.hasScheme && uri.host.isNotEmpty) {
+        loc = uri.path.isEmpty ? '' : uri.path;
+      }
       final match =
           RegExp(r'^/chat/channels/(\d+)$').firstMatch(loc) ??
               RegExp(r'^/chat/(\d+)$').firstMatch(loc);
