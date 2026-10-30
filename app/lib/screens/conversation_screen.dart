@@ -5,6 +5,7 @@ import '../api/qolab_api.dart';
 import '../chat/chat_controller.dart';
 import '../chat/chat_models.dart';
 import '../chat/chat_socket.dart';
+import '../chat/message_formatting.dart';
 import '../theme.dart';
 
 /// A single conversation: message history (chronological, paginated),
@@ -15,6 +16,18 @@ import '../theme.dart';
 /// the REST send response by id), message.edited/deleted update history,
 /// and a reconnect triggers a REST catch-up. Without a socket the screen
 /// behaves exactly like Phase 4A.1 REST chat.
+///
+/// UX pass (4A.2.5):
+/// - The history list is REVERSED: scroll offset 0 is the newest message,
+///   so the conversation opens at the latest message deterministically
+///   (no jump hack, no animation through history, correct under keyboard
+///   insets). Items are built newest-first.
+/// - While the initial fetch is in flight a skeleton shows; the empty
+///   state only renders after a completed fetch returned nothing.
+/// - Date separators sit above the first message of each local calendar
+///   day (Today / Yesterday / 28 October 2026); timestamps are local time.
+/// - New message while reading older history: no forced jump — a small
+///   "New messages" pill; tap to snap to the newest.
 class ConversationScreen extends StatefulWidget {
   const ConversationScreen({
     super.key,
@@ -47,7 +60,12 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final TextEditingController _composer = TextEditingController();
   final ScrollController _scroll = ScrollController();
   String? _sendError;
-  int _lastSeenCount = 0;
+
+  /// Id of the newest message the user has seen (bottom-most built item in
+  /// the reversed list). Drives the "New messages" pill while reading older
+  /// history; cleared when the user returns to the newest end.
+  int? _newestSeenId;
+  bool _showJumpPill = false;
 
   @override
   void initState() {
@@ -62,40 +80,66 @@ class _ConversationScreenState extends State<ConversationScreen> {
         );
     chat.addListener(_onChanged);
     _scroll.addListener(_onScroll);
-    _lastSeenCount = chat.messages.length;
+    _newestSeenId = chat.messages.isNotEmpty ? chat.messages.last.id : null;
     chat.load();
   }
 
   void _onChanged() {
-    // Realtime message arrived (or send appended) → follow the tail if the
-    // user is already at/near the bottom; otherwise preserve their
-    // reading position (no jump).
-    if (chat.messages.length > _lastSeenCount && _scroll.hasClients) {
-      final atBottom = _scroll.position.pixels >=
-          _scroll.position.maxScrollExtent - 120;
-      if (atBottom) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && _scroll.hasClients) {
-            _scroll.animateTo(
-              _scroll.position.maxScrollExtent,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-            );
-          }
-        });
+    if (chat.messages.isNotEmpty) {
+      final newestId = chat.messages.last.id;
+      if (_scroll.hasClients) {
+        final atBottom = _scroll.position.pixels <= 120;
+        if (!atBottom && newestId != _newestSeenId && _newestSeenId != null) {
+          // New message landed while the user is reading older history —
+          // don't move their position; surface the pill instead.
+          _showJumpPill = true;
+        } else if (atBottom && newestId != _newestSeenId) {
+          // Following the tail: a short ease to keep the newest in view.
+          _newestSeenId = newestId;
+          _showJumpPill = false;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _scroll.hasClients && _scroll.position.pixels <= 120) {
+              _scroll.animateTo(0,
+                  duration: const Duration(milliseconds: 200),
+                  curve: Curves.easeOut);
+            }
+          });
+        }
+      } else {
+        _newestSeenId = newestId;
       }
     }
-    _lastSeenCount = chat.messages.length;
     if (mounted) setState(() {});
   }
 
   void _onScroll() {
-    // Near the top → load older messages (guard inside controller).
-    if (_scroll.hasClients &&
-        _scroll.position.pixels <= 80 &&
+    // Reversed list: near offset 0 == viewing the newest end.
+    if (!_scroll.hasClients) return;
+    if (_scroll.position.pixels <= 120 &&
+        _showJumpPill &&
+        chat.messages.isNotEmpty) {
+      _newestSeenId = chat.messages.last.id;
+      setState(() => _showJumpPill = false);
+    }
+    // Reversed list: the OLDER end is at maxScrollExtent → paginate there.
+    if (_scroll.position.pixels >=
+            _scroll.position.maxScrollExtent - 80 &&
         chat.hasMore &&
         !chat.loadingOlder) {
       chat.loadOlder();
+    }
+  }
+
+  void _jumpToLatest() {
+    _newestSeenId = chat.messages.isNotEmpty ? chat.messages.last.id : null;
+    _showJumpPill = false;
+    if (!_scroll.hasClients) return;
+    if (_scroll.position.pixels <= 600) {
+      _scroll.position.jumpTo(0);
+    } else {
+      _scroll.animateTo(0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut);
     }
   }
 
@@ -109,17 +153,6 @@ class _ConversationScreenState extends State<ConversationScreen> {
     super.dispose();
   }
 
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // After the first layout with history, land at the newest message.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _scroll.hasClients) {
-        _scroll.jumpTo(_scroll.position.maxScrollExtent);
-      }
-    });
-  }
-
   Future<void> _send() async {
     final text = _composer.text;
     if (text.trim().isEmpty || chat.sending) return;
@@ -127,6 +160,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
     try {
       await chat.send(text);
       _composer.clear();
+      _newestSeenId = chat.messages.isNotEmpty ? chat.messages.last.id : null;
+      _showJumpPill = false;
     } on ApiException catch (e) {
       // Message stays in the composer so the user can retry.
       if (mounted) setState(() => _sendError = e.message);
@@ -169,7 +204,20 @@ class _ConversationScreenState extends State<ConversationScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            Expanded(child: _history()),
+            Expanded(
+              child: Stack(
+                children: [
+                  _history(),
+                  if (_showJumpPill)
+                    Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 10,
+                      child: Center(child: _jumpPill()),
+                    ),
+                ],
+              ),
+            ),
             if (_sendError != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 6, 20, 0),
@@ -190,21 +238,46 @@ class _ConversationScreenState extends State<ConversationScreen> {
     );
   }
 
+  Widget _jumpPill() {
+    return Material(
+      key: const Key('jump-pill'),
+      color: QolabTheme.wine,
+      borderRadius: BorderRadius.circular(20),
+      elevation: 2,
+      child: InkWell(
+        onTap: _jumpToLatest,
+        borderRadius: BorderRadius.circular(20),
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.arrow_downward_rounded, size: 15, color: Colors.white),
+              SizedBox(width: 5),
+              Text('New messages',
+                  style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   bool get isGroupLike => chat.conversation?.isGroupLike ?? false;
 
   Widget _history() {
-    final d = chat.detail;
-    if (d.isLoading && chat.messages.isEmpty) {
-      return const Center(
-        child: SizedBox(
-          width: 24,
-          height: 24,
-          child: CircularProgressIndicator(
-              strokeWidth: 2.2, color: QolabTheme.wineFaded),
-        ),
-      );
+    // Initial fetch in flight (header and/or first history page) with no
+    // content yet → skeleton. The empty state must never render before the
+    // fetch completed — that was the "No messages" flash.
+    final initialLoading =
+        chat.messages.isEmpty && (chat.detail.isLoading || chat.initialHistoryLoading);
+    if (initialLoading) {
+      return const _HistorySkeleton();
     }
-    if (d.state == SectionState.error && chat.messages.isEmpty) {
+    if (chat.detail.state == SectionState.error && chat.messages.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -214,7 +287,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
               const Icon(Icons.cloud_off_outlined,
                   size: 40, color: QolabTheme.wineFaded),
               const SizedBox(height: 10),
-              Text(d.error ?? 'Conversation unavailable.',
+              Text(chat.detail.error ?? 'Conversation unavailable.',
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: QolabTheme.textSoft)),
               const SizedBox(height: 12),
@@ -255,58 +328,57 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
     return RefreshIndicator(
       // Merge-refresh: refreshMessages() merges by id and never replaces the
-      // list, so the scroll position is preserved by construction. Only
-      // auto-snap to the new bottom when the user was already there.
+      // list. Reversed list: the newest end is offset 0 — only auto-snap
+      // back when the user was already there.
       onRefresh: () async {
-        final wasAtBottom = _isAtBottom();
+        final wasAtNewest = _scroll.hasClients && _scroll.position.pixels <= 160;
         await chat.refreshMessages();
-        if (wasAtBottom && _scroll.hasClients) {
-          _jumpToBottom();
+        if (wasAtNewest && _scroll.hasClients) {
+          _jumpToLatest();
         }
       },
       child: ListView.builder(
-      controller: _scroll,
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      itemCount: chat.messages.length + (chat.loadingOlder ? 1 : 0),
-      itemBuilder: (context, i) {
-        if (chat.loadingOlder && i == 0) {
-          return const Padding(
-            padding: EdgeInsets.all(10),
-            child: Center(
-              child: SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2, color: QolabTheme.wineFaded),
+        controller: _scroll,
+        reverse: true,
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        itemCount: chat.messages.length + (chat.loadingOlder ? 1 : 0),
+        itemBuilder: (context, i) {
+          if (chat.loadingOlder && i == chat.messages.length) {
+            // Older-history spinner renders at the visual TOP (older end).
+            return const Padding(
+              padding: EdgeInsets.all(10),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: QolabTheme.wineFaded),
+                ),
               ),
-            ),
+            );
+          }
+          // Reversed index: i = 0 is the NEWEST message.
+          final idx = chat.messages.length - 1 - i;
+          final m = chat.messages[idx];
+          // Separator sits above the first message of a local calendar day
+          // (i.e. when this message is older than its successor's day).
+          final newer = idx + 1 < chat.messages.length
+              ? chat.messages[idx + 1]
+              : null;
+          final separator =
+              newer == null || startsNewDay(m.createdAt, newer.createdAt)
+                  ? dayLabel(m.createdAt)
+                  : null;
+          return _MessageBubble(
+            message: m,
+            mine: m.userId == widget.myUserId,
+            showSender: isGroupLike && m.userId != widget.myUserId,
+            daySeparator: separator,
           );
-        }
-        final idx = chat.loadingOlder ? i - 1 : i;
-        final m = chat.messages[idx];
-        return _MessageBubble(
-          message: m,
-          mine: m.userId == widget.myUserId,
-          showSender: isGroupLike && m.userId != widget.myUserId,
-        );
-      },
-    ),
+        },
+      ),
     );
-  }
-
-  bool _isAtBottom() {
-    if (!_scroll.hasClients) return true;
-    final pos = _scroll.position;
-    return pos.maxScrollExtent - pos.pixels <= 160;
-  }
-
-  void _jumpToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.position.jumpTo(_scroll.position.maxScrollExtent);
-      }
-    });
   }
 
   Widget _composerBar() {
@@ -367,21 +439,86 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 }
 
+/// Subtle loading placeholder shown while the initial fetch runs — never an
+/// "empty conversation" claim. Bubbles sit at the bottom (mirroring the
+/// reversed list anchored at the newest end) with a gentle shimmer.
+class _HistorySkeleton extends StatelessWidget {
+  const _HistorySkeleton();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Padding(
+      key: Key('history-skeleton'),
+      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: [
+          _SkeletonShimmer(width: 150, alignment: Alignment.centerLeft),
+          _SkeletonShimmer(width: 220, alignment: Alignment.centerRight),
+          _SkeletonShimmer(width: 180, alignment: Alignment.centerLeft),
+          _SkeletonShimmer(width: 240, alignment: Alignment.centerRight),
+          _SkeletonShimmer(width: 120, alignment: Alignment.centerLeft),
+        ],
+      ),
+    );
+  }
+}
+
+class _SkeletonShimmer extends StatefulWidget {
+  const _SkeletonShimmer({required this.width, required this.alignment});
+
+  final double width;
+  final Alignment alignment;
+
+  @override
+  State<_SkeletonShimmer> createState() => _SkeletonShimmerState();
+}
+
+class _SkeletonShimmerState extends State<_SkeletonShimmer>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 1100))..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween(begin: 0.45, end: 1.0)
+          .animate(CurvedAnimation(parent: _c, curve: Curves.easeInOut)),
+      child: Align(
+        alignment: widget.alignment,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 5),
+          width: widget.width,
+          height: 38,
+          decoration: BoxDecoration(
+            color: QolabTheme.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: QolabTheme.line),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _MessageBubble extends StatelessWidget {
   const _MessageBubble({
     required this.message,
     required this.mine,
     this.showSender = false,
+    this.daySeparator,
   });
 
   final ChatMessage message;
   final bool mine;
   final bool showSender;
-
-  String _time(DateTime t) {
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${two(t.hour)}:${two(t.minute)}';
-  }
+  final String? daySeparator;
 
   @override
   Widget build(BuildContext context) {
@@ -426,7 +563,8 @@ class _MessageBubble extends StatelessWidget {
           ),
           const SizedBox(height: 3),
           Text(
-            _time(message.createdAt) + (message.isEdited ? ' · edited' : ''),
+            chatTimeLabel(message.createdAt) +
+                (message.isEdited ? ' · edited' : ''),
             style: TextStyle(
               color: mine ? Colors.white70 : QolabTheme.textSoft,
               fontSize: 10.5,
@@ -435,9 +573,48 @@ class _MessageBubble extends StatelessWidget {
         ],
       ),
     );
-    return Align(
+    final row = Align(
       alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
       child: bubble,
+    );
+    if (daySeparator == null) return row;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _DateChip(label: daySeparator!),
+        row,
+      ],
+    );
+  }
+}
+
+class _DateChip extends StatelessWidget {
+  const _DateChip({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: QolabTheme.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: QolabTheme.line),
+          ),
+          child: Text(
+            label,
+            style: const TextStyle(
+              color: QolabTheme.textSoft,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

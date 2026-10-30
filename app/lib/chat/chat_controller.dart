@@ -345,6 +345,13 @@ class ConversationController extends ChangeNotifier {
   bool hasMore = true;
   bool sending = false;
 
+  /// True from the first [load] until the initial (newest) history page has
+  /// completed. The screen shows a loading skeleton while this is true and
+  /// messages are still empty — the empty state ("No messages yet") must not
+  /// render before the fetch has actually finished. Subsequent refreshes set
+  /// it true again momentarily, but content then exists so no skeleton shows.
+  bool initialHistoryLoading = true;
+
   int _nextPage = 1; // page to fetch next (1 = newest page)
   int _generation = 0;
   bool _disposed = false;
@@ -526,7 +533,13 @@ class ConversationController extends ChangeNotifier {
 
     // Reset fetches the NEWEST page regardless of pagination position.
     _nextPage = 1;
+    initialHistoryLoading = true;
+    notifyListeners();
     await _loadMessagesPage(reset: true, gen: gen);
+    if (!_disposed && gen == _generation) {
+      initialHistoryLoading = false;
+      notifyListeners();
+    }
   }
 
   Future<void> _loadMessagesPage(
