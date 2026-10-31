@@ -7,8 +7,10 @@ plugins {
 
 android {
     namespace = "dev.qolab.qolab_app"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // LiveKit/flutter_webrtc and friends declare NDK 27 / SDK 36; these
+    // supersede the Flutter 3.27.4 defaults (35 / 26.1). Backward compatible.
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_1_8

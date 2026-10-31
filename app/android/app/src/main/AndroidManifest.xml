@@ -1,6 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- HTTPS-only networking to the Qolab backend. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Phase B calling: mic + camera, requested at runtime via
+         permission_handler; audio-only join when camera is denied. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <!-- Keep the call alive when the app is briefly backgrounded. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <application
         android:label="qolab_app"
         android:name="${applicationName}"

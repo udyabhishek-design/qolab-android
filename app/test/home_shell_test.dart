@@ -59,7 +59,16 @@ void main() {
     expect(find.text('Retry'), findsWidgets);
   });
 
+  /// The Phase B meeting card (full-width "Join call" button) is taller, so
+  /// tests asserting content below the fold get a phone-shaped viewport.
+  void useTallViewport(WidgetTester tester) {
+    tester.view.physicalSize = const Size(800, 2000);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+  }
+
   testWidgets('loaded state shows meeting, rooms, tasks', (tester) async {
+    useTallViewport(tester);
     final h = HomeController(api: auth.api);
     h.dashboard.setLoaded(dashFromProps());
     h.rooms.setLoaded(const RoomsData(departmentRoom: null));
@@ -67,6 +76,8 @@ void main() {
     await tester.pump();
 
     expect(find.text('Sprint Review'), findsOneWidget);
+    // Phase B: the meeting card exposes the LiveKit join action.
+    expect(find.text('Join call'), findsOneWidget);
     expect(find.text('Social Rooms'), findsOneWidget);
     expect(find.text('The Lobby'), findsOneWidget);
     expect(find.text('Music Lounge'), findsOneWidget);
@@ -95,6 +106,7 @@ void main() {
   });
 
   testWidgets('Department Room card shows when authorized', (tester) async {
+    useTallViewport(tester);
     final h = HomeController(api: auth.api);
     h.dashboard.setLoaded(dashFromProps());
     h.rooms.setLoaded(const RoomsData(

@@ -255,6 +255,30 @@ class QolabApi {
         path.startsWith('/room/');
   }
 
+  /// POST /meetings/{id}/join-token → JSON {success, token, url}.
+  /// Issues a LiveKit access token for this user (permissions enforced
+  /// server-side by MeetingPolicy). Phase B calling.
+  Future<String> fetchMeetingJoinToken(int meetingId) async {
+    final r = await _request('POST', '/meetings/$meetingId/join-token',
+        followRedirects: false, isMutation: true, expectJson: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status == 403) {
+      throw const ApiException(ApiErrorKind.forbidden,
+          'You do not have access to this meeting.');
+    }
+    if (r.status == 404) {
+      throw const ApiException(ApiErrorKind.unknown,
+          'This meeting was not found.');
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status,
+          body: r.body, inertiaLocation: r.headers['x-inertia-location']);
+    }
+    return r.body;
+  }
+
   /// GET /chat/channels/{channel}/messages?page=N — JSON, newest-first.
   Future<String> fetchMessagesJson(int channelId,
       {int page = 1, int perPage = 50}) async {

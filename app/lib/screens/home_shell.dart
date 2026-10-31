@@ -6,6 +6,7 @@ import '../chat/chat_controller.dart' show ChatListController;
 import '../home/home_controller.dart';
 import '../home/home_models.dart';
 import '../home/session_socket.dart';
+import '../meetings/call_launcher.dart';
 import '../theme.dart';
 import 'chat_list_screen.dart';
 import 'coming_soon_screen.dart';
@@ -115,7 +116,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomeScreen(auth: widget.auth, home: home),
+      HomeScreen(auth: widget.auth, home: home, api: widget.api),
       ChatListScreen(
           auth: widget.auth,
           api: widget.api,
@@ -294,10 +295,12 @@ class _BottomNav extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────
 
 class HomeScreen extends StatelessWidget {
-  const HomeScreen({super.key, required this.auth, required this.home});
+  const HomeScreen(
+      {super.key, required this.auth, required this.home, required this.api});
 
   final AuthController auth;
   final HomeController home;
+  final QolabApi api;
 
   String _greetingWord(DateTime now) {
     final h = now.hour;
@@ -323,7 +326,7 @@ class HomeScreen extends StatelessWidget {
               children: [
                 _header(context, first),
                 const SizedBox(height: 18),
-                _nextMeetingCard(),
+                _nextMeetingCard(context),
                 const SizedBox(height: 18),
                 _socialRooms(),
                 const SizedBox(height: 18),
@@ -409,7 +412,7 @@ class HomeScreen extends StatelessWidget {
 
   // ── Next Meeting ────────────────────────────────────────────────────
 
-  Widget _nextMeetingCard() {
+  Widget _nextMeetingCard(BuildContext context) {
     return _SectionCard(
       title: 'Next Meeting',
       child: _sectionBody(
@@ -420,44 +423,80 @@ class HomeScreen extends StatelessWidget {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(m.title,
-                        style: QolabTheme.title,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis),
-                  ),
-                  if (m.isLive)
+              GestureDetector(
+                // Phase B: tapping the meeting joins the LiveKit call.
+                // Permission handling + audio-only fallback live in the
+                // launcher.
+                onTap: () => _joinMeeting(context, m),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(m.title,
+                              style: QolabTheme.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                        if (m.isLive)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: QolabTheme.wine,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: const Text('LIVE',
+                                style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(_meetingWhen(m), style: QolabTheme.body),
+                    if (m.participantsCount != null) ...[
+                      const SizedBox(height: 4),
+                      Text('${m.participantsCount} participant'
+                          '${m.participantsCount == 1 ? '' : 's'}',
+                          style: QolabTheme.caption),
+                    ],
+                    const SizedBox(height: 10),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                          horizontal: 14, vertical: 8),
                       decoration: BoxDecoration(
                         color: QolabTheme.wine,
-                        borderRadius: BorderRadius.circular(999),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Text('LIVE',
+                      child: const Text('Join call',
                           style: TextStyle(
                               color: Colors.white,
-                              fontSize: 10.5,
+                              fontSize: 13,
                               fontWeight: FontWeight.w700)),
                     ),
-                ],
+                  ],
+                ),
               ),
-              const SizedBox(height: 8),
-              Text(_meetingWhen(m), style: QolabTheme.body),
-              if (m.participantsCount != null) ...[
-                const SizedBox(height: 4),
-                Text('${m.participantsCount} participant'
-                    '${m.participantsCount == 1 ? '' : 's'}',
-                    style: QolabTheme.caption),
-              ],
             ],
           );
         },
         empty: const Text('No meetings scheduled',
             style: QolabTheme.caption),
       ),
+    );
+  }
+
+  /// Phase B: join the meeting's LiveKit call from the Next Meeting card.
+  void _joinMeeting(BuildContext context, HomeMeeting m) {
+    joinMeetingCall(
+      context,
+      api: api,
+      meetingId: m.id,
+      meetingTitle: m.title,
+      localName: auth.user?.name ?? 'You',
     );
   }
 
