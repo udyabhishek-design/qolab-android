@@ -7,6 +7,8 @@ import '../home/home_controller.dart';
 import '../home/home_models.dart';
 import '../home/session_socket.dart';
 import '../meetings/call_launcher.dart';
+import '../direct_call/direct_call_controller.dart';
+import '../direct_call/direct_call_screens.dart';
 import '../theme.dart';
 import 'chat_list_screen.dart';
 import 'coming_soon_screen.dart';
@@ -78,6 +80,46 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     if (mounted) setState(() {}); // badge reacts to unread changes
   }
 
+  // ── Direct Calling (Phase C1) ─────────────────────────────────────
+
+  DirectCallCoordinator? _directCall;
+
+  /// Lazily build (once per shell) and attach the call coordinator.
+  DirectCallCoordinator _ensureDirectCall() {
+    if (_directCall != null) return _directCall!;
+    final service = widget.socket?.service;
+    final myUserId = widget.auth.user?.id ?? 0;
+    final controller = DirectCallController(
+      api: widget.api,
+      socket: myUserId > 0 ? service : null,
+      myUserId: myUserId,
+    );
+    _directCall = DirectCallCoordinator(controller: controller, api: widget.api)
+      ..localName = widget.auth.user?.name ?? 'You';
+    if (service != null && myUserId > 0 && mounted) {
+      // Attach after first frame so a call event can push screens.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          final name = _directCall!.localName;
+          _directCall!.attach(context, localName: name);
+          controller.recover();
+        }
+      });
+    }
+    return _directCall!;
+  }
+
+  /// DM header call button → start an outgoing call.
+  void _startDirectCall(String callType, int partnerId) {
+    final coordinator = _ensureDirectCall();
+    coordinator.controller.start(partnerId, callType).then((err) {
+      if (err != null && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text(err), duration: const Duration(seconds: 3)));
+      }
+    });
+  }
+
   /// Foreground-resume synchronization (Phase 4A.2.1): when the app returns
   /// from background, the OS may have frozen or silently dropped the
   /// websocket. Force a lightweight check: reconnect if the socket thinks it
@@ -96,6 +138,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     chat.removeListener(_onChatChanged);
+    // Direct calling: stop ringtone and detach listeners.
+    _directCall?.detach();
     // Only dispose a controller we own (tests manage their own).
     if (widget.homeController == null) home.dispose();
     if (widget.chatController == null) chat.dispose();
@@ -121,7 +165,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           auth: widget.auth,
           api: widget.api,
           controller: chat,
-          socket: widget.socket?.service),
+          socket: widget.socket?.service,
+          onStartCall: _startDirectCall),
       const ComingSoonScreen(
         title: 'Ask Drytis',
         description: 'Your AI assistant for meetings, tasks and knowledge.',

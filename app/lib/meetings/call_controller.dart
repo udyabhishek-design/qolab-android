@@ -166,7 +166,10 @@ class MeetingCallController extends ChangeNotifier {
 
   /// Join the meeting: request join-token, then connect the LiveKit room.
   /// [audioOnly] skips the camera entirely (permission-denied path).
-  Future<void> join({bool audioOnly = false}) async {
+  /// [directToken]/[directUrl] (Direct Calling C1): skip the join-token
+  /// fetch — the caller already minted credentials via /chat/calls.
+  Future<void> join(
+      {bool audioOnly = false, String? directToken, String? directUrl}) async {
     if (status == CallStatus.requestingToken ||
         status == CallStatus.connecting ||
         status == CallStatus.connected) {
@@ -182,21 +185,37 @@ class MeetingCallController extends ChangeNotifier {
         micEnabled: !audioOnly,
       ));
 
-    MeetingJoinToken? token;
-    try {
-      final body = await api.fetchMeetingJoinToken(meetingId);
-      token = MeetingJoinToken.parse(body);
-    } on ApiException catch (e) {
-      _setState(CallStatus.failed, error: e.message);
-      return;
-    } catch (_) {
-      _setState(CallStatus.failed,
-          error: 'Could not reach the meeting service. Please try again.');
-      return;
+    final String? connectUrl;
+    final String? connectToken;
+    if (directToken != null && directToken.isNotEmpty) {
+      // Direct call: credentials provided up front.
+      connectToken = directToken;
+      connectUrl = directUrl;
+    } else {
+      MeetingJoinToken? token;
+      try {
+        final body = await api.fetchMeetingJoinToken(meetingId);
+        token = MeetingJoinToken.parse(body);
+      } on ApiException catch (e) {
+        _setState(CallStatus.failed, error: e.message);
+        return;
+      } catch (_) {
+        _setState(CallStatus.failed,
+            error: 'Could not reach the meeting service. Please try again.');
+        return;
+      }
+      if (token == null || !token.isUsable) {
+        _setState(CallStatus.failed,
+            error: 'The meeting service returned an unexpected response.');
+        return;
+      }
+      connectToken = token.token;
+      connectUrl = token.url;
     }
-    if (token == null || !token.isUsable) {
+
+    if (connectUrl == null || connectUrl.isEmpty) {
       _setState(CallStatus.failed,
-          error: 'The meeting service returned an unexpected response.');
+          error: 'The call server address is missing. Please try again.');
       return;
     }
 
@@ -209,7 +228,7 @@ class MeetingCallController extends ChangeNotifier {
       }
     });
     try {
-      await room.connect(token.url!, token.token!);
+      await room.connect(connectUrl, connectToken!);
     } catch (_) {
       _setState(CallStatus.failed,
           error: 'Could not connect to the meeting. Please try again.');

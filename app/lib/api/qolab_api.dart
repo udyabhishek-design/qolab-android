@@ -279,6 +279,76 @@ class QolabApi {
     return r.body;
   }
 
+  // ── Direct Calling (Phase C1) ────────────────────────────────────
+
+  /// POST /chat/calls — start a one-to-one call. Returns the raw JSON
+  /// body ({success, call, token, url}).
+  Future<String> startDirectCall(int recipientId, String callType,
+      {int? channelId}) async {
+    final r = await _request('POST', '/chat/calls',
+        body: _jsonBody({
+          'recipient_id': recipientId,
+          'call_type': callType,
+          if (channelId != null) 'channel_id': channelId,
+        }),
+        isMutation: true,
+        followRedirects: false,
+        expectJson: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200 && r.status != 201) {
+      throw apiErrorFromStatus(r.status, body: r.body);
+    }
+    return r.body;
+  }
+
+  /// GET /chat/calls — active/pending calls for this user (reconnect
+  /// recovery). Returns the raw JSON body ({success, calls: [...]}).
+  Future<String> fetchActiveDirectCalls() async {
+    final r = await _request('GET', '/chat/calls',
+        isMutation: false, expectJson: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status, body: r.body);
+    }
+    return r.body;
+  }
+
+  /// POST /chat/calls/{callId}/{action} for accept|decline|cancel|end.
+  /// Returns the raw JSON body (accept also carries token+url).
+  Future<String> directCallAction(String callId, String action) async {
+    final r = await _request('POST', '/chat/calls/$callId/$action',
+        isMutation: true,
+        followRedirects: false,
+        expectJson: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200 && r.status != 201) {
+      throw apiErrorFromStatus(r.status, body: r.body);
+    }
+    return r.body;
+  }
+
+  /// POST /chat/calls/{callId}/token — LiveKit creds for an authorized
+  /// participant of an accepted call (or the caller while ringing).
+  Future<String> fetchDirectCallToken(String callId) async {
+    final r = await _request('POST', '/chat/calls/$callId/token',
+        isMutation: true,
+        followRedirects: false,
+        expectJson: true);
+    if (r.redirectedToLogin || r.status == 401) {
+      throw apiErrorFromStatus(401, redirectedToLogin: r.redirectedToLogin);
+    }
+    if (r.status != 200) {
+      throw apiErrorFromStatus(r.status, body: r.body);
+    }
+    return r.body;
+  }
+
   /// GET /chat/channels/{channel}/messages?page=N — JSON, newest-first.
   Future<String> fetchMessagesJson(int channelId,
       {int page = 1, int perPage = 50}) async {

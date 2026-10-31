@@ -27,6 +27,7 @@ class ChatListScreen extends StatefulWidget {
     this.controller,
     this.socket,
     this.onOpenConversation,
+    this.onStartCall,
   });
 
   final AuthController auth;
@@ -41,6 +42,10 @@ class ChatListScreen extends StatefulWidget {
   /// Optional navigation hook (tests can capture); defaults to pushing
   /// ConversationScreen.
   final void Function(BuildContext, Conversation)? onOpenConversation;
+
+  /// Direct Calling (Phase C1): ('audio'|'video', partnerId) from a DM
+  /// header. Null hides the call buttons.
+  final void Function(String, int)? onStartCall;
 
   @override
   State<ChatListScreen> createState() => _ChatListScreenState();
@@ -107,6 +112,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         fallbackName: c.name,
         myUserId: widget.auth.user?.id ?? 0,
         socket: widget.socket,
+        onStartCall: widget.onStartCall,
       ),
     )).then((_) {
       // Returning from a conversation: refresh read state + activity.

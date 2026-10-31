@@ -38,12 +38,18 @@ class ConversationScreen extends StatefulWidget {
     this.socket,
     this.controller,
     this.onSessionExpired,
+    this.onStartCall,
   });
 
   final QolabApi api;
   final int channelId;
   final String fallbackName;
   final int myUserId;
+
+  /// Direct Calling (Phase C1): invoked with ('audio'|'video', partnerId)
+  /// when the DM header call buttons are pressed. Null (group chats /
+  /// legacy tests) hides the buttons.
+  final void Function(String callType, int partnerId)? onStartCall;
 
   /// Realtime socket (Phase 4A.2). Optional — null keeps pure-REST.
   final ChatSocketService? socket;
@@ -182,6 +188,21 @@ class _ConversationScreenState extends State<ConversationScreen> {
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: const BackButton(color: QolabTheme.ink),
+        actions: [
+          // Direct Calling (C1): DM-only audio/video call buttons.
+          if (!isGroupLike && widget.onStartCall != null && dmPartner != null)
+            IconButton(
+              tooltip: 'Audio call',
+              icon: const Icon(Icons.call_outlined, color: QolabTheme.ink),
+              onPressed: () => widget.onStartCall!('audio', dmPartnerId),
+            ),
+          if (!isGroupLike && widget.onStartCall != null && dmPartner != null)
+            IconButton(
+              tooltip: 'Video call',
+              icon: const Icon(Icons.videocam_outlined, color: QolabTheme.ink),
+              onPressed: () => widget.onStartCall!('video', dmPartnerId),
+            ),
+        ],
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -267,6 +288,13 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   bool get isGroupLike => chat.conversation?.isGroupLike ?? false;
+
+  /// DM partner id from the parsed conversation (null until detail loads
+  /// or for non-DM channels).
+  int? get dmPartner => chat.conversation?.dmPartner?.id;
+
+  /// Non-null variant for the call buttons (guarded by `dmPartner != null`).
+  int get dmPartnerId => dmPartner ?? 0;
 
   Widget _history() {
     // Initial fetch in flight (header and/or first history page) with no

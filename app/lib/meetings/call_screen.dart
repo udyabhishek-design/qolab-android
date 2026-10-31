@@ -29,12 +29,39 @@ class MeetingCallScreen extends StatefulWidget {
     this.audioOnly = false,
     this.adapter,
     this.videoRendererBuilder,
+    this.token,
+    this.serverUrl,
+    this.onLeave,
   });
+
+  /// Direct Calling (Phase C1): join with a PRE-MINTED LiveKit token
+  /// instead of fetching a meetings join-token. [onLeave] runs after the
+  /// LiveKit room is torn down (e.g. POST /chat/calls/{id}/end).
+  MeetingCallScreen.forDirectCall({
+    super.key,
+    required this.api,
+    required this.token,
+    required this.serverUrl,
+    required String title,
+    required this.localName,
+    this.audioOnly = false,
+    this.adapter,
+    this.videoRendererBuilder,
+    this.onLeave,
+  })  : meetingId = 0,
+        meetingTitle = title;
 
   final QolabApi api;
   final int meetingId;
   final String meetingTitle;
   final String localName;
+
+  /// Direct-call mode: token + url are provided up front.
+  final String? token;
+  final String? serverUrl;
+
+  /// Direct-call mode: called when the user leaves the call.
+  final Future<void> Function()? onLeave;
 
   /// Join without camera (permission denied or user choice).
   final bool audioOnly;
@@ -66,7 +93,10 @@ class _MeetingCallScreenState extends State<MeetingCallScreen> {
       room: widget.adapter ?? _NullRoom(),
     );
     _call.addListener(_onChanged);
-    _call.join(audioOnly: widget.audioOnly);
+    _call.join(
+        audioOnly: widget.audioOnly,
+        directToken: widget.token,
+        directUrl: widget.serverUrl);
   }
 
   void _onChanged() {
@@ -91,6 +121,11 @@ class _MeetingCallScreenState extends State<MeetingCallScreen> {
     if (_leaving) return;
     _leaving = true;
     await _call.leave();
+    if (widget.onLeave != null) {
+      try {
+        await widget.onLeave!();
+      } catch (_) {}
+    }
     if (mounted) Navigator.of(context).maybePop();
   }
 
