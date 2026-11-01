@@ -9,6 +9,7 @@ import '../home/session_socket.dart';
 import '../meetings/call_launcher.dart';
 import '../direct_call/direct_call_controller.dart';
 import '../direct_call/direct_call_screens.dart';
+import '../push/fcm_bridge.dart';
 import '../theme.dart';
 import 'chat_list_screen.dart';
 import 'coming_soon_screen.dart';
@@ -106,6 +107,41 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         }
       });
     }
+
+    // Phase C3A — route FCM pushes + native notification actions into the
+    // same coordinator that serves Reverb events. The controller fetches
+    // authoritative state from the backend, so duplicate delivery between
+    // Reverb and FCM is reconciled server-side (idempotent transitions).
+    FcmBridge.onPush = (data) {
+      final type = data['type'] as String?;
+      if (type == 'call.incoming') {
+        controller.handleIncomingPush(
+          callId: data['call_id'] as String?,
+          callType: data['call_type'] as String?,
+          callerId: int.tryParse(data['caller_id'] as String? ?? ''),
+          callerName: data['caller_name'] as String?,
+        );
+      } else if (type == 'call.update') {
+        controller.handleUpdatePush(
+          callId: data['call_id'] as String?,
+          status: data['status'] as String?,
+        );
+      }
+    };
+    FcmBridge.onAction = (action, data) {
+      if (action.endsWith('ACCEPT_CALL')) {
+        controller.acceptFromNotification(data['call_id'] as String?);
+      } else if (action.endsWith('DECLINE_CALL')) {
+        controller.declineFromNotification(data['call_id'] as String?);
+      } else if (action.endsWith('CALL_INCOMING')) {
+        controller.handleIncomingPush(
+          callId: data['call_id'] as String?,
+          callType: data['call_type'] as String?,
+          callerId: int.tryParse(data['caller_id'] as String? ?? ''),
+          callerName: data['caller_name'] as String?,
+        );
+      }
+    };
     return _directCall!;
   }
 

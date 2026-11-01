@@ -5,13 +5,16 @@ import 'auth/auth_controller.dart';
 import 'auth/session_store.dart';
 import 'auth_gate.dart';
 import 'home/session_socket.dart';
+import 'push/fcm_bridge.dart';
 
 /// Qolab app bootstrap.
 ///
 /// QOLAB_ORIGIN is baked at build time:
 ///   flutter build apk --debug \
 ///     --dart-define=QOLAB_ORIGIN=https://workpulse-gbpedt.drytis.dev
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
   const origin = String.fromEnvironment(
     'QOLAB_ORIGIN',
     defaultValue: 'https://workpulse-gbpedt.drytis.dev',
@@ -19,6 +22,16 @@ void main() {
   final api = QolabApi(origin: origin);
   final auth = AuthController(api: api, store: SecureSessionStore());
   final socket = QolabChatSocket(api: api, origin: origin);
+
+  // Phase C3A — Firebase must initialize before anything else touches it.
+  // Runs guarded: a missing google-services config must never block boot.
+  try {
+    await FcmBridge.initialize();
+  } catch (_) {
+    // FCM unavailable (no config / no Play services) — calling falls back
+    // to Reverb foreground delivery; server state stays authoritative.
+  }
+
   runApp(QolabApp(auth: auth, socket: socket));
 }
 
@@ -73,8 +86,15 @@ class _BootstrapState extends State<_Bootstrap> {
     final status = widget.auth.status;
     if (status == AuthStatus.signedIn) {
       widget.socket.start();
+      // Phase C3A — push registration follows the session.
+      FcmBridge.attachApi(widget.auth.api);
+      FcmBridge.register(widget.auth.api);
+      FcmBridge.requestPermission();
     } else if (status == AuthStatus.signedOut) {
       widget.socket.stop();
+      // Logout cleanup — unregister this device's push token.
+      FcmBridge.unregister(widget.auth.api);
+      FcmBridge.attachApi(null);
     }
     // offline/unknown/restoring/signingIn: leave the socket as-is; a later
     // state change resolves it (retry keeps the session, signout stops it).

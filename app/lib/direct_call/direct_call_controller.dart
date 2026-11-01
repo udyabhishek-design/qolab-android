@@ -127,6 +127,120 @@ class DirectCallController extends ChangeNotifier {
 
   // ── Events ───────────────────────────────────────────────────────
 
+  /// Phase C3A — FCM push payload (backgrounded/killed/locked). The FCM
+  /// data payload is intentionally minimal; we reconcile against the
+  /// backend's authoritative state before ringing so stale pushes (call
+  /// already answered/declined/expired) never show a dead ring screen.
+  Future<void> handleIncomingPush({
+    String? callId,
+    String? callType,
+    int? callerId,
+    String? callerName,
+  }) async {
+    if (_disposed || callId == null) return;
+    final current = _state;
+    if (current.phase == DirectCallPhase.ringing ||
+        current.phase == DirectCallPhase.dialing ||
+        current.phase == DirectCallPhase.connecting ||
+        current.phase == DirectCallPhase.active) {
+      return; // already tracked (Reverb or an earlier push)
+    }
+    // Verify server-side that the call is still ringing for me.
+    try {
+      final json = await api.fetchActiveDirectCalls();
+      final data = _findRingingForMe(json, callId);
+      if (data == null) return; // stale — expired/answered elsewhere
+      _onIncoming(data);
+    } catch (_) {
+      // Network failed: fall back to the push payload alone.
+      _onIncoming({
+        'call_id': callId,
+        'call_type': callType ?? 'audio',
+        'caller': {'id': callerId ?? 0, 'name': callerName ?? 'Qolab Member'},
+        'status': 'ringing',
+      });
+    }
+  }
+
+  /// FCM call.update — dismiss ringing/notifications on any transition.
+  void handleUpdatePush({String? callId, String? status}) {
+    if (callId == null) return;
+    final reason = switch (status) {
+      'declined' => 'declined',
+      'cancelled' => 'cancelled',
+      'missed' => 'missed',
+      'ended' => 'ended',
+      'accepted' => 'accepted',
+      _ => null,
+    };
+    if (reason == null) return;
+    if (reason == 'accepted') {
+      // Handled by _onAccepted via the call data; nothing extra needed for
+      // the accepter (they drove it) — the caller gets call.accepted.
+      return;
+    }
+    _onTerminal({
+      'call_id': callId,
+      'status': status,
+      // fromJson requires call_type; the ringing state holds the real value.
+      'call_type': _state.call?.callId == callId
+          ? _state.call!.callType
+          : 'audio',
+    }, reason);
+  }
+
+  /// Native notification Accept button (app cold-started or live).
+  Future<void> acceptFromNotification(String? callId) async {
+    if (callId == null) return;
+    // Ensure the state machine is ringing for THIS call, then accept via
+    // the authenticated HTTP path (server validates).
+    if (_state.call?.callId != callId) {
+      await handleIncomingPush(callId: callId);
+    }
+    if (_state.phase == DirectCallPhase.ringing) {
+      await accept();
+    }
+  }
+
+  /// Native notification Decline button.
+  Future<void> declineFromNotification(String? callId) async {
+    if (callId == null) return;
+    if (_state.call?.callId == callId &&
+        _state.phase == DirectCallPhase.ringing) {
+      await decline();
+    } else {
+      // Stale notification: the server may already have transitioned. POST
+      // decline anyway — the 409 response is harmless and confirms state.
+      try {
+        await api.directCallAction(callId, 'decline');
+      } catch (_) {}
+      _onTerminal({
+        'call_id': callId,
+        'status': 'declined',
+        'call_type': _state.call?.callType ?? 'audio',
+      }, 'declined');
+    }
+  }
+
+  /// Find the ringing call with [callId] addressed to me in the
+  /// GET /chat/calls index response.
+  Object? _findRingingForMe(String json, String callId) {
+    try {
+      final decoded = jsonDecode(json);
+      final calls = decoded is Map ? decoded['calls'] ?? decoded['data'] : decoded;
+      if (calls is! List) return null;
+      for (final raw in calls) {
+        if (raw is Map &&
+            raw['call_id'] == callId &&
+            raw['status'] == 'ringing' &&
+            raw['recipient']?['id'] == myUserId) {
+          return raw;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   void _onIncoming(Object? data) {
     final call = DirectCallData.fromJson(data);
     if (call == null || call.caller?.id == myUserId) return; // own outgoing

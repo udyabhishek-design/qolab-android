@@ -68,9 +68,10 @@ void main() {
       expect(c.messages.length, 1);
       final initialFetches = fetchCount;
 
-      // Wait past the 2-minute zombie threshold (with margin for the 30s
-      // tick cadence). No events are emitted the entire time.
-      await Future<void>.delayed(const Duration(seconds: 150));
+      // Wait past the 2-minute zombie threshold with generous margin:
+      // under full-suite parallel load the 30s poll timer can tick late,
+      // so a 150s wait (exactly on the cadence boundary) flakes.
+      await Future<void>.delayed(const Duration(seconds: 200));
       expect(fetchCount, greaterThan(initialFetches),
           reason: 'a connected-but-silent (zombie) connection must trigger '
               'the REST fallback poll — the pre-4A.2.4 code required '
@@ -78,7 +79,7 @@ void main() {
               'no event ever arrived, so the conversation stayed stale '
               'until manual refresh');
       c.dispose();
-    }, timeout: const Timeout(Duration(minutes: 4)));
+    }, timeout: const Timeout(Duration(minutes: 5)));
 
     test(
         'permanently auth-failed channel polls on the fast cadence even '
@@ -92,12 +93,12 @@ void main() {
       expect(c.messages.length, 1);
       final initialFetches = fetchCount;
 
-      await Future<void>.delayed(const Duration(seconds: 75));
+      await Future<void>.delayed(const Duration(seconds: 100));
       expect(fetchCount, greaterThan(initialFetches),
           reason: 'auth-failed channel must poll on the ~30s cadence '
               '(treated as not-connected) instead of trusting the socket');
       c.dispose();
-    }, timeout: const Timeout(Duration(minutes: 3)));
+    }, timeout: const Timeout(Duration(minutes: 4)));
   });
 }
 

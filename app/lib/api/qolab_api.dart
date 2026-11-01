@@ -349,6 +349,28 @@ class QolabApi {
     return r.body;
   }
 
+  // ── Phase C3A — FCM device tokens ───────────────────────────
+
+  /// POST /chat/device-tokens — register this Android device for
+  /// incoming-call push. Idempotent server-side (user_id+token upsert).
+  Future<bool> registerDeviceToken(String token) async {
+    final r = await _request('POST', '/chat/device-tokens',
+        body: _jsonBody({'token': token, 'platform': 'android'}),
+        isMutation: true,
+        followRedirects: false,
+        expectJson: true);
+    return r.status >= 200 && r.status < 300;
+  }
+
+  /// DELETE /chat/device-tokens — logout cleanup (best-effort).
+  Future<void> unregisterDeviceToken(String token) async {
+    await _request('DELETE', '/chat/device-tokens',
+        body: _jsonBody({'token': token}),
+        isMutation: true,
+        followRedirects: false,
+        expectJson: true);
+  }
+
   /// GET /chat/channels/{channel}/messages?page=N — JSON, newest-first.
   Future<String> fetchMessagesJson(int channelId,
       {int page = 1, int perPage = 50}) async {

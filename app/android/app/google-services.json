@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "941814975908",
+    "project_id": "qolab-f908c",
+    "storage_bucket": "qolab-f908c.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:941814975908:android:d5b0f4b5a6fcc95ebec531",
+        "android_client_info": {
+          "package_name": "dev.qolab.qolab_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB1ig-bmKeD90RHL6yUfehZSBz6kylibiE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
