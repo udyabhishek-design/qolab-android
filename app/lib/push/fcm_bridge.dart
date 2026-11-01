@@ -1,8 +1,8 @@
 import 'dart:async';
-import 'dart:ui';
 
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../api/qolab_api.dart';
@@ -40,11 +40,41 @@ class FcmBridge {
   static bool _initialized = false;
   static bool _permissionGranted = false;
 
+  /// Completes when initialize() finishes (successfully or degraded).
+  static final Completer<void> _initDone = Completer<void>();
+
+  /// Hard cap on Firebase init. A runtime with broken/absent Google Play
+  /// services (seen on emulators like BlueStacks) can make
+  /// Firebase.initializeApp() hang for minutes rather than throw; boot
+  /// must never depend on it resolving.
+  static const _initTimeout = Duration(seconds: 10);
+
   // ── lifecycle ───────────────────────────────────────────────
 
-  static Future<void> initialize() async {
+  /// Guarded init: never throws, never hangs the caller. Firebase is
+  /// either ready, permanently degraded, or the wait is abandoned at
+  /// [_initTimeout] — in every case the app continues without push.
+  static Future<void> initializeGuarded() async {
     if (_initialized) return;
-    await Firebase.initializeApp();
+    try {
+      await Firebase.initializeApp().timeout(_initTimeout);
+      await _wireAfterInit();
+      _initialized = true;
+    } catch (e) {
+      // Firebase unavailable (no config / no Play services / hung init).
+      // Calling falls back to Reverb foreground delivery; the server
+      // state remains authoritative. Never rethrow — boot continues.
+      _initialized = false;
+      debugPrint('QOLAB FCM init degraded: $e');
+    } finally {
+      if (!_initDone.isCompleted) _initDone.complete();
+    }
+  }
+
+  /// Legacy entry kept for tests: same guarded semantics.
+  static Future<void> initialize() async => initializeGuarded();
+
+  static Future<void> _wireAfterInit() async {
     _initialized = true;
 
     // Native → Dart action sink.
@@ -104,8 +134,22 @@ class FcmBridge {
 
   /// Fetch + register the device token with the backend. Safe to call
   /// repeatedly (backend upserts on user_id+token).
+  ///
+  /// register() now waits (bounded by the same [_initTimeout] budget) for
+  /// a still-running guarded init, so a login that lands during a slow
+  /// Firebase init doesn't silently miss token registration.
   static Future<bool> register(QolabApi api) async {
+    if (_initialized) return _registerNow(api);
+    // Init still in flight (or failed fast). Give it a chance to finish —
+    // real devices with healthy Play services init in well under a second.
+    try {
+      await _initDone.future.timeout(_initTimeout);
+    } catch (_) {}
     if (!_initialized) return false;
+    return _registerNow(api);
+  }
+
+  static Future<bool> _registerNow(QolabApi api) async {
     try {
       _token ??= await FirebaseMessaging.instance.getToken();
       if (_token == null) return false;
