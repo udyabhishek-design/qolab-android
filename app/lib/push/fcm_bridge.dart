@@ -56,6 +56,10 @@ class FcmBridge {
   /// [_initTimeout] — in every case the app continues without push.
   static Future<void> initializeGuarded() async {
     if (_initialized) return;
+    // Native action channel FIRST and unconditionally: it must work even
+    // when Firebase is degraded (no Play services), otherwise cold-start
+    // accept/decline actions would be lost on those devices.
+    await _wireActions();
     try {
       await Firebase.initializeApp().timeout(_initTimeout);
       await _wireAfterInit();
@@ -74,10 +78,10 @@ class FcmBridge {
   /// Legacy entry kept for tests: same guarded semantics.
   static Future<void> initialize() async => initializeGuarded();
 
-  static Future<void> _wireAfterInit() async {
-    _initialized = true;
-
-    // Native → Dart action sink.
+  /// Native → Dart action sink. Independent of Firebase: v1.5.62's
+  /// MainActivity registers the native half of 'qolab/call_actions' in
+  /// configureFlutterEngine, so this always has a counterpart.
+  static Future<void> _wireActions() async {
     _actionsChannel.setMethodCallHandler((call) async {
       if (call.method == 'callAction' && call.arguments is Map) {
         final args = Map<String, dynamic>.from(call.arguments as Map);
@@ -85,11 +89,19 @@ class FcmBridge {
       }
       return null;
     });
-    // Drain any action captured while the engine was cold.
-    final pending = await _actionsChannel.invokeMethod<Object?>('takePending');
-    if (pending is Map) {
-      _handleAction(Map<String, dynamic>.from(pending));
+    try {
+      // Drain any action captured while the engine was cold.
+      final pending = await _actionsChannel.invokeMethod<Object?>('takePending');
+      if (pending is Map) {
+        _handleAction(Map<String, dynamic>.from(pending));
+      }
+    } on MissingPluginException {
+      // Engine without the native half (tests) — fail closed.
     }
+  }
+
+  static Future<void> _wireAfterInit() async {
+    _initialized = true;
 
     // Foreground messages (app open, screen on).
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {

@@ -44,6 +44,18 @@ android {
     }
 }
 
+// Phase C3A — the app module has its own native FirebaseMessagingService
+// (QolabFirebaseMessagingService.java in src/main/java). The
+// firebase_messaging plugin exposes com.google.firebase:firebase-messaging
+// with `implementation` scope, which is NOT on the app module's javac
+// classpath — the service cannot compile without this direct declaration.
+// (v1.5.61 failed the other way: the .java sources were never compiled at
+// all; BOTH halves are needed: sources under src/main/java + this dep.)
+dependencies {
+    implementation platform('com.google.firebase:firebase-bom:33.7.0')
+    implementation 'com.google.firebase:firebase-messaging'
+}
+
 flutter {
     source = "../.."
 }

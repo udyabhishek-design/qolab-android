@@ -11,9 +11,17 @@ import io.flutter.plugin.common.MethodChannel
  * Phase C3A — bridges FCM notification actions (accept/decline) and
  * notification taps into the Flutter engine.
  *
- * Dart registers itself as the "qolab/call_actions" MethodChannel handler
- * on startup and calls `takePending` to receive any action that arrived
- * while the engine was cold (app terminated — notification button press).
+ * v1.5.62: MainActivity OWNS the native half of the "qolab/call_actions"
+ * MethodChannel. It sets itself as the MethodCallHandler when the engine
+ * is configured, so Dart's `takePending` invokeMethod always has a native
+ * receiver (v1.5.61 shipped no native handler → MissingPluginException),
+ * and wires CallActionSink.channel so live (already-running-app) actions
+ * are delivered via callAction instead of being parked as "pending".
+ *
+ * Dart registers a MethodCallHandler on its end at startup
+ * (fcm_bridge.dart) and calls `takePending` to receive any action that
+ * arrived while the engine was cold (app terminated — notification
+ * button press).
  */
 object CallActionSink {
     @Volatile
@@ -53,13 +61,51 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        // The Dart side (fcm_bridge.dart) creates the MethodChannel on
-        // "qolab/call_actions" and assigns CallActionSink.channel through
-        // the messenger; nothing to do here beyond keeping the engine warm.
+        // Native half of the "qolab/call_actions" channel. Registered here,
+        // per-engine, before the Dart side asks for takePending.
+        val channel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "qolab/call_actions"
+        )
+        channel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                // Dart (fcm_bridge.dart) is up and listening: hand over
+                // any action parked while the engine was cold.
+                "takePending" -> {
+                    val pendingBundle = CallActionSink.pending
+                    CallActionSink.pending = null
+                    if (pendingBundle != null) {
+                        result.success(CallActionSink.bundleToMap(pendingBundle))
+                    } else {
+                        result.success(null)
+                    }
+                }
+                // Dart acknowledges it is ready to receive live actions.
+                "ready" -> {
+                    CallActionSink.channel = channel
+                    result.success(null)
+                }
+                // Keep the live dispatch channel from leaking a dead
+                // engine's channel when the activity is destroyed.
+                "detach" -> {
+                    if (CallActionSink.channel === channel) {
+                        CallActionSink.channel = null
+                    }
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
+        CallActionSink.channel = channel
         CallActionSink.pending?.let { pending ->
             CallActionSink.pending = null
             CallActionSink.dispatch(pending)
         }
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        CallActionSink.channel = null
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
