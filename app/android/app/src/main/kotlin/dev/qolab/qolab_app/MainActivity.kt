@@ -1,7 +1,11 @@
 package dev.qolab.qolab_app
 
+import android.content.Context
 import android.content.Intent
+import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Bundle
+import android.util.Log
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -12,7 +16,7 @@ import io.flutter.plugin.common.MethodChannel
  * notification taps into the Flutter engine.
  *
  * v1.5.62: MainActivity OWNS the native half of the "qolab/call_actions"
- * MethodChannel. It sets itself as the MethodCallHandler when the engine
+ * MethodChannel. It sets itself as a MethodCallHandler when the engine
  * is configured, so Dart's `takePending` invokeMethod always has a native
  * receiver (v1.5.61 shipped no native handler → MissingPluginException),
  * and wires CallActionSink.channel so live (already-running-app) actions
@@ -22,6 +26,11 @@ import io.flutter.plugin.common.MethodChannel
  * (fcm_bridge.dart) and calls `takePending` to receive any action that
  * arrived while the engine was cold (app terminated — notification
  * button press).
+ *
+ * v1.5.64: also owns the native half of "qolab/ringback" — a repeating
+ * outgoing-call ringback tone (ToneGenerator on STREAM_VOICE_CALL) for
+ * the caller while the recipient's device rings. Call-volume behaviour,
+ * no audio-focus contention with the incoming-call ringtone.
  */
 object CallActionSink {
     @Volatile
@@ -46,6 +55,35 @@ object CallActionSink {
             m[key] = b.getString(key)
         }
         return m
+    }
+}
+
+/** Native ringback for outgoing calls (v1.5.64). */
+object Ringback {
+    private const val TAG = "QolabRingback"
+    private const val TONE_VOLUME = 80
+    private const val TONE_DURATION_MS = 400
+
+    private var tone: ToneGenerator? = null
+
+    fun start() {
+        try {
+            stop()
+            tone = ToneGenerator(AudioManager.STREAM_VOICE_CALL, TONE_VOLUME).also { gen ->
+                gen.startTone(ToneGenerator.TONE_SUP_RINGTONE, TONE_DURATION_MS)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "start failed: ${e.message}")
+        }
+    }
+
+    fun stop() {
+        try {
+            tone?.stopTone()
+            tone?.release()
+        } catch (_: Exception) {
+        }
+        tone = null
     }
 }
 
@@ -101,10 +139,30 @@ class MainActivity : FlutterActivity() {
             CallActionSink.pending = null
             CallActionSink.dispatch(pending)
         }
+
+        // Native half of "qolab/ringback" (v1.5.64).
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "qolab/ringback"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    Ringback.start()
+                    result.success(null)
+                }
+                "stop" -> {
+                    Ringback.stop()
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
         CallActionSink.channel = null
+        // Activity/engine teardown: never leave a ringback tone running.
+        Ringback.stop()
         super.cleanUpFlutterEngine(flutterEngine)
     }
 

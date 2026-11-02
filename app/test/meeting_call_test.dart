@@ -192,6 +192,32 @@ void main() {
       expect(c.status, CallStatus.ended);
       expect(c.participants, isEmpty);
     });
+
+    // ── v1.5.64: media publication contract ───────────────────────────
+    // livekit_client does NOT auto-publish mic/camera on plain connect;
+    // the adapter must pass fastConnectOptions. The LiveKitRoom
+    // interface therefore requires the launcher to pin the initial
+    // tracks BEFORE join — the contract is compile-time + wiring, which
+    // we assert here at the interface level.
+
+    test('audio-only join disables camera but keeps mic enabled', () async {
+      // v1.5.64 media fix: the adapter now publishes the mic during the
+      // join handshake (fastConnectOptions) — model that in the fake:
+      // a connected room with the mic published reports isMicEnabled.
+      final room = _FakeRoom()..mic = true;
+      final c = MeetingCallController(
+          api: _TokenApi(body: okToken),
+          meetingId: 20,
+          meetingTitle: 't',
+          localName: 'x',
+          room: room);
+      await c.join(audioOnly: true);
+      // audioOnly seeds the local participant mic-on, camera-off; the
+      // room adapter mirrors that into fastConnectOptions.
+      expect(c.participants.single.micEnabled, isTrue);
+      expect(c.participants.single.cameraEnabled, isFalse);
+      await c.leave();
+    });
   });
 
   group('3+4. mic & camera toggling', () {

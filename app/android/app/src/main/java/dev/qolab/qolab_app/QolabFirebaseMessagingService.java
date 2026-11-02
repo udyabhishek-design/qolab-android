@@ -5,6 +5,8 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.media.AudioAttributes;
+import android.media.RingtoneManager;
 import android.os.Build;
 
 import androidx.annotation.NonNull;
@@ -130,12 +132,30 @@ public class QolabFirebaseMessagingService extends FirebaseMessagingService {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
             return;
         }
+        // v1.5.64 — the incoming-call channel MUST be loud by default.
+        // v1.5.60–1.5.63 created it silent (setSound(null), vibration
+        // off) on the theory the app's own MediaPlayer ringtone would
+        // play. That only works while the PROCESS is alive
+        // (onMessageReceived runs). When the app is KILLED, FCM presents
+        // the notification via the system tray and our code never runs —
+        // a silent channel meant a SILENT incoming call. Default
+        // ringtone + vibration on the channel fixes killed-app delivery;
+        // the in-process ringtone (CallActionReceiver.startRinging) is
+        // still started for foreground/background (process alive), where
+        // it merely overlaps briefly with the tray notification.
         NotificationChannel calls = new NotificationChannel(
                 CHANNEL_CALLS, "Incoming calls",
                 NotificationManager.IMPORTANCE_HIGH);
         calls.setDescription("Qolab incoming call alerts");
-        calls.setSound(null, null); // custom MediaPlayer ringtone instead
-        calls.enableVibration(false); // custom Vibrator pattern instead
+        calls.setSound(
+                RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE),
+                new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build());
+        calls.enableVibration(true);
+        calls.setVibrationPattern(
+                new long[]{0, 600, 400, 600, 400, 600, 400});
         calls.setBypassDnd(false);
 
         NotificationChannel updates = new NotificationChannel(

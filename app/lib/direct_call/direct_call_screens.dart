@@ -9,12 +9,17 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:livekit_client/livekit_client.dart' as lk;
+import 'package:flutter_webrtc/flutter_webrtc.dart' as rtc;
 
 import '../api/qolab_api.dart';
-import '../meetings/call_launcher.dart' show joinDirectCall;
+import '../meetings/call_controller.dart';
+import '../meetings/call_screen.dart';
+import '../meetings/livekit_adapter.dart';
 import '../theme.dart';
 import 'direct_call_controller.dart';
 import 'direct_call_models.dart';
+import 'ringback_tone.dart';
 
 /// Wraps a [DirectCallController] with UI flow management: shows the
 /// appropriate screen for each phase and drives ringtone/vibration while
@@ -50,6 +55,7 @@ class DirectCallCoordinator {
   void detach() {
     controller.removeListener(_onStateChanged);
     _stopRing();
+    unawaited(RingbackTone.stop());
     _context = null;
   }
 
@@ -57,9 +63,19 @@ class DirectCallCoordinator {
     final ctx = _context;
     if (ctx == null) return;
     final s = controller.state;
-    final showRinging =
-        s.phase == DirectCallPhase.ringing || s.phase == DirectCallPhase.dialing;
-    if (showRinging) {
+
+    // ── Audible states (v1.5.64) ────────────────────────────────────
+    // INCOMING (ringing): system alert-tone loop + vibration, as before.
+    // OUTGOING (dialing): proper repeating RINGBACK (ToneGenerator via
+    // qolab/ringback) so the caller hears standard ring-ring while the
+    // recipient's device rings. Stopped on EVERY exit from dialing:
+    // answered, declined, cancelled, missed, failed, or app teardown.
+    if (s.phase == DirectCallPhase.dialing) {
+      unawaited(RingbackTone.start());
+    } else {
+      unawaited(RingbackTone.stop());
+    }
+    if (s.phase == DirectCallPhase.ringing) {
       _startRing();
     } else {
       _stopRing();
@@ -68,7 +84,12 @@ class DirectCallCoordinator {
     if (s.phase == DirectCallPhase.idle) {
       if (_showing) {
         _showing = false;
-        Navigator.of(ctx).canPop() ? Navigator.of(ctx).pop() : null;
+        // v1.5.64: the media screen is INLINE in the flow route now — a
+        // single pop removes the whole call UI. Only pop if the flow
+        // route is still the top-most route we pushed (never pop a
+        // stranger's route out from under the user).
+        final nav = Navigator.of(ctx);
+        if (nav.canPop()) nav.pop();
       }
       return;
     }
@@ -78,6 +99,7 @@ class DirectCallCoordinator {
       return;
     }
     _showing = true;
+    _busy = false;
     Navigator.of(ctx).push(MaterialPageRoute(
       fullscreenDialog: true,
       barrierDismissible: false,
@@ -186,7 +208,6 @@ class _DirectCallFlowScreenState extends State<_DirectCallFlowScreen> {
         localName: widget.coordinator._localName,
       );
     }
-
     if (s.phase == DirectCallPhase.ringing) {
       return _IncomingCallScreen(
           coordinator: widget.coordinator, call: call!);
@@ -421,14 +442,18 @@ class _CallAction extends StatelessWidget {
   }
 }
 
-/// ACTIVE direct call: pushes the meetings LiveKit screen with direct-call
-/// credentials (token already minted via accept/token HTTP — NOT via a
-/// join-token fetch). v1.5.63: routes through [joinDirectCall] so a real
-/// LiveKitRoomAdapter + video renderer are attached and mic/camera
-/// permissions are requested BEFORE LiveKit starts capturing. The bare
-/// MeetingCallScreen.forDirectCall used in ≤v1.5.62 passed no adapter, so
-/// the controller fell back to _NullRoom and every accepted call failed
-/// with "Could not connect to the meeting".
+/// ACTIVE direct call: renders the meetings LiveKit screen INLINE with
+/// direct-call credentials (token already minted via accept/token HTTP —
+/// NOT via a join-token fetch).
+///
+/// v1.5.64 route architecture: the media screen is a CHILD of the flow
+/// route — no second route pushed on top. v1.5.63 pushed a separate
+/// MaterialPageRoute from a post-frame callback; when the call ended, the
+/// coordinator popped once (media route), leaving the ORPHANED flow route
+/// underneath with a dead Close button (stuck "Call ended" screen).
+/// Inline embedding means every terminal path (call.ended, partner left,
+/// local hang-up) tears down the media widget and the SINGLE flow route
+/// in one step.
 class ActiveDirectCallScreen extends StatefulWidget {
   const ActiveDirectCallScreen({
     super.key,
@@ -450,54 +475,171 @@ class ActiveDirectCallScreen extends StatefulWidget {
 }
 
 class _ActiveDirectCallScreenState extends State<ActiveDirectCallScreen> {
-  bool _launched = false;
+  MeetingCallController? _media;
+  LiveKitRoomAdapter? _adapter;
+  bool _leaving = false;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _launch());
+    widget.coordinator.controller.addListener(_onCallStateChanged);
+
+    // Build the media controller inline with the real LiveKit adapter.
+    // Publish local tracks during the join handshake (v1.5.64 media fix);
+    // mic permission was granted when the call flow started.
+    _adapter = LiveKitRoomAdapter();
+    final cameraCall = widget.call.callType == 'video';
+    _adapter!.setInitialTracks(publishMic: true, publishCamera: cameraCall);
+    _media = MeetingCallController(
+      api: widget.coordinator.api,
+      meetingId: 0,
+      meetingTitle: (cameraCall ? 'Video call · ' : 'Call · ') +
+          (widget.call.recipient?.name ??
+              widget.call.caller?.name ??
+              'Member'),
+      localName: widget.localName,
+      room: _adapter!,
+    );
+    _media!.join(
+        audioOnly: !cameraCall,
+        directToken: widget.token,
+        directUrl: widget.url);
   }
 
-  Future<void> _launch() async {
-    if (_launched || !mounted) return;
-    _launched = true;
-    await joinDirectCall(
-      context,
-      api: widget.coordinator.api,
-      token: widget.token,
-      serverUrl: widget.url ?? '',
-      title: (widget.call.callType == 'video' ? 'Video call · ' : 'Call · ') +
-          (widget.call.recipient?.name ?? widget.call.caller?.name ?? 'Member'),
-      localName: widget.localName,
-      videoCall: widget.call.isVideo,
-      onLeave: () => widget.coordinator.controller.hangUp(),
-    );
+  void _onCallStateChanged() {
+    final s = widget.coordinator.controller.state;
+    final terminal =
+        s.phase == DirectCallPhase.idle || s.phase == DirectCallPhase.ended;
+    if (terminal && !_leaving) {
+      // Partner ended/declined/cancelled, or the backend transitioned the
+      // call (call.ended via Reverb or FCM) — tear down media; the flow
+      // screen then shows the ended banner whose Close pops the ONE route.
+      _teardownMedia();
+    }
+  }
+
+  Future<void> _teardownMedia() async {
+    if (_leaving) return;
+    _leaving = true;
+    final m = _media;
+    final a = _adapter;
+    if (m != null && m.status != CallStatus.ended) {
+      try {
+        await m.leave();
+      } catch (_) {}
+    }
+    // Fully dispose the room (disconnect + dispose) — adapter.dispose()
+    // alone leaves livekit's engine timers alive after route teardown.
+    if (a != null) {
+      try {
+        await a.disconnect();
+      } catch (_) {}
+      a.dispose();
+    }
+    _adapter = null;
+    _media = null;
+    if (mounted) setState(() {});
+  }
+
+  /// Local hang-up (End Call in the media controls).
+  Future<void> _localHangUp() async {
+    await _teardownMedia();
+    await widget.coordinator.controller.hangUp();
+  }
+
+  @override
+  void dispose() {
+    widget.coordinator.controller.removeListener(_onCallStateChanged);
+    final a = _adapter;
+    if (a != null) {
+      // Route torn down without teardown (edge: parent popped the whole
+      // navigator): synchronously release what we can.
+      try {
+        unawaited(a.disconnect());
+      } catch (_) {}
+      a.dispose();
+    }
+    _media?.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Connecting placeholder while permissions resolve and the call route
-    // is being pushed by _launch().
-    return Scaffold(
-      backgroundColor: QolabTheme.ink,
-      body: const SafeArea(
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                width: 24,
-                height: 24,
-                child: CircularProgressIndicator(
-                    strokeWidth: 2.2, color: Colors.white70),
-              ),
-              SizedBox(height: 12),
-              Text('Connecting…',
-                  style: TextStyle(color: Colors.white70, fontSize: 14)),
-            ],
-          ),
-        ),
-      ),
+    final media = _media;
+    final s = widget.coordinator.controller.state;
+    final terminal = s.phase == DirectCallPhase.idle ||
+        s.phase == DirectCallPhase.ended;
+    if (media != null && !terminal) {
+      return MeetingCallScreen.hosted(
+        controller: media,
+        videoRendererBuilder: (c, p) => _adapter == null
+            ? const SizedBox.shrink()
+            : _DirectCallVideoTile(adapter: _adapter!, participant: p),
+        onLocalLeave: _localHangUp,
+      );
+    }
+    // Media gone / call terminal: compact ended banner on this route.
+    return _CallEndedScreen(
+      state: s,
+      onClose: widget.coordinator.controller.dismiss,
+    );
+  }
+}
+
+/// Inline video tile for the direct call's media screen — mirrors the
+/// launcher's tile but without permission handling (the direct-call flow
+/// already resolved them).
+class _DirectCallVideoTile extends StatefulWidget {
+  const _DirectCallVideoTile({required this.adapter, required this.participant});
+
+  final LiveKitRoomAdapter adapter;
+  final CallParticipant participant;
+
+  @override
+  State<_DirectCallVideoTile> createState() => _DirectCallVideoTileState();
+}
+
+class _DirectCallVideoTileState extends State<_DirectCallVideoTile> {
+  lk.VideoTrack? _track;
+  StreamSubscription<LiveKitEvent>? _sub;
+
+  void _resync() {
+    final p = widget.participant;
+    final lk.VideoTrack? next = p.isLocal
+        ? widget.adapter.localVideoTrack
+        : widget.adapter.videoTrackFor(p.identity);
+    if (!identical(next, _track)) {
+      setState(() => _track = next);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _resync();
+    _sub = widget.adapter.events.listen((_) {
+      if (mounted) _resync();
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final track = _track;
+    if (track == null) {
+      return Container(color: const Color(0xFF231D27));
+    }
+    return lk.VideoTrackRenderer(
+      track,
+      fit: rtc.RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+      mirrorMode: widget.participant.isLocal
+          ? lk.VideoViewMirrorMode.mirror
+          : lk.VideoViewMirrorMode.off,
     );
   }
 }

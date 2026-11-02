@@ -13,6 +13,7 @@ import 'dart:async';
 
 import 'package:livekit_client/livekit_client.dart' as lk;
 
+import '../util/log.dart';
 import 'call_controller.dart';
 
 class LiveKitRoomAdapter implements LiveKitRoom {
@@ -32,38 +33,85 @@ class LiveKitRoomAdapter implements LiveKitRoom {
     final r = lk.Room();
     _room = r;
     _listener = r.createListener()
-      ..on<lk.RoomConnectedEvent>(
-          (_) => _emit(const ConnectionChanged(CallStatus.connected)))
+      ..on<lk.RoomConnectedEvent>((_) {
+        qolabLog('livekit: room connected '
+            'mic=$_enableMicOnJoin cam=$_enableCameraOnJoin');
+        _emit(const ConnectionChanged(CallStatus.connected));
+      })
       ..on<lk.RoomReconnectingEvent>(
           (_) => _emit(const ConnectionChanged(CallStatus.reconnecting)))
       ..on<lk.RoomReconnectedEvent>(
           (_) => _emit(const ConnectionChanged(CallStatus.connected)))
-      ..on<lk.RoomDisconnectedEvent>(
-          (_) => _emit(const ConnectionChanged(CallStatus.ended)))
-      ..on<lk.ParticipantConnectedEvent>((e) => _emit(ParticipantJoined(
-          e.participant.identity,
-          e.participant.name.isNotEmpty
-              ? e.participant.name
-              : e.participant.identity)))
-      ..on<lk.ParticipantDisconnectedEvent>(
-          (e) => _emit(ParticipantLeft(e.participant.identity)))
+      ..on<lk.RoomDisconnectedEvent>((e) {
+        qolabLog('livekit: room disconnected reason=${e.reason?.name}');
+        _emit(const ConnectionChanged(CallStatus.ended));
+      })
+      ..on<lk.ParticipantConnectedEvent>((e) {
+        qolabLog('livekit: participant joined ${e.participant.identity}');
+        _emit(ParticipantJoined(
+            e.participant.identity,
+            e.participant.name.isNotEmpty
+                ? e.participant.name
+                : e.participant.identity));
+      })
+      ..on<lk.ParticipantDisconnectedEvent>((e) {
+        qolabLog('livekit: participant left ${e.participant.identity}');
+        _emit(ParticipantLeft(e.participant.identity));
+      })
       // Every track publication/subscription/mute change resyncs the
       // affected participant — immune to per-track event-order races.
-      ..on<lk.TrackSubscribedEvent>((e) => _emitTrack(e.participant.identity))
-      ..on<lk.TrackUnsubscribedEvent>(
-          (e) => _emitTrack(e.participant.identity))
+      ..on<lk.TrackSubscribedEvent>((e) {
+        qolabLog('livekit: track subscribed '
+            '${e.participant.identity} ${e.track.kind.name}');
+        _emitTrack(e.participant.identity);
+      })
+      ..on<lk.TrackUnsubscribedEvent>((e) {
+        qolabLog('livekit: track unsubscribed ${e.participant.identity}');
+        _emitTrack(e.participant.identity);
+      })
       ..on<lk.TrackMutedEvent>((e) => _emitTrack(e.participant.identity))
       ..on<lk.TrackUnmutedEvent>((e) => _emitTrack(e.participant.identity))
-      ..on<lk.LocalTrackPublishedEvent>(
-          (e) => _emitTrack(e.participant.identity))
-      ..on<lk.LocalTrackUnpublishedEvent>(
-          (e) => _emitTrack(e.participant.identity));
+      ..on<lk.LocalTrackPublishedEvent>((e) {
+        qolabLog('livekit: local track published '
+            '${e.publication.kind.name}');
+        _emitTrack(e.participant.identity);
+      })
+      ..on<lk.LocalTrackUnpublishedEvent>((e) {
+        qolabLog('livekit: local track unpublished '
+            '${e.publication.kind.name}');
+        _emitTrack(e.participant.identity);
+      });
   }
 
   @override
   Future<void> connect(String url, String token) async {
     if (_room == null || _room!.isDisposed) _wireRoom();
-    await room.connect(url, token);
+    await room.connect(
+      url,
+      token,
+      // v1.5.64: livekit_client does NOT auto-publish mic/camera on a
+      // plain connect(). Without fastConnectOptions both participants
+      // joined with zero tracks published — call screen showed, media
+      // was dead in both directions. fastConnect publishes the local
+      // mic/camera during the join handshake itself, before the remote
+      // sees us arrive.
+      fastConnectOptions: lk.FastConnectOptions(
+        microphone: lk.TrackOption(enabled: _enableMicOnJoin),
+        camera: lk.TrackOption(enabled: _enableCameraOnJoin),
+      ),
+    );
+  }
+
+  /// Whether the next connect() should publish the mic/camera (set from
+  /// the call's audioOnly/videoCall flags before joining).
+  bool _enableMicOnJoin = true;
+  bool _enableCameraOnJoin = false;
+
+  /// Configure which local tracks the NEXT connect publishes via
+  /// fastConnect. Must be set before connect() is awaited.
+  void setInitialTracks({required bool publishMic, required bool publishCamera}) {
+    _enableMicOnJoin = publishMic;
+    _enableCameraOnJoin = publishCamera;
   }
 
   /// Exposed for the video widgets: a remote's subscribed video track.

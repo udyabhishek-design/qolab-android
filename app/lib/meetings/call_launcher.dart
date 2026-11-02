@@ -27,9 +27,11 @@ Future<bool> joinMeetingCall(
   required String localName,
 }) async {
   bool cameraGranted = false;
+  bool micGranted = true;
   try {
     final mic = await Permission.microphone.request();
-    if (mic.isGranted || mic.isLimited) {
+    micGranted = mic.isGranted || mic.isLimited;
+    if (micGranted) {
       final cam = await Permission.camera.request();
       cameraGranted = cam.isGranted || cam.isLimited;
     }
@@ -43,6 +45,10 @@ Future<bool> joinMeetingCall(
     adapter.dispose();
     return false;
   }
+  // v1.5.64: publish local tracks during the join handshake (the adapter
+  // passes these as fastConnectOptions) — without this, livekit_client
+  // connected with zero published tracks and media was dead both ways.
+  adapter.setInitialTracks(publishMic: micGranted, publishCamera: cameraGranted);
   await Navigator.of(context).push(MaterialPageRoute(
     fullscreenDialog: true,
     builder: (_) => MeetingCallScreen(
@@ -84,9 +90,11 @@ Future<bool> joinDirectCall(
   Future<void> Function()? onLeave,
 }) async {
   bool cameraGranted = false;
+  bool micGrantedForDirect = true;
   try {
     final mic = await Permission.microphone.request();
-    if (videoCall && (mic.isGranted || mic.isLimited)) {
+    micGrantedForDirect = mic.isGranted || mic.isLimited;
+    if (videoCall && micGrantedForDirect) {
       final cam = await Permission.camera.request();
       cameraGranted = cam.isGranted || cam.isLimited;
     }
@@ -100,6 +108,10 @@ Future<bool> joinDirectCall(
     adapter.dispose();
     return false;
   }
+  // v1.5.64: publish mic (+ camera when granted on a video call) during
+  // the join handshake — see joinMeetingCall above.
+  adapter.setInitialTracks(
+      publishMic: micGrantedForDirect, publishCamera: cameraGranted);
   await Navigator.of(context).push(MaterialPageRoute(
     fullscreenDialog: true,
     builder: (_) => MeetingCallScreen.forDirectCall(

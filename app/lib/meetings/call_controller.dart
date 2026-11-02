@@ -227,8 +227,14 @@ class MeetingCallController extends ChangeNotifier {
             error: 'Connection lost. Please rejoin the meeting.');
       }
     });
+    // v1.5.64: the join future is RETAINED. Disposing a livekit Room while
+    // its connect() future is still in flight leaves the engine's
+    // reconnect timers alive after teardown (leaked-Timer assertion in
+    // tests; ghost reconnects on device). leave() / dispose() await
+    // _settleJoin() first.
+    _joinFuture = room.connect(connectUrl, connectToken!);
     try {
-      await room.connect(connectUrl, connectToken!);
+      await _joinFuture;
     } catch (_) {
       _setState(CallStatus.failed,
           error: 'Could not connect to the meeting. Please try again.');
@@ -369,11 +375,24 @@ class MeetingCallController extends ChangeNotifier {
     _notify();
   }
 
+  Future<void>? _joinFuture;
+
+  /// v1.5.64: await any in-flight connect() before teardown — disposing a
+  /// Room mid-connect leaks the engine's reconnect timers.
+  Future<void> _settleJoin() async {
+    final f = _joinFuture;
+    if (f == null) return;
+    try {
+      await f;
+    } catch (_) {}
+  }
+
   /// Leave: idempotent, full teardown. Order matters — stop tracks/room
   /// first so no ghost participant outlives the local one, then mark ended.
   Future<void> leave() async {
     if (_leaving || status == CallStatus.ended) return;
     _leaving = true;
+    await _settleJoin();
     try {
       await room.disconnect();
     } catch (_) {

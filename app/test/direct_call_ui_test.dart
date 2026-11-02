@@ -57,7 +57,8 @@ void main() {
     );
     // Seed the desired phase without touching real network paths.
     controller.debugSetState(phase, call,
-        token: phase == DirectCallPhase.active ? 'tok' : null);
+        token: phase == DirectCallPhase.active ? 'tok' : null,
+        url: phase == DirectCallPhase.active ? 'wss://lk.example/room' : null);
     final coordinator = DirectCallCoordinator(controller: controller, api: api);
 
     await tester.pumpWidget(MaterialApp(
@@ -127,16 +128,36 @@ void main() {
   // ── 1. accept path no longer constructs a bare MeetingCallScreen ────
 
   testWidgets(
-      'active phase shows the connecting placeholder inside the flow route '
-      '(launcher pushes the media route; no _NullRoom fallback)',
+      'active phase renders the inline media screen (MeetingCallScreen '
+      'hosted INSIDE the flow route — v1.5.64 single-route architecture)',
       (tester) async {
     const size = Size(360, 800);
-    await pumpFlow(tester, size, DirectCallPhase.active, incomingCall());
-    // The active phase renders the connecting placeholder while
-    // joinDirectCall resolves permissions. It must NOT render the
-    // meetings call screen's joining state inside this widget tree
-    // (that lives on the pushed route).
-    expect(find.text('Connecting…'), findsOneWidget);
-    expect(find.text('Joining meeting…'), findsNothing);
+    final controller = DirectCallController(api: api, socket: null, myUserId: 26);
+    controller.debugSetState(DirectCallPhase.active, incomingCall(),
+        token: 'tok', url: 'wss://lk.example/room');
+    final coordinator = DirectCallCoordinator(controller: controller, api: api);
+    tester.view.physicalSize = size;
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(MaterialApp(
+      home: DirectCallFlowScreenHost(coordinator: coordinator),
+    ));
+    await tester.pump();
+    // v1.5.64: the media screen is hosted inline (no second route push).
+    // The hosted MeetingCallScreen shows the joining state on THIS route
+    // while the LiveKit adapter connects.
+    expect(find.text('Joining meeting…'), findsOneWidget);
+
+    // Settle: fire livekit's 10s timers. Timer 1: the engine's connect
+    // timeout (pending from the failed join). Then dismiss — teardown
+    // runs room.disconnect(), whose internal 10s waitFor timer must also
+    // fire before the test ends.
+    await tester.pump(const Duration(seconds: 11));
+    controller.dismiss();
+    await tester.pump(); // teardown starts
+    await tester.pump(const Duration(seconds: 11)); // disconnect waitFor fires
+    controller.dispose();
+    await tester.pump(const Duration(milliseconds: 100));
   });
 }

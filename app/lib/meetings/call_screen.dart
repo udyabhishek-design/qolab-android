@@ -32,7 +32,8 @@ class MeetingCallScreen extends StatefulWidget {
     this.token,
     this.serverUrl,
     this.onLeave,
-  });
+  })  : _hostedController = null,
+        onLocalLeave = null;
 
   /// Direct Calling (Phase C1): join with a PRE-MINTED LiveKit token
   /// instead of fetching a meetings join-token. [onLeave] runs after the
@@ -49,7 +50,32 @@ class MeetingCallScreen extends StatefulWidget {
     this.videoRendererBuilder,
     this.onLeave,
   })  : meetingId = 0,
-        meetingTitle = title;
+        meetingTitle = title,
+        _hostedController = null,
+        onLocalLeave = null;
+
+  /// v1.5.64 Direct Calling: host an ALREADY-CONSTRUCTED controller
+  /// (built by the direct-call flow with a real adapter) INSIDE an
+  /// existing route — no push, no navigation. The hosted screen never
+  /// pops or joins; the host widget decides when to dispose it
+  /// ([onLocalLeave] fires when the user presses End Call).
+  MeetingCallScreen.hosted({
+    super.key,
+    required MeetingCallController controller,
+    this.videoRendererBuilder,
+    required this.onLocalLeave,
+  })  : _hostedController = controller,
+        api = controller.api,
+        meetingId = controller.meetingId,
+        meetingTitle = controller.meetingTitle,
+        localName = controller.localName,
+        audioOnly = false,
+        adapter = null,
+        token = null,
+        serverUrl = null,
+        onLeave = null;
+
+  final MeetingCallController? _hostedController;
 
   final QolabApi api;
   final int meetingId;
@@ -62,6 +88,9 @@ class MeetingCallScreen extends StatefulWidget {
 
   /// Direct-call mode: called when the user leaves the call.
   final Future<void> Function()? onLeave;
+
+  /// Hosted mode: called by the host (direct-call flow) on local End Call.
+  final Future<void> Function()? onLocalLeave;
 
   /// Join without camera (permission denied or user choice).
   final bool audioOnly;
@@ -79,24 +108,33 @@ class MeetingCallScreen extends StatefulWidget {
 }
 
 class _MeetingCallScreenState extends State<MeetingCallScreen> {
+  /// Hosted mode (v1.5.64 direct calling): the controller was built and
+  /// joined by the host widget — this screen only renders and listens,
+  /// and never owns dispose/navigation.
   late final MeetingCallController _call;
   bool _leaving = false;
+
+  bool get _hosted => widget._hostedController != null;
 
   @override
   void initState() {
     super.initState();
-    _call = MeetingCallController(
-      api: widget.api,
-      meetingId: widget.meetingId,
-      meetingTitle: widget.meetingTitle,
-      localName: widget.localName,
-      room: widget.adapter ?? _NullRoom(),
-    );
+    if (!_hosted) {
+      _call = MeetingCallController(
+        api: widget.api,
+        meetingId: widget.meetingId,
+        meetingTitle: widget.meetingTitle,
+        localName: widget.localName,
+        room: widget.adapter ?? _NullRoom(),
+      );
+      _call.join(
+          audioOnly: widget.audioOnly,
+          directToken: widget.token,
+          directUrl: widget.serverUrl);
+    } else {
+      _call = widget._hostedController!;
+    }
     _call.addListener(_onChanged);
-    _call.join(
-        audioOnly: widget.audioOnly,
-        directToken: widget.token,
-        directUrl: widget.serverUrl);
   }
 
   void _onChanged() {
@@ -105,7 +143,8 @@ class _MeetingCallScreenState extends State<MeetingCallScreen> {
     // build() reads controller state directly, so it must be invalidated
     // here or the screen stays frozen on its first frame.
     setState(() {});
-    if (_call.status == CallStatus.ended && !_leaving) {
+    // Hosted mode: navigation is the HOST's job — never pop from here.
+    if (!_hosted && _call.status == CallStatus.ended && !_leaving) {
       Navigator.of(context).maybePop();
     }
   }
@@ -113,13 +152,24 @@ class _MeetingCallScreenState extends State<MeetingCallScreen> {
   @override
   void dispose() {
     _call.removeListener(_onChanged);
-    _call.dispose();
+    if (!_hosted) _call.dispose();
     super.dispose();
   }
 
   Future<void> _leave() async {
     if (_leaving) return;
     _leaving = true;
+    if (_hosted) {
+      // Hosted: teardown + navigation belong to the host (direct-call
+      // flow tears down media and dismisses its own single route).
+      final host = widget.onLocalLeave;
+      if (host != null) {
+        try {
+          await host();
+        } catch (_) {}
+      }
+      return;
+    }
     await _call.leave();
     if (widget.onLeave != null) {
       try {
