@@ -11,7 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../api/qolab_api.dart';
-import '../meetings/call_screen.dart';
+import '../meetings/call_launcher.dart' show joinDirectCall;
 import '../theme.dart';
 import 'direct_call_controller.dart';
 import 'direct_call_models.dart';
@@ -133,6 +133,18 @@ class DirectCallCoordinator {
 
 /// Single flow screen: renders per-phase content. When the call becomes
 /// ACTIVE it swaps to the meetings LiveKit screen (audio-first).
+/// Public host for [_DirectCallFlowScreen] so widget tests can pump a
+/// seeded phase without a live socket or network.
+class DirectCallFlowScreenHost extends StatelessWidget {
+  const DirectCallFlowScreenHost({super.key, required this.coordinator});
+
+  final DirectCallCoordinator coordinator;
+
+  @override
+  Widget build(BuildContext context) =>
+      _DirectCallFlowScreen(coordinator: coordinator);
+}
+
 class _DirectCallFlowScreen extends StatefulWidget {
   const _DirectCallFlowScreen({required this.coordinator});
 
@@ -200,51 +212,63 @@ class _IncomingCallScreen extends StatelessWidget {
     final isVideo = call.isVideo;
     return Scaffold(
       backgroundColor: QolabTheme.ink,
+      // v1.5.63: explicit Center + ConstrainedBox (same as outgoing) so
+      // the incoming UI stays horizontally centered on every form factor.
       body: SafeArea(
-        child: Column(
-          children: [
-            const Spacer(flex: 2),
-            CircleAvatar(
-              radius: 44,
-              backgroundColor: QolabTheme.canvas,
-              child: Text(
-                (peer?.name ?? '?').characters.first.toUpperCase(),
-                style: const TextStyle(
-                    color: QolabTheme.ink, fontSize: 30, fontWeight: FontWeight.w700),
-              ),
-            ),
-            const SizedBox(height: 18),
-            Text(peer?.name ?? 'Member',
-                style: const TextStyle(
-                    color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
-            Text(
-              isVideo ? 'Incoming video call' : 'Incoming audio call',
-              style: const TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            const Spacer(flex: 3),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
               children: [
-                _CallAction(
-                  icon: Icons.call_end,
-                  label: 'Decline',
-                  color: Colors.red.shade600,
-                  onPressed: () async {
-                    await coordinator.handleDecline();
-                  },
+                const Spacer(flex: 2),
+                CircleAvatar(
+                  key: const Key('incoming-avatar'),
+                  radius: 44,
+                  backgroundColor: QolabTheme.canvas,
+                  child: Text(
+                    (peer?.name ?? '?').characters.first.toUpperCase(),
+                    style: const TextStyle(
+                        color: QolabTheme.ink,
+                        fontSize: 30,
+                        fontWeight: FontWeight.w700),
+                  ),
                 ),
-                _CallAction(
-                  icon: isVideo ? Icons.videocam : Icons.call,
-                  label: 'Accept',
-                  color: Colors.green.shade600,
-                  onPressed: () async {
-                    await coordinator.handleAccept();
-                  },
+                const SizedBox(height: 18),
+                Text(peer?.name ?? 'Member',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
+                Text(
+                  isVideo ? 'Incoming video call' : 'Incoming audio call',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
                 ),
+                const Spacer(flex: 3),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _CallAction(
+                      icon: Icons.call_end,
+                      label: 'Decline',
+                      color: Colors.red.shade600,
+                      onPressed: () async {
+                        await coordinator.handleDecline();
+                      },
+                    ),
+                    _CallAction(
+                      icon: isVideo ? Icons.videocam : Icons.call,
+                      label: 'Accept',
+                      color: Colors.green.shade600,
+                      onPressed: () async {
+                        await coordinator.handleAccept();
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 48),
               ],
             ),
-            const SizedBox(height: 48),
-          ],
+          ),
         ),
       ),
     );
@@ -262,44 +286,63 @@ class _OutgoingCallScreen extends StatelessWidget {
     final peer = call.recipient;
     return Scaffold(
       backgroundColor: QolabTheme.ink,
+      // v1.5.63: explicit Center + ConstrainedBox so the dialing UI is
+      // horizontally centered on every form factor (narrow phones like the
+      // G32 AND wide emulators like BlueStacks) instead of relying on a
+      // full-width Column, which the platform view inset on some devices
+      // could offset. Content is capped at 420 logical px of width.
       body: SafeArea(
-        child: Column(
-          children: [
-            const Spacer(flex: 2),
-            CircleAvatar(
-              radius: 44,
-              backgroundColor: QolabTheme.canvas,
-              child: Text(
-                (peer?.name ?? '?').characters.first.toUpperCase(),
-                style: const TextStyle(
-                    color: QolabTheme.ink, fontSize: 30, fontWeight: FontWeight.w700),
-              ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              children: [
+                const Spacer(flex: 2),
+                CircleAvatar(
+                  key: const Key('outgoing-avatar'),
+                  radius: 44,
+                  backgroundColor: QolabTheme.canvas,
+                  child: Text(
+                    (peer?.name ?? '?').characters.first.toUpperCase(),
+                    style: const TextStyle(
+                        color: QolabTheme.ink,
+                        fontSize: 30,
+                        fontWeight: FontWeight.w700),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(peer?.name ?? 'Member',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white70),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  call.isVideo ? 'Ringing · video call' : 'Ringing · audio call',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const Spacer(flex: 3),
+                Center(
+                  child: _CallAction(
+                    icon: Icons.call_end,
+                    label: 'Cancel',
+                    color: Colors.red.shade600,
+                    onPressed: () => coordinator.handleCancel(),
+                  ),
+                ),
+                const SizedBox(height: 48),
+              ],
             ),
-            const SizedBox(height: 18),
-            Text(peer?.name ?? 'Member',
-                style: const TextStyle(
-                    color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            const SizedBox(
-              width: 22,
-              height: 22,
-              child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Colors.white70),
-            ),
-            const SizedBox(height: 10),
-            Text(
-              call.isVideo ? 'Ringing · video call' : 'Ringing · audio call',
-              style: const TextStyle(color: Colors.white70, fontSize: 14),
-            ),
-            const Spacer(flex: 3),
-            _CallAction(
-              icon: Icons.call_end,
-              label: 'Cancel',
-              color: Colors.red.shade600,
-              onPressed: () => coordinator.handleCancel(),
-            ),
-            const SizedBox(height: 48),
-          ],
+          ),
         ),
       ),
     );
@@ -378,10 +421,15 @@ class _CallAction extends StatelessWidget {
   }
 }
 
-/// ACTIVE direct call: wraps the meetings LiveKit screen with direct-call
+/// ACTIVE direct call: pushes the meetings LiveKit screen with direct-call
 /// credentials (token already minted via accept/token HTTP — NOT via a
-/// join-token fetch) and routes HangUp to the direct-call end endpoint.
-class ActiveDirectCallScreen extends StatelessWidget {
+/// join-token fetch). v1.5.63: routes through [joinDirectCall] so a real
+/// LiveKitRoomAdapter + video renderer are attached and mic/camera
+/// permissions are requested BEFORE LiveKit starts capturing. The bare
+/// MeetingCallScreen.forDirectCall used in ≤v1.5.62 passed no adapter, so
+/// the controller fell back to _NullRoom and every accepted call failed
+/// with "Could not connect to the meeting".
+class ActiveDirectCallScreen extends StatefulWidget {
   const ActiveDirectCallScreen({
     super.key,
     required this.coordinator,
@@ -398,16 +446,58 @@ class ActiveDirectCallScreen extends StatelessWidget {
   final String localName;
 
   @override
+  State<ActiveDirectCallScreen> createState() => _ActiveDirectCallScreenState();
+}
+
+class _ActiveDirectCallScreenState extends State<ActiveDirectCallScreen> {
+  bool _launched = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _launch());
+  }
+
+  Future<void> _launch() async {
+    if (_launched || !mounted) return;
+    _launched = true;
+    await joinDirectCall(
+      context,
+      api: widget.coordinator.api,
+      token: widget.token,
+      serverUrl: widget.url ?? '',
+      title: (widget.call.callType == 'video' ? 'Video call · ' : 'Call · ') +
+          (widget.call.recipient?.name ?? widget.call.caller?.name ?? 'Member'),
+      localName: widget.localName,
+      videoCall: widget.call.isVideo,
+      onLeave: () => widget.coordinator.controller.hangUp(),
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MeetingCallScreen.forDirectCall(
-      api: coordinator.api,
-      token: token,
-      serverUrl: url,
-      title: (call.callType == 'video' ? 'Video call · ' : 'Call · ') +
-          (call.recipient?.name ?? call.caller?.name ?? 'Member'),
-      localName: localName,
-      audioOnly: !call.isVideo,
-      onLeave: () => coordinator.controller.hangUp(),
+    // Connecting placeholder while permissions resolve and the call route
+    // is being pushed by _launch().
+    return Scaffold(
+      backgroundColor: QolabTheme.ink,
+      body: const SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2.2, color: Colors.white70),
+              ),
+              SizedBox(height: 12),
+              Text('Connecting…',
+                  style: TextStyle(color: Colors.white70, fontSize: 14)),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

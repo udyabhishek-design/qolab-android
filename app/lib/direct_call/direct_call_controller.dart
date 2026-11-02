@@ -92,6 +92,20 @@ class DirectCallController extends ChangeNotifier {
   DirectCallState _state = const DirectCallState();
   DirectCallState get state => _state;
 
+  /// Test-only: seed a phase directly (no network, no socket events).
+  @visibleForTesting
+  void debugSetState(DirectCallPhase phase, DirectCallData? call,
+      {String? token, String? url}) {
+    _state = DirectCallState(
+      phase: phase,
+      call: call,
+      token: token,
+      url: url,
+      isOutgoing: phase == DirectCallPhase.dialing,
+    );
+    _notify();
+  }
+
   VoidCallback? _cancelSubscription;
   StreamSubscription<void>? _resyncSub;
   bool _disposed = false;

@@ -60,6 +60,65 @@ Future<bool> joinMeetingCall(
   return true;
 }
 
+/// Direct Calling (C2 fix, v1.5.63) — joins a one-to-one call with
+/// PRE-MINTED LiveKit credentials (from POST /chat/calls/{id}/accept or
+/// /start — never fetched via a meetings join-token).
+///
+/// Mirrors [joinMeetingCall]'s production integration exactly:
+/// runtime permissions first (camera denial → audio-only fallback), a
+/// REAL [LiveKitRoomAdapter] + video renderer (v1.5.62 passed neither,
+/// so MeetingCallScreen fell back to _NullRoom and every accept failed
+/// with "Could not connect to the meeting"), and adapter disposal on
+/// pop so no LiveKit session lingers after the call screen closes.
+///
+/// `videoCall` controls whether camera permission is requested at all —
+/// audio calls never trigger the camera prompt.
+Future<bool> joinDirectCall(
+  BuildContext context, {
+  required QolabApi api,
+  required String token,
+  required String serverUrl,
+  required String title,
+  required String localName,
+  required bool videoCall,
+  Future<void> Function()? onLeave,
+}) async {
+  bool cameraGranted = false;
+  try {
+    final mic = await Permission.microphone.request();
+    if (videoCall && (mic.isGranted || mic.isLimited)) {
+      final cam = await Permission.camera.request();
+      cameraGranted = cam.isGranted || cam.isLimited;
+    }
+  } catch (_) {
+    // permission_handler unavailable — join anyway; the call screen will
+    // surface any track failure as a clean error state.
+  }
+
+  final adapter = LiveKitRoomAdapter();
+  if (!context.mounted) {
+    adapter.dispose();
+    return false;
+  }
+  await Navigator.of(context).push(MaterialPageRoute(
+    fullscreenDialog: true,
+    builder: (_) => MeetingCallScreen.forDirectCall(
+      api: api,
+      token: token,
+      serverUrl: serverUrl,
+      title: title,
+      localName: localName,
+      audioOnly: !cameraGranted,
+      adapter: adapter,
+      videoRendererBuilder: (context, p) =>
+          _LiveVideoTile(adapter: adapter, participant: p),
+      onLeave: onLeave,
+    ),
+  ));
+  adapter.dispose();
+  return true;
+}
+
 /// Binds a participant tile to their LiveKit video track. Remotes render
 /// their subscribed RemoteVideoTrack; the local tile renders the published
 /// LocalVideoTrack (mirrored). No track → dark tile (the avatar fallback
