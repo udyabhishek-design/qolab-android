@@ -110,6 +110,7 @@ class DirectCallController extends ChangeNotifier {
   StreamSubscription<void>? _resyncSub;
   bool _disposed = false;
   Timer? _ringTimeout;
+  Timer? _dialPollTimer;
 
   /// Attach the user-channel listener (idempotent).
   void attach() {
@@ -284,6 +285,7 @@ class DirectCallController extends ChangeNotifier {
       return; // accepted for another call / we're the accepter
     }
     _ringTimeout?.cancel();
+    _dialPollTimer?.cancel();
     _state = current.copyWith(
         phase: DirectCallPhase.connecting, call: call, isOutgoing: true);
     _notify();
@@ -341,6 +343,7 @@ class DirectCallController extends ChangeNotifier {
         url: decoded?['url'] is String ? decoded!['url'] as String : null,
       );
       _armRingTimeout(call.callId);
+      _startDialPoll(call.callId);
       _notify();
       return null;
     } on ApiException catch (e) {
@@ -396,10 +399,54 @@ class DirectCallController extends ChangeNotifier {
     } catch (_) {/* UI already reset; server state is authoritative on next recover */ }
   }
 
+  void _startDialPoll(String callId) {
+    _dialPollTimer?.cancel();
+    _dialPollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (_disposed ||
+          _state.phase != DirectCallPhase.dialing ||
+          _state.call?.callId != callId) {
+        _dialPollTimer?.cancel();
+        return;
+      }
+      unawaited(_pollDialingCall(callId));
+    });
+  }
+
+  Future<void> _pollDialingCall(String callId) async {
+    try {
+      final body = await api.fetchActiveDirectCalls();
+      final decoded = _decode(body);
+      final calls = decoded?['calls'];
+      if (decoded?['success'] != true || calls is! List) return;
+      if (_disposed ||
+          _state.phase != DirectCallPhase.dialing ||
+          _state.call?.callId != callId) {
+        return;
+      }
+      for (final raw in calls) {
+        final call = DirectCallData.fromJson(raw);
+        if (call == null || call.callId != callId) continue;
+        if (call.isActive || call.status == 'accepted') {
+          _onAccepted(raw);
+        }
+        return;
+      }
+      // Call is no longer ringing or active on the server -> ended/declined/missed.
+      _dialPollTimer?.cancel();
+      _ringTimeout?.cancel();
+      _state = _state.copyWith(
+          phase: DirectCallPhase.ended, endedReason: 'ended');
+      _notify();
+    } catch (_) {
+      // Transient network hiccup; keep polling until ring timeout.
+    }
+  }
+
   Future<void> cancelOutgoing() async {
     final call = _state.call;
     if (call == null) return;
     _ringTimeout?.cancel();
+    _dialPollTimer?.cancel();
     _state = const DirectCallState();
     _notify();
     try {
@@ -468,6 +515,11 @@ class DirectCallController extends ChangeNotifier {
       final calls = decoded?['calls'];
       if (decoded?['success'] != true || calls is! List) return;
       final current = _state;
+      // If we are dialing, check if the callee already accepted while the socket was reconnecting.
+      if (current.phase == DirectCallPhase.dialing && current.call != null) {
+        await _pollDialingCall(current.call!.callId);
+        return;
+      }
       // Never clobber a live in-progress UI state with a snapshot.
       if (current.phase != DirectCallPhase.idle &&
           current.phase != DirectCallPhase.ended) {
@@ -521,6 +573,7 @@ class DirectCallController extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     _ringTimeout?.cancel();
+    _dialPollTimer?.cancel();
     _cancelSubscription?.call();
     _resyncSub?.cancel();
     super.dispose();

@@ -25,16 +25,56 @@ import '../api/qolab_api.dart';
 ///
 /// NEVER handles LiveKit tokens — all call state is fetched authenticated
 /// from GET /chat/calls/{id}; the server is the source of truth.
+typedef _PushMap = Map<String, dynamic>;
+
 class FcmBridge {
   static const MethodChannel _actionsChannel = MethodChannel('qolab/call_actions');
 
+  static final List<_PushMap> _pendingPushes = [];
+  static final List<_PushMap> _pendingActions = [];
+
+  static void Function(Map<String, dynamic> payload)? _onPush;
   /// Callback invoked for every call-related push event, in-app or
   /// recovered after process death. `payload` = FCM data map.
-  static void Function(Map<String, dynamic> payload)? onPush;
+  static void Function(Map<String, dynamic> payload)? get onPush => _onPush;
+  static set onPush(void Function(Map<String, dynamic> payload)? handler) {
+    _onPush = handler;
+    if (handler != null && _pendingPushes.isNotEmpty) {
+      final queued = List<_PushMap>.from(_pendingPushes);
+      _pendingPushes.clear();
+      for (final p in queued) {
+        handler(p);
+      }
+    }
+  }
 
+  static void Function(String action, Map<String, dynamic> data)? _onAction;
   /// Native accept/decline actions (notification buttons). The
   /// coordinator authenticates and performs the action.
-  static void Function(String action, Map<String, dynamic> data)? onAction;
+  static void Function(String action, Map<String, dynamic> data)? get onAction => _onAction;
+  static set onAction(void Function(String action, Map<String, dynamic> data)? handler) {
+    _onAction = handler;
+    if (handler != null) {
+      if (_pendingActions.isNotEmpty) {
+        final queued = List<_PushMap>.from(_pendingActions);
+        _pendingActions.clear();
+        for (final args in queued) {
+          final action = args['action'] as String?;
+          if (action != null) handler(action, args);
+        }
+      }
+      unawaited(_drainNativePending());
+    }
+  }
+
+  static Future<void> _drainNativePending() async {
+    try {
+      final pending = await _actionsChannel.invokeMethod<Object?>('takePending');
+      if (pending is Map) {
+        _handleAction(Map<String, dynamic>.from(pending));
+      }
+    } catch (_) {}
+  }
 
   static String? _token;
   static bool _initialized = false;
@@ -201,14 +241,24 @@ class FcmBridge {
     final type = data['type'] as String?;
     if (type == null) return;
     if (type == 'call.incoming' || type == 'call.update') {
-      onPush?.call(data);
+      final handler = _onPush;
+      if (handler != null) {
+        handler(data);
+      } else {
+        _pendingPushes.add(Map<String, dynamic>.from(data));
+      }
     }
   }
 
   static void _handleAction(Map<String, dynamic> args) {
     final action = args['action'] as String?;
     if (action == null) return;
-    onAction?.call(action, args);
+    final handler = _onAction;
+    if (handler != null) {
+      handler(action, args);
+    } else {
+      _pendingActions.add(Map<String, dynamic>.from(args));
+    }
   }
 
   static QolabApi? _registerApi;
