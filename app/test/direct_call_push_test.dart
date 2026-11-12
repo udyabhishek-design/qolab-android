@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:flutter/foundation.dart';
 import 'package:qolab_app/api/qolab_api.dart';
 import 'package:qolab_app/chat/chat_socket.dart';
 import 'package:qolab_app/chat/reverb_client.dart';

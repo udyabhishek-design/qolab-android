@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:qolab_app/direct_call/direct_call_controller.dart';
 import 'package:qolab_app/direct_call/ringback_tone.dart';
-import 'package:qolab_app/meetings/call_controller.dart';
 import 'package:qolab_app/meetings/livekit_adapter.dart';
 import 'package:qolab_app/api/qolab_api.dart';
 import 'package:qolab_app/direct_call/direct_call_models.dart';
