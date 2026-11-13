@@ -111,6 +111,7 @@ class DirectCallController extends ChangeNotifier {
   bool _disposed = false;
   Timer? _ringTimeout;
   Timer? _dialPollTimer;
+  int _dialMissCount = 0;
 
   /// Attach the user-channel listener (idempotent).
   void attach() {
@@ -280,7 +281,10 @@ class DirectCallController extends ChangeNotifier {
     final call = DirectCallData.fromJson(data);
     if (call == null) return;
     final current = _state;
-    if (current.phase != DirectCallPhase.dialing ||
+    final canAcceptFromEnded = current.isOutgoing &&
+        current.phase == DirectCallPhase.ended &&
+        current.endedReason == 'ended';
+    if ((current.phase != DirectCallPhase.dialing && !canAcceptFromEnded) ||
         current.call?.callId != call.callId) {
       return; // accepted for another call / we're the accepter
     }
@@ -401,6 +405,7 @@ class DirectCallController extends ChangeNotifier {
 
   void _startDialPoll(String callId) {
     _dialPollTimer?.cancel();
+    _dialMissCount = 0;
     _dialPollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (_disposed ||
           _state.phase != DirectCallPhase.dialing ||
@@ -426,12 +431,16 @@ class DirectCallController extends ChangeNotifier {
       for (final raw in calls) {
         final call = DirectCallData.fromJson(raw);
         if (call == null || call.callId != callId) continue;
+        _dialMissCount = 0;
         if (call.isActive || call.status == 'accepted') {
           _onAccepted(raw);
         }
         return;
       }
-      // Call is no longer ringing or active on the server -> ended/declined/missed.
+      // Require 2 consecutive misses so a ringing -> active transition race
+      // never flashes "Call Ended" right before .call.accepted arrives.
+      _dialMissCount++;
+      if (_dialMissCount < 2) return;
       _dialPollTimer?.cancel();
       _ringTimeout?.cancel();
       _state = _state.copyWith(
