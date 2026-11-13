@@ -113,6 +113,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         channelId: c.id,
         fallbackName: c.name,
         myUserId: widget.auth.user?.id ?? 0,
+        initialConversation: c,
         socket: widget.socket,
         onStartCall: widget.onStartCall,
       ),

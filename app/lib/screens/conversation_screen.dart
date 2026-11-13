@@ -35,6 +35,7 @@ class ConversationScreen extends StatefulWidget {
     required this.channelId,
     required this.fallbackName,
     required this.myUserId,
+    this.initialConversation,
     this.socket,
     this.controller,
     this.onSessionExpired,
@@ -45,6 +46,7 @@ class ConversationScreen extends StatefulWidget {
   final int channelId;
   final String fallbackName;
   final int myUserId;
+  final Conversation? initialConversation;
 
   /// Direct Calling (Phase C1): invoked with ('audio'|'video', partnerId)
   /// when the DM header call buttons are pressed. Null (group chats /
@@ -81,6 +83,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
           api: widget.api,
           channelId: widget.channelId,
           myUserId: widget.myUserId,
+          initialConversation: widget.initialConversation,
           socket: widget.socket,
           onSessionExpired: widget.onSessionExpired,
         );

@@ -84,7 +84,8 @@ class ChatListController extends ChangeNotifier {
   Timer? _reconcileTimer;
   final Map<int, DateTime> _activityHints = {};
 
-  Section<ChatIndex> index = Section<ChatIndex>.loading();
+  static ChatIndex? _cachedIndex;
+  Section<ChatIndex> index = _cachedIndex != null ? Section<ChatIndex>.loaded(_cachedIndex) : Section<ChatIndex>.loading();
 
   /// Unread counts keyed by channel id — independent of [index]; failure
   /// leaves the map null (never fabricated).
@@ -239,6 +240,8 @@ class ChatListController extends ChangeNotifier {
         return;
       }
       final data = ChatIndex.fromPage(page);
+      _cachedIndex = data;
+      unawaited(_prefetchRecentThreads(data));
       final isEmpty =
           data.direct.isEmpty && data.groups.isEmpty && data.employees.isEmpty;
       index = isEmpty ? Section<ChatIndex>.empty() : Section.loaded(data);
@@ -259,6 +262,16 @@ class ChatListController extends ChangeNotifier {
         index = Section<ChatIndex>.failed('Chat is unavailable right now.');
         notifyListeners();
       }
+    }
+  }
+
+  Future<void> _prefetchRecentThreads(ChatIndex data) async {
+    for (final c in [...data.direct.take(3), ...data.groups.take(2)]) {
+      if (_disposed || ConversationController.hasCachedMessages(c.id)) continue;
+      try {
+        final json = await api.fetchMessagesJson(c.id, page: 1);
+        ConversationController.seedCachedMessages(c.id, MessagesPage.fromJson(jsonDecode(json)).chronological);
+      } catch (_) {}
     }
   }
 
@@ -320,9 +333,23 @@ class ConversationController extends ChangeNotifier {
     required this.api,
     required this.channelId,
     required this.myUserId,
+    this.initialConversation,
     this.onSessionExpired,
     this.socket,
-  });
+  }) {
+    final seed = initialConversation ?? _cachedDetails[channelId];
+    if (seed != null) detail = Section<Conversation>.loaded(seed);
+    final msgs = _cachedMessages[channelId];
+    if (msgs != null && msgs.isNotEmpty) {
+      messages = List<ChatMessage>.from(msgs);
+      initialHistoryLoading = false;
+    }
+  }
+  static final Map<int, Conversation> _cachedDetails = {};
+  static final Map<int, List<ChatMessage>> _cachedMessages = {};
+  static bool hasCachedMessages(int id) => _cachedMessages.containsKey(id);
+  static void seedCachedMessages(int id, List<ChatMessage> m) { _cachedMessages[id] = List<ChatMessage>.from(m); }
+  final Conversation? initialConversation;
 
   final QolabApi api;
   final int channelId;
@@ -496,50 +523,29 @@ class ConversationController extends ChangeNotifier {
       notifyListeners();
     }
 
-    try {
-      final html = await api.fetchChannelDetailHtml(channelId);
-      if (_disposed || gen != _generation) return;
-      final page = InertiaPage.parse(html);
-      final d = page == null ? null : ChannelDetail.fromPage(page);
-      if (d == null) {
-        if (!detail.hasValue) {
-          detail = Section<Conversation>.failed(
-              'This conversation is unavailable.');
-          notifyListeners();
-        }
-        return;
-      }
-      detail = Section.loaded(d.conversation);
-      notifyListeners();
-    } on ApiException catch (e) {
-      if (_disposed || gen != _generation) return;
-      if (e.kind == ApiErrorKind.unauthenticated) {
-        onSessionExpired?.call();
-        return;
-      }
-      if (!detail.hasValue) {
-        detail = Section<Conversation>.failed(_friendly(e));
-        notifyListeners();
-      }
-      // Detail failed but content exists → still try history refresh below.
-    } catch (_) {
-      if (_disposed || gen != _generation) return;
-      if (!detail.hasValue) {
-        detail = Section<Conversation>.failed(
-            'This conversation is unavailable.');
-        notifyListeners();
-      }
-    }
-
-    // Reset fetches the NEWEST page regardless of pagination position.
     _nextPage = 1;
-    initialHistoryLoading = true;
-    notifyListeners();
-    await _loadMessagesPage(reset: true, gen: gen);
-    if (!_disposed && gen == _generation) {
-      initialHistoryLoading = false;
-      notifyListeners();
+    if (messages.isEmpty) { initialHistoryLoading = true; notifyListeners(); }
+    Future<void> fetchDetail() async {
+      try {
+        final html = await api.fetchChannelDetailHtml(channelId);
+        if (_disposed || gen != _generation) return;
+        final page = InertiaPage.parse(html);
+        final d = page == null ? null : ChannelDetail.fromPage(page);
+        if (d == null) { if (!detail.hasValue) { detail = Section<Conversation>.failed('This conversation is unavailable.'); notifyListeners(); } return; }
+        _cachedDetails[channelId] = d.conversation;
+        detail = Section.loaded(d.conversation);
+        notifyListeners();
+      } on ApiException catch (e) {
+        if (_disposed || gen != _generation) return;
+        if (e.kind == ApiErrorKind.unauthenticated) { onSessionExpired?.call(); return; }
+        if (!detail.hasValue) { detail = Section<Conversation>.failed(_friendly(e)); notifyListeners(); }
+      } catch (_) {
+        if (_disposed || gen != _generation) return;
+        if (!detail.hasValue) { detail = Section<Conversation>.failed('This conversation is unavailable.'); notifyListeners(); }
+      }
     }
+    await Future.wait([fetchDetail(), _loadMessagesPage(reset: true, gen: gen)]);
+    if (!_disposed && gen == _generation) { initialHistoryLoading = false; notifyListeners(); }
   }
 
   Future<void> _loadMessagesPage(
@@ -572,6 +578,7 @@ class ConversationController extends ChangeNotifier {
         }
         final merged = byId.values.toList()..sort(_compare);
         messages = merged;
+        _cachedMessages[channelId] = List<ChatMessage>.from(merged);
       } else {
         final seen = messages.map((m) => m.id).toSet();
         final older = pageData.chronological
