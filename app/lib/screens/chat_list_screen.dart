@@ -78,7 +78,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
     chat = widget.controller ??
         ChatListController(api: widget.api, socket: widget.socket);
     chat.addListener(_onChanged);
-    chat.refresh();
+    if (widget.controller == null) {
+      chat.refresh();
+    }
     final myUserId = widget.auth.user?.id;
     if (widget.socket != null && myUserId != null && myUserId > 0) {
       chat.attachUserChannel(myUserId);

@@ -75,6 +75,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     }
     home.refresh();
     chat.refresh();
+    _ensureDirectCall();
   }
 
   void _onChatChanged() {
@@ -129,9 +130,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       }
     };
     FcmBridge.onAction = (action, data) {
-      if (action.endsWith('ACCEPT_CALL')) {
+      if (action.endsWith('CALL_ACCEPT') || action.endsWith('ACCEPT_CALL')) {
         controller.acceptFromNotification(data['call_id'] as String?);
-      } else if (action.endsWith('DECLINE_CALL')) {
+      } else if (action.endsWith('CALL_DECLINE') || action.endsWith('DECLINE_CALL')) {
         controller.declineFromNotification(data['call_id'] as String?);
       } else if (action.endsWith('CALL_INCOMING')) {
         controller.handleIncomingPush(

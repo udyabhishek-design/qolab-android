@@ -216,7 +216,10 @@ class _DirectCallFlowScreenState extends State<_DirectCallFlowScreen> {
       return _OutgoingCallScreen(
           coordinator: widget.coordinator, call: call!);
     }
-    // ended / connecting / error states: compact status screen.
+    if (s.phase == DirectCallPhase.connecting) {
+      return _ConnectingCallScreen(call: call, isOutgoing: s.isOutgoing);
+    }
+    // ended / error states: compact status screen.
     return _CallEndedScreen(state: s, onClose: widget.coordinator.controller.dismiss);
   }
 }
@@ -363,6 +366,61 @@ class _OutgoingCallScreen extends StatelessWidget {
                 const SizedBox(height: 48),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ConnectingCallScreen extends StatelessWidget {
+  const _ConnectingCallScreen({required this.call, required this.isOutgoing});
+
+  final DirectCallData? call;
+  final bool isOutgoing;
+
+  @override
+  Widget build(BuildContext context) {
+    final peer = isOutgoing ? call?.recipient : call?.caller;
+    return Scaffold(
+      backgroundColor: QolabTheme.ink,
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 40,
+                backgroundColor: QolabTheme.canvas,
+                child: Text(
+                  (peer?.name ?? '?').characters.first.toUpperCase(),
+                  style: const TextStyle(
+                      color: QolabTheme.ink,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                peer?.name ?? 'Member',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 12),
+              const SizedBox(
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white70),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Connecting…',
+                style: TextStyle(color: Colors.white70, fontSize: 14),
+              ),
+            ],
           ),
         ),
       ),
