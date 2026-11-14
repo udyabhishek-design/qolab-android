@@ -84,8 +84,8 @@ class ChatListController extends ChangeNotifier {
   Timer? _reconcileTimer;
   final Map<int, DateTime> _activityHints = {};
 
-  static ChatIndex? _cachedIndex;
-  Section<ChatIndex> index = _cachedIndex != null ? Section<ChatIndex>.loaded(_cachedIndex) : Section<ChatIndex>.loading();
+  static final Expando<ChatIndex> _indexCache = Expando<ChatIndex>();
+  late Section<ChatIndex> index = _indexCache[api] != null ? Section<ChatIndex>.loaded(_indexCache[api]) : Section<ChatIndex>.loading();
 
   /// Unread counts keyed by channel id — independent of [index]; failure
   /// leaves the map null (never fabricated).
@@ -240,7 +240,7 @@ class ChatListController extends ChangeNotifier {
         return;
       }
       final data = ChatIndex.fromPage(page);
-      _cachedIndex = data;
+      _indexCache[api] = data;
       unawaited(_prefetchRecentThreads(data));
       final isEmpty =
           data.direct.isEmpty && data.groups.isEmpty && data.employees.isEmpty;
@@ -267,10 +267,10 @@ class ChatListController extends ChangeNotifier {
 
   Future<void> _prefetchRecentThreads(ChatIndex data) async {
     for (final c in [...data.direct.take(3), ...data.groups.take(2)]) {
-      if (_disposed || ConversationController.hasCachedMessages(c.id)) continue;
+      if (_disposed || ConversationController.hasCachedMessages(api, c.id)) continue;
       try {
         final json = await api.fetchMessagesJson(c.id, page: 1);
-        ConversationController.seedCachedMessages(c.id, MessagesPage.fromJson(jsonDecode(json)).chronological);
+        ConversationController.seedCachedMessages(api, c.id, MessagesPage.fromJson(jsonDecode(json)).chronological);
       } catch (_) {}
     }
   }
@@ -337,18 +337,20 @@ class ConversationController extends ChangeNotifier {
     this.onSessionExpired,
     this.socket,
   }) {
-    final seed = initialConversation ?? _cachedDetails[channelId];
+    final seed = initialConversation ?? _detailsFor(api)[channelId];
     if (seed != null) detail = Section<Conversation>.loaded(seed);
-    final msgs = _cachedMessages[channelId];
+    final msgs = _messagesFor(api)[channelId];
     if (msgs != null && msgs.isNotEmpty) {
       messages = List<ChatMessage>.from(msgs);
       initialHistoryLoading = false;
     }
   }
-  static final Map<int, Conversation> _cachedDetails = {};
-  static final Map<int, List<ChatMessage>> _cachedMessages = {};
-  static bool hasCachedMessages(int id) => _cachedMessages.containsKey(id);
-  static void seedCachedMessages(int id, List<ChatMessage> m) { _cachedMessages[id] = List<ChatMessage>.from(m); }
+  static final Expando<Map<int, Conversation>> _detailCache = Expando();
+  static final Expando<Map<int, List<ChatMessage>>> _msgCache = Expando();
+  static Map<int, Conversation> _detailsFor(QolabApi a) => _detailCache[a] ??= {};
+  static Map<int, List<ChatMessage>> _messagesFor(QolabApi a) => _msgCache[a] ??= {};
+  static bool hasCachedMessages(QolabApi a, int id) => _messagesFor(a).containsKey(id);
+  static void seedCachedMessages(QolabApi a, int id, List<ChatMessage> m) { _messagesFor(a)[id] = List<ChatMessage>.from(m); }
   final Conversation? initialConversation;
 
   final QolabApi api;
@@ -524,7 +526,6 @@ class ConversationController extends ChangeNotifier {
     }
 
     _nextPage = 1;
-    if (messages.isEmpty) { initialHistoryLoading = true; notifyListeners(); }
     Future<void> fetchDetail() async {
       try {
         final html = await api.fetchChannelDetailHtml(channelId);
@@ -532,7 +533,7 @@ class ConversationController extends ChangeNotifier {
         final page = InertiaPage.parse(html);
         final d = page == null ? null : ChannelDetail.fromPage(page);
         if (d == null) { if (!detail.hasValue) { detail = Section<Conversation>.failed('This conversation is unavailable.'); notifyListeners(); } return; }
-        _cachedDetails[channelId] = d.conversation;
+        _detailsFor(api)[channelId] = d.conversation;
         detail = Section.loaded(d.conversation);
         notifyListeners();
       } on ApiException catch (e) {
@@ -578,7 +579,7 @@ class ConversationController extends ChangeNotifier {
         }
         final merged = byId.values.toList()..sort(_compare);
         messages = merged;
-        _cachedMessages[channelId] = List<ChatMessage>.from(merged);
+        _messagesFor(api)[channelId] = List<ChatMessage>.from(merged);
       } else {
         final seen = messages.map((m) => m.id).toSet();
         final older = pageData.chronological
